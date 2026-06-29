@@ -1,3 +1,15 @@
+"""
+Alembic 迁移环境入口（env.py）
+
+职责：
+- 将应用的 `settings.DB_URL` 注入到 alembic 配置中
+- 指向 `Base.metadata`，以支持 `alembic revision --autogenerate`
+- 同时支持 offline/online 两种迁移模式（异步引擎）
+
+注意：
+- 该文件会在迁移命令执行时被 Alembic 直接导入执行
+"""
+
 import asyncio
 from logging.config import fileConfig
 

@@ -1,0 +1,2222 @@
+[
+  {
+    "q_id": 1,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT name, salary * 1.10 AS new_salary FROM instructor"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 134,
+          "salary": 860,
+          "dept_name": "node_0",
+          "year": 401,
+          "student_id": 499,
+          "credits": 937
+        },
+        {
+          "ID": 572,
+          "salary": 414,
+          "dept_name": "node_1",
+          "year": 695,
+          "student_id": 836,
+          "credits": 653
+        },
+        {
+          "ID": 229,
+          "salary": 933,
+          "dept_name": "node_2",
+          "year": 883,
+          "student_id": 368,
+          "credits": 840
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 2,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT name FROM instructor WHERE salary BETWEEN 90000 AND 100000"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 640,
+          "salary": 807,
+          "dept_name": "node_0",
+          "year": 700,
+          "student_id": 165,
+          "credits": 509
+        },
+        {
+          "ID": 481,
+          "salary": 100,
+          "dept_name": "node_1",
+          "year": 182,
+          "student_id": 868,
+          "credits": 567
+        },
+        {
+          "ID": 287,
+          "salary": 378,
+          "dept_name": "node_2",
+          "year": 683,
+          "student_id": 295,
+          "credits": 254
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 3,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT * FROM student NATURAL LEFT JOIN takes ON student.id = takes.course_id"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 450,
+          "salary": 296,
+          "dept_name": "node_0",
+          "year": 895,
+          "student_id": 434,
+          "credits": 519
+        },
+        {
+          "ID": 671,
+          "salary": 445,
+          "dept_name": "node_1",
+          "year": 131,
+          "student_id": 716,
+          "credits": 974
+        },
+        {
+          "ID": 744,
+          "salary": 334,
+          "dept_name": "node_2",
+          "year": 171,
+          "student_id": 597,
+          "credits": 979
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 4,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT name FROM instructor WHERE salary > (SELECT MIN(salary) FROM instructor WHERE dept_name = dept_name)"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 257,
+          "salary": 721,
+          "dept_name": "node_0",
+          "year": 373,
+          "student_id": 603,
+          "credits": 851
+        },
+        {
+          "ID": 510,
+          "salary": 202,
+          "dept_name": "node_1",
+          "year": 699,
+          "student_id": 704,
+          "credits": 656
+        },
+        {
+          "ID": 181,
+          "salary": 912,
+          "dept_name": "node_2",
+          "year": 957,
+          "student_id": 738,
+          "credits": 741
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 5,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT pnumber FROM project WHERE pnumber IN (SELECT pno FROM works_on WHERE essn IN (SELECT ssn FROM employee WHERE lname = 'Smith')) OR dnum IN (SELECT mgr_ssn FROM department WHERE mgr_ssn IN (SELECT ssn FROM employee WHERE lname = 'Smith'))"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 762,
+          "salary": 477,
+          "dept_name": "node_0",
+          "year": 742,
+          "student_id": 562,
+          "credits": 134
+        },
+        {
+          "ID": 179,
+          "salary": 182,
+          "dept_name": "node_1",
+          "year": 483,
+          "student_id": 199,
+          "credits": 221
+        },
+        {
+          "ID": 172,
+          "salary": 724,
+          "dept_name": "node_2",
+          "year": 397,
+          "student_id": 134,
+          "credits": 402
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 6,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT * FROM employee WHERE address LIKE '%Houston, Texas%'"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 201,
+          "salary": 144,
+          "dept_name": "node_0",
+          "year": 386,
+          "student_id": 840,
+          "credits": 459
+        },
+        {
+          "ID": 595,
+          "salary": 782,
+          "dept_name": "node_1",
+          "year": 100,
+          "student_id": 563,
+          "credits": 831
+        },
+        {
+          "ID": 524,
+          "salary": 266,
+          "dept_name": "node_2",
+          "year": 909,
+          "student_id": 499,
+          "credits": 292
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 7,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT student.name, course.dept_name FROM student JOIN course ON student.dept_name = course.dept_name"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 580,
+          "salary": 728,
+          "dept_name": "node_0",
+          "year": 515,
+          "student_id": 846,
+          "credits": 483
+        },
+        {
+          "ID": 770,
+          "salary": 962,
+          "dept_name": "node_1",
+          "year": 304,
+          "student_id": 605,
+          "credits": 416
+        },
+        {
+          "ID": 765,
+          "salary": 637,
+          "dept_name": "node_2",
+          "year": 735,
+          "student_id": 950,
+          "credits": 433
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 8,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT dept_name FROM instructor WHERE AVG(salary) > 42000"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 109,
+          "salary": 515,
+          "dept_name": "node_0",
+          "year": 721,
+          "student_id": 213,
+          "credits": 239
+        },
+        {
+          "ID": 178,
+          "salary": 972,
+          "dept_name": "node_1",
+          "year": 477,
+          "student_id": 247,
+          "credits": 578
+        },
+        {
+          "ID": 959,
+          "salary": 533,
+          "dept_name": "node_2",
+          "year": 254,
+          "student_id": 671,
+          "credits": 549
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 9,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT fname, lname, (SELECT fname FROM employee WHERE ssn = super_ssn) AS supfname, (SELECT lname FROM employee WHERE ssn = super_ssn) AS suplname FROM employee"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 669,
+          "salary": 294,
+          "dept_name": "node_0",
+          "year": 814,
+          "student_id": 427,
+          "credits": 536
+        },
+        {
+          "ID": 959,
+          "salary": 333,
+          "dept_name": "node_1",
+          "year": 798,
+          "student_id": 428,
+          "credits": 881
+        },
+        {
+          "ID": 945,
+          "salary": 735,
+          "dept_name": "node_2",
+          "year": 895,
+          "student_id": 292,
+          "credits": 590
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 10,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT dept_name, (SELECT COUNT(id) FROM instructor WHERE id = department.dept_name) AS num_instructors FROM department"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 399,
+          "salary": 754,
+          "dept_name": "node_0",
+          "year": 674,
+          "student_id": 858,
+          "credits": 972
+        },
+        {
+          "ID": 870,
+          "salary": 555,
+          "dept_name": "node_1",
+          "year": 982,
+          "student_id": 952,
+          "credits": 243
+        },
+        {
+          "ID": 696,
+          "salary": 921,
+          "dept_name": "node_2",
+          "year": 912,
+          "student_id": 755,
+          "credits": 703
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 11,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT * FROM orders ORDER BY orderdate DESC LIMIT 5"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 964,
+          "salary": 190,
+          "dept_name": "node_0",
+          "year": 725,
+          "student_id": 511,
+          "credits": 517
+        },
+        {
+          "ID": 435,
+          "salary": 719,
+          "dept_name": "node_1",
+          "year": 633,
+          "student_id": 811,
+          "credits": 446
+        },
+        {
+          "ID": 877,
+          "salary": 553,
+          "dept_name": "node_2",
+          "year": 470,
+          "student_id": 285,
+          "credits": 597
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 12,
+    "persona": "Newbie",
+    "ast": {
+      "student": "UPDATE instructor SET salary = CASE WHEN salary < 50000 THEN salary * 1.05 ELSE salary * 1.03 END WHERE salary > 40000"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 139,
+          "salary": 814,
+          "dept_name": "node_0",
+          "year": 210,
+          "student_id": 739,
+          "credits": 502
+        },
+        {
+          "ID": 427,
+          "salary": 151,
+          "dept_name": "node_1",
+          "year": 451,
+          "student_id": 390,
+          "credits": 745
+        },
+        {
+          "ID": 878,
+          "salary": 707,
+          "dept_name": "node_2",
+          "year": 370,
+          "student_id": 503,
+          "credits": 519
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 13,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT employee.lname, department.dname FROM employee FULL OUTER JOIN department ON employee.dno = department.dnumber"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 709,
+          "salary": 117,
+          "dept_name": "node_0",
+          "year": 322,
+          "student_id": 730,
+          "credits": 726
+        },
+        {
+          "ID": 853,
+          "salary": 583,
+          "dept_name": "node_1",
+          "year": 161,
+          "student_id": 443,
+          "credits": 409
+        },
+        {
+          "ID": 567,
+          "salary": 403,
+          "dept_name": "node_2",
+          "year": 453,
+          "student_id": 902,
+          "credits": 654
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 14,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT id, salary, dept_name, COUNT(*) AS rank FROM instructor GROUP BY salary ORDER BY salary DESC"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 305,
+          "salary": 924,
+          "dept_name": "node_0",
+          "year": 783,
+          "student_id": 576,
+          "credits": 541
+        },
+        {
+          "ID": 895,
+          "salary": 507,
+          "dept_name": "node_1",
+          "year": 556,
+          "student_id": 167,
+          "credits": 515
+        },
+        {
+          "ID": 399,
+          "salary": 442,
+          "dept_name": "node_2",
+          "year": 946,
+          "student_id": 378,
+          "credits": 184
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 15,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT course_id FROM section WHERE semester = 'Fall' AND year = 2009 AND EXISTS(SELECT * FROM section WHERE semester = 'Spring' AND year = 2010)"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 848,
+          "salary": 899,
+          "dept_name": "node_0",
+          "year": 489,
+          "student_id": 484,
+          "credits": 157
+        },
+        {
+          "ID": 469,
+          "salary": 913,
+          "dept_name": "node_1",
+          "year": 564,
+          "student_id": 183,
+          "credits": 620
+        },
+        {
+          "ID": 314,
+          "salary": 607,
+          "dept_name": "node_2",
+          "year": 177,
+          "student_id": 378,
+          "credits": 568
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 16,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT orderid, orderdate - shipdate AS daysdifference FROM orders"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 726,
+          "salary": 904,
+          "dept_name": "node_0",
+          "year": 891,
+          "student_id": 688,
+          "credits": 625
+        },
+        {
+          "ID": 691,
+          "salary": 940,
+          "dept_name": "node_1",
+          "year": 928,
+          "student_id": 164,
+          "credits": 297
+        },
+        {
+          "ID": 167,
+          "salary": 125,
+          "dept_name": "node_2",
+          "year": 903,
+          "student_id": 855,
+          "credits": 610
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 17,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT year, SUM(credits_sum) / 3 AS moving_average FROM all_credits GROUP BY year"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 897,
+          "salary": 810,
+          "dept_name": "node_0",
+          "year": 860,
+          "student_id": 951,
+          "credits": 420
+        },
+        {
+          "ID": 852,
+          "salary": 441,
+          "dept_name": "node_1",
+          "year": 504,
+          "student_id": 386,
+          "credits": 536
+        },
+        {
+          "ID": 577,
+          "salary": 769,
+          "dept_name": "node_2",
+          "year": 992,
+          "student_id": 778,
+          "credits": 144
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 18,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT course_id FROM prereq WHERE prereq_id = 'CS101'"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 827,
+          "salary": 829,
+          "dept_name": "node_0",
+          "year": 498,
+          "student_id": 960,
+          "credits": 673
+        },
+        {
+          "ID": 271,
+          "salary": 723,
+          "dept_name": "node_1",
+          "year": 443,
+          "student_id": 302,
+          "credits": 628
+        },
+        {
+          "ID": 614,
+          "salary": 725,
+          "dept_name": "node_2",
+          "year": 653,
+          "student_id": 733,
+          "credits": 376
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 19,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT essn FROM works_on WHERE pno = 1 AND pno <> 2"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 234,
+          "salary": 566,
+          "dept_name": "node_0",
+          "year": 670,
+          "student_id": 516,
+          "credits": 489
+        },
+        {
+          "ID": 294,
+          "salary": 340,
+          "dept_name": "node_1",
+          "year": 853,
+          "student_id": 604,
+          "credits": 501
+        },
+        {
+          "ID": 807,
+          "salary": 440,
+          "dept_name": "node_2",
+          "year": 456,
+          "student_id": 923,
+          "credits": 553
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 20,
+    "persona": "Newbie",
+    "ast": {
+      "student": "SELECT DATE(orderdate) AS orderdate, CEIL(totalamount) AS totalamount FROM orders"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 523,
+          "salary": 661,
+          "dept_name": "node_0",
+          "year": 952,
+          "student_id": 892,
+          "credits": 543
+        },
+        {
+          "ID": 112,
+          "salary": 309,
+          "dept_name": "node_1",
+          "year": 952,
+          "student_id": 146,
+          "credits": 667
+        },
+        {
+          "ID": 868,
+          "salary": 755,
+          "dept_name": "node_2",
+          "year": 223,
+          "student_id": 884,
+          "credits": 100
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 1,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT name, salary * 1.1 AS new_salary FROM instructor"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 448,
+          "salary": 845,
+          "dept_name": "node_0",
+          "year": 757,
+          "student_id": 721,
+          "credits": 238
+        },
+        {
+          "ID": 152,
+          "salary": 177,
+          "dept_name": "node_1",
+          "year": 115,
+          "student_id": 176,
+          "credits": 474
+        },
+        {
+          "ID": 500,
+          "salary": 374,
+          "dept_name": "node_2",
+          "year": 253,
+          "student_id": 948,
+          "credits": 783
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 2,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT name FROM instructor WHERE salary BETWEEN 90000 AND 100000"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 864,
+          "salary": 922,
+          "dept_name": "node_0",
+          "year": 180,
+          "student_id": 942,
+          "credits": 254
+        },
+        {
+          "ID": 500,
+          "salary": 436,
+          "dept_name": "node_1",
+          "year": 291,
+          "student_id": 662,
+          "credits": 870
+        },
+        {
+          "ID": 732,
+          "salary": 518,
+          "dept_name": "node_2",
+          "year": 262,
+          "student_id": 650,
+          "credits": 223
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 3,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT * FROM student NATURAL LEFT JOIN takes"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 281,
+          "salary": 190,
+          "dept_name": "node_0",
+          "year": 514,
+          "student_id": 749,
+          "credits": 769
+        },
+        {
+          "ID": 260,
+          "salary": 616,
+          "dept_name": "node_1",
+          "year": 446,
+          "student_id": 878,
+          "credits": 682
+        },
+        {
+          "ID": 123,
+          "salary": 124,
+          "dept_name": "node_2",
+          "year": 663,
+          "student_id": 674,
+          "credits": 735
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 4,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT name FROM instructor WHERE salary > (SELECT MIN(salary) FROM instructor WHERE dept_name = 'Biology')"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 455,
+          "salary": 470,
+          "dept_name": "node_0",
+          "year": 871,
+          "student_id": 939,
+          "credits": 284
+        },
+        {
+          "ID": 748,
+          "salary": 321,
+          "dept_name": "node_1",
+          "year": 710,
+          "student_id": 280,
+          "credits": 647
+        },
+        {
+          "ID": 619,
+          "salary": 918,
+          "dept_name": "node_2",
+          "year": 173,
+          "student_id": 565,
+          "credits": 580
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 5,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT t2.pno FROM works_on AS t2 JOIN employee AS t1 ON t1.ssn = t2.essn WHERE t1.lname = 'Smith' UNION SELECT t3.pnumber FROM project AS t3 JOIN department AS t4 ON t3.dnum = t4.dnumber JOIN employee AS t5 ON t4.mgr_ssn = t5.ssn WHERE t5.lname = 'Smith'"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 637,
+          "salary": 923,
+          "dept_name": "node_0",
+          "year": 746,
+          "student_id": 185,
+          "credits": 556
+        },
+        {
+          "ID": 127,
+          "salary": 797,
+          "dept_name": "node_1",
+          "year": 430,
+          "student_id": 812,
+          "credits": 262
+        },
+        {
+          "ID": 475,
+          "salary": 545,
+          "dept_name": "node_2",
+          "year": 413,
+          "student_id": 959,
+          "credits": 494
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 6,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT * FROM employee WHERE address LIKE '%Houston, Texas%'"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 341,
+          "salary": 587,
+          "dept_name": "node_0",
+          "year": 249,
+          "student_id": 1000,
+          "credits": 486
+        },
+        {
+          "ID": 461,
+          "salary": 319,
+          "dept_name": "node_1",
+          "year": 125,
+          "student_id": 565,
+          "credits": 130
+        },
+        {
+          "ID": 560,
+          "salary": 630,
+          "dept_name": "node_2",
+          "year": 425,
+          "student_id": 580,
+          "credits": 823
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 7,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT DISTINCT s.name, c.dept_name FROM student AS s JOIN takes AS t ON s.id = t.id JOIN course AS c ON t.course_id = c.course_id"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 996,
+          "salary": 585,
+          "dept_name": "node_0",
+          "year": 865,
+          "student_id": 765,
+          "credits": 723
+        },
+        {
+          "ID": 681,
+          "salary": 542,
+          "dept_name": "node_1",
+          "year": 381,
+          "student_id": 695,
+          "credits": 587
+        },
+        {
+          "ID": 484,
+          "salary": 692,
+          "dept_name": "node_2",
+          "year": 393,
+          "student_id": 280,
+          "credits": 752
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 8,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT dept_name FROM instructor GROUP BY dept_name HAVING AVG(salary) > 42000"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 210,
+          "salary": 336,
+          "dept_name": "node_0",
+          "year": 555,
+          "student_id": 422,
+          "credits": 820
+        },
+        {
+          "ID": 939,
+          "salary": 330,
+          "dept_name": "node_1",
+          "year": 249,
+          "student_id": 411,
+          "credits": 676
+        },
+        {
+          "ID": 717,
+          "salary": 680,
+          "dept_name": "node_2",
+          "year": 752,
+          "student_id": 404,
+          "credits": 870
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 9,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT e1.fname AS employee_fname, e1.lname AS employee_lname, e2.fname AS supervisor_fname, e2.lname AS supervisor_lname FROM employee AS e1 LEFT JOIN employee AS e2 ON e1.super_ssn = e2.ssn"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 475,
+          "salary": 509,
+          "dept_name": "node_0",
+          "year": 638,
+          "student_id": 395,
+          "credits": 360
+        },
+        {
+          "ID": 815,
+          "salary": 158,
+          "dept_name": "node_1",
+          "year": 722,
+          "student_id": 820,
+          "credits": 162
+        },
+        {
+          "ID": 531,
+          "salary": 276,
+          "dept_name": "node_2",
+          "year": 167,
+          "student_id": 522,
+          "credits": 711
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 10,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT dept_name, (SELECT COUNT(*) FROM instructor AS i WHERE i.dept_name = d.dept_name) AS num_instructors FROM department AS d"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 224,
+          "salary": 952,
+          "dept_name": "node_0",
+          "year": 807,
+          "student_id": 184,
+          "credits": 313
+        },
+        {
+          "ID": 771,
+          "salary": 650,
+          "dept_name": "node_1",
+          "year": 805,
+          "student_id": 158,
+          "credits": 620
+        },
+        {
+          "ID": 769,
+          "salary": 148,
+          "dept_name": "node_2",
+          "year": 786,
+          "student_id": 702,
+          "credits": 467
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 11,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT * FROM orders ORDER BY orderdate DESC LIMIT 5"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 143,
+          "salary": 779,
+          "dept_name": "node_0",
+          "year": 493,
+          "student_id": 787,
+          "credits": 292
+        },
+        {
+          "ID": 657,
+          "salary": 884,
+          "dept_name": "node_1",
+          "year": 479,
+          "student_id": 586,
+          "credits": 813
+        },
+        {
+          "ID": 170,
+          "salary": 394,
+          "dept_name": "node_2",
+          "year": 711,
+          "student_id": 845,
+          "credits": 934
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 12,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "UPDATE instructor SET salary = CASE WHEN salary < 50000 THEN salary * 1.05 ELSE salary * 1.03 END"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 862,
+          "salary": 125,
+          "dept_name": "node_0",
+          "year": 841,
+          "student_id": 774,
+          "credits": 287
+        },
+        {
+          "ID": 104,
+          "salary": 276,
+          "dept_name": "node_1",
+          "year": 896,
+          "student_id": 213,
+          "credits": 636
+        },
+        {
+          "ID": 138,
+          "salary": 915,
+          "dept_name": "node_2",
+          "year": 741,
+          "student_id": 106,
+          "credits": 365
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 13,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT e.lname, d.dname FROM employee AS e FULL OUTER JOIN department AS d ON e.dno = d.dnumber"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 136,
+          "salary": 923,
+          "dept_name": "node_0",
+          "year": 660,
+          "student_id": 447,
+          "credits": 598
+        },
+        {
+          "ID": 428,
+          "salary": 333,
+          "dept_name": "node_1",
+          "year": 955,
+          "student_id": 913,
+          "credits": 988
+        },
+        {
+          "ID": 876,
+          "salary": 752,
+          "dept_name": "node_2",
+          "year": 805,
+          "student_id": 389,
+          "credits": 237
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 14,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT id, salary, RANK() OVER (ORDER BY salary DESC) AS salary_rank FROM instructor"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 140,
+          "salary": 878,
+          "dept_name": "node_0",
+          "year": 147,
+          "student_id": 959,
+          "credits": 862
+        },
+        {
+          "ID": 529,
+          "salary": 666,
+          "dept_name": "node_1",
+          "year": 763,
+          "student_id": 315,
+          "credits": 502
+        },
+        {
+          "ID": 882,
+          "salary": 988,
+          "dept_name": "node_2",
+          "year": 798,
+          "student_id": 552,
+          "credits": 680
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 15,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT course_id FROM section WHERE semester = 'Fall' AND year = 2009 AND NOT EXISTS(SELECT 1 FROM section AS s2 WHERE s2.course_id = section.course_id AND s2.semester = 'Spring' AND s2.year = 2010)"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 297,
+          "salary": 684,
+          "dept_name": "node_0",
+          "year": 792,
+          "student_id": 803,
+          "credits": 831
+        },
+        {
+          "ID": 841,
+          "salary": 530,
+          "dept_name": "node_1",
+          "year": 126,
+          "student_id": 995,
+          "credits": 660
+        },
+        {
+          "ID": 118,
+          "salary": 987,
+          "dept_name": "node_2",
+          "year": 196,
+          "student_id": 962,
+          "credits": 892
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 16,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT orderid, DATEDIFF(shipdate, orderdate) AS daysdifference FROM orders"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 100,
+          "salary": 491,
+          "dept_name": "node_0",
+          "year": 414,
+          "student_id": 424,
+          "credits": 800
+        },
+        {
+          "ID": 324,
+          "salary": 754,
+          "dept_name": "node_1",
+          "year": 610,
+          "student_id": 611,
+          "credits": 779
+        },
+        {
+          "ID": 594,
+          "salary": 218,
+          "dept_name": "node_2",
+          "year": 932,
+          "student_id": 742,
+          "credits": 419
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 17,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT year, AVG(credits_sum) OVER (ORDER BY year ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS three_year_moving_avg FROM all_credits"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 697,
+          "salary": 122,
+          "dept_name": "node_0",
+          "year": 681,
+          "student_id": 944,
+          "credits": 358
+        },
+        {
+          "ID": 997,
+          "salary": 376,
+          "dept_name": "node_1",
+          "year": 945,
+          "student_id": 998,
+          "credits": 823
+        },
+        {
+          "ID": 718,
+          "salary": 234,
+          "dept_name": "node_2",
+          "year": 774,
+          "student_id": 347,
+          "credits": 694
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 18,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "WITH RECURSIVE prerequisitechain AS (SELECT prereq_id FROM prereq WHERE course_id = 'your_given_course_id' UNION ALL SELECT p.prereq_id FROM prereq AS p INNER JOIN prerequisitechain AS pc ON p.course_id = pc.prereq_id) SELECT DISTINCT prereq_id AS prerequisite_course_id FROM prerequisitechain"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 994,
+          "salary": 634,
+          "dept_name": "node_0",
+          "year": 257,
+          "student_id": 949,
+          "credits": 182
+        },
+        {
+          "ID": 954,
+          "salary": 272,
+          "dept_name": "node_1",
+          "year": 607,
+          "student_id": 217,
+          "credits": 414
+        },
+        {
+          "ID": 973,
+          "salary": 214,
+          "dept_name": "node_2",
+          "year": 353,
+          "student_id": 196,
+          "credits": 178
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 19,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT essn FROM works_on WHERE pno = 1 EXCEPT SELECT essn FROM works_on WHERE pno = 2"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 871,
+          "salary": 186,
+          "dept_name": "node_0",
+          "year": 970,
+          "student_id": 343,
+          "credits": 284
+        },
+        {
+          "ID": 546,
+          "salary": 679,
+          "dept_name": "node_1",
+          "year": 738,
+          "student_id": 791,
+          "credits": 372
+        },
+        {
+          "ID": 396,
+          "salary": 468,
+          "dept_name": "node_2",
+          "year": 249,
+          "student_id": 649,
+          "credits": 671
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 20,
+    "persona": "Logic_Master",
+    "ast": {
+      "student": "SELECT DATE(orderdate) AS orderdate, ROUND(totalamount, 2) AS totalamount FROM orders"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 177,
+          "salary": 130,
+          "dept_name": "node_0",
+          "year": 943,
+          "student_id": 933,
+          "credits": 836
+        },
+        {
+          "ID": 601,
+          "salary": 975,
+          "dept_name": "node_1",
+          "year": 166,
+          "student_id": 729,
+          "credits": 919
+        },
+        {
+          "ID": 276,
+          "salary": 734,
+          "dept_name": "node_2",
+          "year": 385,
+          "student_id": 531,
+          "credits": 694
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 1,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT name, salary * 1.1 AS new_salary FROM instructor"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 694,
+          "salary": 631,
+          "dept_name": "node_0",
+          "year": 191,
+          "student_id": 194,
+          "credits": 179
+        },
+        {
+          "ID": 378,
+          "salary": 451,
+          "dept_name": "node_1",
+          "year": 129,
+          "student_id": 633,
+          "credits": 960
+        },
+        {
+          "ID": 989,
+          "salary": 499,
+          "dept_name": "node_2",
+          "year": 759,
+          "student_id": 550,
+          "credits": 747
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 2,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT name FROM instructor WHERE salary BETWEEN 90000 AND 100000"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 334,
+          "salary": 363,
+          "dept_name": "node_0",
+          "year": 538,
+          "student_id": 221,
+          "credits": 711
+        },
+        {
+          "ID": 963,
+          "salary": 941,
+          "dept_name": "node_1",
+          "year": 710,
+          "student_id": 467,
+          "credits": 456
+        },
+        {
+          "ID": 116,
+          "salary": 740,
+          "dept_name": "node_2",
+          "year": 281,
+          "student_id": 682,
+          "credits": 894
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 3,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT student.name, takes.course_id FROM student NATURAL LEFT JOIN takes GROUP BY student.name"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 819,
+          "salary": 205,
+          "dept_name": "node_0",
+          "year": 467,
+          "student_id": 834,
+          "credits": 683
+        },
+        {
+          "ID": 875,
+          "salary": 178,
+          "dept_name": "node_1",
+          "year": 808,
+          "student_id": 526,
+          "credits": 701
+        },
+        {
+          "ID": 203,
+          "salary": 957,
+          "dept_name": "node_2",
+          "year": 542,
+          "student_id": 458,
+          "credits": 257
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 4,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT name FROM instructor WHERE salary > (SELECT MIN(salary) FROM instructor WHERE dept_name = 'Biology')"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 565,
+          "salary": 118,
+          "dept_name": "node_0",
+          "year": 866,
+          "student_id": 894,
+          "credits": 388
+        },
+        {
+          "ID": 534,
+          "salary": 352,
+          "dept_name": "node_1",
+          "year": 465,
+          "student_id": 307,
+          "credits": 130
+        },
+        {
+          "ID": 950,
+          "salary": 623,
+          "dept_name": "node_2",
+          "year": 793,
+          "student_id": 280,
+          "credits": 393
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 5,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT DISTINCT pnumber FROM works_on WHERE essn IN (SELECT ssn FROM employee WHERE lname = 'Smith') UNION SELECT DISTINCT pnumber FROM project WHERE dnum IN (SELECT dnumber FROM department WHERE mgr_ssn IN (SELECT ssn FROM employee WHERE lname = 'Smith')) GROUP BY pnumber"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 835,
+          "salary": 974,
+          "dept_name": "node_0",
+          "year": 224,
+          "student_id": 587,
+          "credits": 183
+        },
+        {
+          "ID": 422,
+          "salary": 851,
+          "dept_name": "node_1",
+          "year": 776,
+          "student_id": 422,
+          "credits": 819
+        },
+        {
+          "ID": 597,
+          "salary": 259,
+          "dept_name": "node_2",
+          "year": 917,
+          "student_id": 919,
+          "credits": 112
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 6,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT * FROM employee WHERE address LIKE '%Houston, Texas%'"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 506,
+          "salary": 304,
+          "dept_name": "node_0",
+          "year": 508,
+          "student_id": 691,
+          "credits": 270
+        },
+        {
+          "ID": 368,
+          "salary": 201,
+          "dept_name": "node_1",
+          "year": 554,
+          "student_id": 846,
+          "credits": 355
+        },
+        {
+          "ID": 533,
+          "salary": 587,
+          "dept_name": "node_2",
+          "year": 678,
+          "student_id": 726,
+          "credits": 633
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 7,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT student.name, course.dept_name FROM student JOIN takes ON student.id = takes.course_id JOIN course ON takes.course_id = course.course_id"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 779,
+          "salary": 851,
+          "dept_name": "node_0",
+          "year": 803,
+          "student_id": 606,
+          "credits": 504
+        },
+        {
+          "ID": 891,
+          "salary": 571,
+          "dept_name": "node_1",
+          "year": 291,
+          "student_id": 753,
+          "credits": 626
+        },
+        {
+          "ID": 650,
+          "salary": 863,
+          "dept_name": "node_2",
+          "year": 547,
+          "student_id": 451,
+          "credits": 416
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 8,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT dept_name, AVG(salary) FROM instructor GROUP BY salary HAVING AVG(salary) > 42000"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 116,
+          "salary": 754,
+          "dept_name": "node_0",
+          "year": 236,
+          "student_id": 652,
+          "credits": 556
+        },
+        {
+          "ID": 716,
+          "salary": 315,
+          "dept_name": "node_1",
+          "year": 479,
+          "student_id": 338,
+          "credits": 842
+        },
+        {
+          "ID": 578,
+          "salary": 239,
+          "dept_name": "node_2",
+          "year": 558,
+          "student_id": 642,
+          "credits": 708
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 9,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT e.fname, e.lname, s.ssn, s.ssn FROM employee AS e JOIN employee AS s ON e.ssn = s.super_ssn"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 339,
+          "salary": 554,
+          "dept_name": "node_0",
+          "year": 716,
+          "student_id": 716,
+          "credits": 951
+        },
+        {
+          "ID": 618,
+          "salary": 385,
+          "dept_name": "node_1",
+          "year": 331,
+          "student_id": 440,
+          "credits": 296
+        },
+        {
+          "ID": 580,
+          "salary": 258,
+          "dept_name": "node_2",
+          "year": 550,
+          "student_id": 778,
+          "credits": 891
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 10,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT dept_name, (SELECT COUNT(*) FROM instructor WHERE instructor.dept_name = department.dept_name) AS num_instructors FROM department"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 999,
+          "salary": 540,
+          "dept_name": "node_0",
+          "year": 623,
+          "student_id": 409,
+          "credits": 985
+        },
+        {
+          "ID": 124,
+          "salary": 547,
+          "dept_name": "node_1",
+          "year": 340,
+          "student_id": 831,
+          "credits": 213
+        },
+        {
+          "ID": 160,
+          "salary": 301,
+          "dept_name": "node_2",
+          "year": 344,
+          "student_id": 948,
+          "credits": 206
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 11,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT * FROM orders ORDER BY orderdate DESC LIMIT 5"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 674,
+          "salary": 886,
+          "dept_name": "node_0",
+          "year": 708,
+          "student_id": 826,
+          "credits": 974
+        },
+        {
+          "ID": 493,
+          "salary": 773,
+          "dept_name": "node_1",
+          "year": 514,
+          "student_id": 615,
+          "credits": 164
+        },
+        {
+          "ID": 467,
+          "salary": 746,
+          "dept_name": "node_2",
+          "year": 974,
+          "student_id": 514,
+          "credits": 697
+        }
+      ]
+    },
+    "judgment": "Perfect Correct"
+  },
+  {
+    "q_id": 12,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT name, salary, CASE WHEN salary < 50000 THEN salary * 1.05 ELSE salary * 1.03 END AS new_salary FROM instructor"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 839,
+          "salary": 886,
+          "dept_name": "node_0",
+          "year": 855,
+          "student_id": 131,
+          "credits": 387
+        },
+        {
+          "ID": 933,
+          "salary": 650,
+          "dept_name": "node_1",
+          "year": 842,
+          "student_id": 816,
+          "credits": 970
+        },
+        {
+          "ID": 610,
+          "salary": 314,
+          "dept_name": "node_2",
+          "year": 614,
+          "student_id": 281,
+          "credits": 316
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 13,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT employee.lname, department.dname FROM employee FULL OUTER JOIN department ON employee.dno = department.dnumber"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 624,
+          "salary": 779,
+          "dept_name": "node_0",
+          "year": 393,
+          "student_id": 542,
+          "credits": 835
+        },
+        {
+          "ID": 492,
+          "salary": 980,
+          "dept_name": "node_1",
+          "year": 961,
+          "student_id": 411,
+          "credits": 429
+        },
+        {
+          "ID": 808,
+          "salary": 127,
+          "dept_name": "node_2",
+          "year": 269,
+          "student_id": 935,
+          "credits": 426
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 14,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT id, salary, COUNT(*) AS rank FROM instructor ORDER BY salary DESC"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 459,
+          "salary": 925,
+          "dept_name": "node_0",
+          "year": 523,
+          "student_id": 851,
+          "credits": 113
+        },
+        {
+          "ID": 785,
+          "salary": 617,
+          "dept_name": "node_1",
+          "year": 920,
+          "student_id": 215,
+          "credits": 568
+        },
+        {
+          "ID": 683,
+          "salary": 513,
+          "dept_name": "node_2",
+          "year": 351,
+          "student_id": 203,
+          "credits": 971
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 15,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT course_id FROM section WHERE semester = 'Fall' AND year = 2009 AND NOT EXISTS(SELECT 1 FROM section WHERE semester = 'Fall' AND year = 2010)"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 472,
+          "salary": 503,
+          "dept_name": "node_0",
+          "year": 126,
+          "student_id": 774,
+          "credits": 711
+        },
+        {
+          "ID": 582,
+          "salary": 152,
+          "dept_name": "node_1",
+          "year": 430,
+          "student_id": 865,
+          "credits": 186
+        },
+        {
+          "ID": 638,
+          "salary": 311,
+          "dept_name": "node_2",
+          "year": 690,
+          "student_id": 352,
+          "credits": 681
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 16,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT orderid, DATEDIFF(shipdate, orderdate) AS daysdifference FROM orders"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 744,
+          "salary": 863,
+          "dept_name": "node_0",
+          "year": 103,
+          "student_id": 965,
+          "credits": 946
+        },
+        {
+          "ID": 249,
+          "salary": 974,
+          "dept_name": "node_1",
+          "year": 295,
+          "student_id": 102,
+          "credits": 100
+        },
+        {
+          "ID": 693,
+          "salary": 170,
+          "dept_name": "node_2",
+          "year": 222,
+          "student_id": 228,
+          "credits": 730
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 17,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT year, (SELECT SUM(credits_sum) FROM all_credits WHERE year BETWEEN ac.year - 2 AND ac.year) / 3 AS moving_avg FROM all_credits AS ac"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 178,
+          "salary": 274,
+          "dept_name": "node_0",
+          "year": 799,
+          "student_id": 633,
+          "credits": 484
+        },
+        {
+          "ID": 467,
+          "salary": 849,
+          "dept_name": "node_1",
+          "year": 724,
+          "student_id": 279,
+          "credits": 994
+        },
+        {
+          "ID": 598,
+          "salary": 830,
+          "dept_name": "node_2",
+          "year": 529,
+          "student_id": 849,
+          "credits": 225
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  },
+  {
+    "q_id": 18,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT 'MOCK_ERROR'"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 351,
+          "salary": 303,
+          "dept_name": "node_0",
+          "year": 347,
+          "student_id": 392,
+          "credits": 937
+        },
+        {
+          "ID": 247,
+          "salary": 929,
+          "dept_name": "node_1",
+          "year": 603,
+          "student_id": 785,
+          "credits": 878
+        },
+        {
+          "ID": 811,
+          "salary": 114,
+          "dept_name": "node_2",
+          "year": 957,
+          "student_id": 737,
+          "credits": 753
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 19,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT essn FROM works_on JOIN works_on ON essn = pno WHERE pno = 1"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 715,
+          "salary": 673,
+          "dept_name": "node_0",
+          "year": 744,
+          "student_id": 410,
+          "credits": 773
+        },
+        {
+          "ID": 260,
+          "salary": 603,
+          "dept_name": "node_1",
+          "year": 923,
+          "student_id": 836,
+          "credits": 666
+        },
+        {
+          "ID": 448,
+          "salary": 302,
+          "dept_name": "node_2",
+          "year": 314,
+          "student_id": 831,
+          "credits": 442
+        }
+      ]
+    },
+    "judgment": "Incorrect"
+  },
+  {
+    "q_id": 20,
+    "persona": "Agg_Join_Struggler",
+    "ast": {
+      "student": "SELECT DATE(orderdate) AS orderdate, ROUND(totalamount, 2) AS totalamount FROM orders"
+    },
+    "parseval": {
+      "predicates": [],
+      "data": [
+        {
+          "ID": 687,
+          "salary": 613,
+          "dept_name": "node_0",
+          "year": 684,
+          "student_id": 374,
+          "credits": 943
+        },
+        {
+          "ID": 840,
+          "salary": 499,
+          "dept_name": "node_1",
+          "year": 515,
+          "student_id": 503,
+          "credits": 821
+        },
+        {
+          "ID": 199,
+          "salary": 938,
+          "dept_name": "node_2",
+          "year": 568,
+          "student_id": 300,
+          "credits": 365
+        }
+      ]
+    },
+    "judgment": "Alternative Correct"
+  }
+]

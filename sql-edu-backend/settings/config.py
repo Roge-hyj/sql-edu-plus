@@ -1,3 +1,15 @@
+"""
+配置加载（Settings）
+
+本模块负责：
+- 从环境变量 / `.env` 读取配置并提供 `settings` 单例
+- 对安全关键项做启动时校验（例如 JWT 密钥不能为空）
+
+使用方式：
+- 业务代码通过 `from settings.config import settings` 读取配置
+- 或通过 `from settings import get_settings`（缓存）获取设置对象
+"""
+
 from functools import lru_cache
 from typing import List
 from pydantic_settings import BaseSettings,SettingsConfigDict

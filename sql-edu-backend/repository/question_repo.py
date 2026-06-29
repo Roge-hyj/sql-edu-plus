@@ -1,3 +1,11 @@
+"""
+题目仓库（QuestionRepository）
+
+Repository 层职责：
+- 隔离 SQLAlchemy 的查询细节
+- 为路由/服务层提供面向业务的查询方法
+"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from models.question import Question

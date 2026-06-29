@@ -1,3 +1,9 @@
+"""
+题目相关 Schemas
+
+包含题目创建/返回结构，以及难度反馈输入模型等。
+"""
+
 from pydantic import BaseModel, field_validator
 
 

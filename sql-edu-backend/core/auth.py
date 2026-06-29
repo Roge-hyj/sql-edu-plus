@@ -1,3 +1,16 @@
+"""
+认证与鉴权（JWT + FastAPI 依赖）
+
+本模块提供：
+- `AuthHandler`: JWT 的签发、解析与 FastAPI 依赖注入
+- `SingletonMeta`: 简单单例元类（避免在运行时重复创建 AuthHandler）
+
+约定：
+- Access Token 用于接口访问（短期）
+- Refresh Token 用于换取新的 Access Token（长期）
+- token payload 中 `iss` 存 user_id，`sub` 存 token 类型
+"""
+
 import jwt  # 导入 pyjwt 库，用来生成和解密 Token
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer

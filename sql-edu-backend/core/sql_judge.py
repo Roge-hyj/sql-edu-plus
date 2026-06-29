@@ -238,33 +238,79 @@ class SQLJudgeService:
         :param required_output_columns: 若非空，表示题目对输出列名/别名有明确要求
         :return: (是否正确, 错误描述)
         """
+        detail = await self.judge_sql_detailed(
+            student_sql=student_sql,
+            correct_sql=correct_sql,
+            required_output_columns=required_output_columns,
+        )
+        return detail["is_correct"], detail["error_message"]
+
+    async def judge_sql_detailed(
+        self, student_sql: str, correct_sql: str, required_output_columns: str | None = None
+    ) -> dict[str, Any]:
+        """完整判题并返回阶段 1/2 所需的数据层证据。
+
+        返回值只包含结果集元信息，不直接暴露完整行数据，避免在提示上下文里塞入过大的数据。
+        """
         try:
             student_result = await self.execute_sql_safely(student_sql)
         except SQLSafetyError:
-            raise  # 向上抛出，由路由层识别并设置 is_safety_blocked
+            raise
         except SQLJudgeError as e:
-            return False, f"学生 SQL 执行失败: {str(e)}"
+            return {
+                "is_correct": False,
+                "error_message": f"学生 SQL 执行失败: {str(e)}",
+                "student_result_meta": None,
+                "correct_result_meta": None,
+                "comparison": {
+                    "ordered": self._sql_has_order_by(correct_sql),
+                    "enforce_aliases": bool(required_output_columns and str(required_output_columns).strip()),
+                    "student_exec_ok": False,
+                    "correct_exec_ok": None,
+                },
+            }
 
         try:
             correct_result = await self.execute_sql_safely(correct_sql)
         except SQLJudgeError as e:
-            return False, f"标准答案 SQL 执行失败: {str(e)}"
+            return {
+                "is_correct": False,
+                "error_message": f"标准答案 SQL 执行失败: {str(e)}",
+                "student_result_meta": self._result_meta(student_result),
+                "correct_result_meta": None,
+                "comparison": {
+                    "ordered": self._sql_has_order_by(correct_sql),
+                    "enforce_aliases": bool(required_output_columns and str(required_output_columns).strip()),
+                    "student_exec_ok": True,
+                    "correct_exec_ok": False,
+                },
+            }
 
         enforce_aliases = bool(required_output_columns and str(required_output_columns).strip())
+        ordered = self._sql_has_order_by(correct_sql)
         if enforce_aliases:
-            # 有别名要求：使用原来的「列结构 + 值」比较逻辑
-            if self._sql_has_order_by(correct_sql):
+            if ordered:
                 is_correct, error_msg = self.compare_results_ordered(student_result, correct_result)
             else:
                 is_correct, error_msg = self.compare_results_unordered(student_result, correct_result)
         else:
-            # 无别名要求：忽略列名，只按列值等价判定
-            if self._sql_has_order_by(correct_sql):
+            if ordered:
                 is_correct, error_msg = self._compare_by_values_ordered(student_result, correct_result)
             else:
                 is_correct, error_msg = self.compare_results_by_values_only(student_result, correct_result)
 
-        return is_correct, error_msg
+        return {
+            "is_correct": is_correct,
+            "error_message": error_msg,
+            "student_result_meta": self._result_meta(student_result),
+            "correct_result_meta": self._result_meta(correct_result),
+            "comparison": {
+                "ordered": ordered,
+                "enforce_aliases": enforce_aliases,
+                "student_exec_ok": True,
+                "correct_exec_ok": True,
+            },
+        }
 
     def _compare_by_values_ordered(
         self, student_result: list[dict[str, Any]], correct_result: list[dict[str, Any]]
@@ -283,6 +329,22 @@ class SQLJudgeService:
             if sv != cv:
                 return False, f"第 {i + 1} 行与标准答案不一致（顺序或数据有误）。"
         return True, "结果匹配（含顺序）。"
+
+    def _result_meta(self, result: list[dict[str, Any]]) -> dict[str, Any]:
+        """提取结果集元信息，供错误归因使用。"""
+        columns = list(result[0].keys()) if result else []
+        normalized = self._normalize_result_keep_order(result)
+        unique_rows = {
+            tuple(sorted(row.items()))
+            for row in self._normalize_result(result)
+        } if result else set()
+        return {
+            "row_count": len(result),
+            "column_count": len(columns),
+            "columns": columns,
+            "duplicate_row_count": max(0, len(normalized) - len(unique_rows)),
+            "sample_rows": normalized[:3],
+        }
 
 
 __all__ = ["SQLJudgeService", "SQLJudgeError", "SQLSafetyError"]

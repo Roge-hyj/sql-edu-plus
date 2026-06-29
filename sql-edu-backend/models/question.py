@@ -1,3 +1,12 @@
+"""
+题目模型（Question）
+
+本模块定义题库中的 SQL 练习题结构，包括：
+- 中文题面与可选多语言字段（en/zh-TW）
+- 标准答案 `correct_sql`
+- 难度、限时、schema_preview、required_output_columns 等用于判题与 UI 展示的信息
+"""
+
 from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 

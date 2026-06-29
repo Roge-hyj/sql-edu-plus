@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "difficulty": 1.5,
+    "l1": "KP_BASIC",
+    "l2": ["PROJ_COL", "ALIAS_COL"],
+    "schema": "instructor(ID, name, dept_name, salary)",
+    "q": "Find the names of all instructors and rename the name column as instructor_name.",
+    "ans_sql": "SELECT name AS instructor_name FROM instructor;",
+    "source": "Example only; replace with actual PDF source"
+  }
+]

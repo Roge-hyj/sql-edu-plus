@@ -1,3 +1,12 @@
+"""
+对话消息模型（ChatMessage）
+
+本模块保存学生与 AI 教师的多轮对话历史（按 user_id + question_id 聚合）。
+该历史会用于：
+- 前端展示聊天记录
+- 多轮对话时作为 LLM 上下文（通常只取最近 N 条）
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, Text

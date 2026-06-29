@@ -1,3 +1,15 @@
+"""
+用户与验证码仓库（UserRepository / EmailCodeRepository）
+
+该文件包含两类 Repository：
+- UserRepository：用户查询/创建/删除等
+- EmailCodeRepository：邮箱验证码的生成、校验、标记已用、补偿删除等
+
+注意：
+- 验证码的有效期（10 分钟）在这里校验
+- 事务提交由路由层控制；repository 只负责执行语句与 flush
+"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.auth import EmailCaptcha
 from sqlalchemy import select,delete,exists,update,desc

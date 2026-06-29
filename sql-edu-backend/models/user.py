@@ -1,3 +1,11 @@
+"""
+用户模型（User）
+
+本模块定义用户表结构与密码处理策略：
+- 使用 passlib 的 `bcrypt_sha256` 以支持超过 72 bytes 的口令输入（先 SHA256 再 bcrypt）
+- `password` 通过 property 只写不读，避免意外暴露哈希
+"""
+
 from .base import Base
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Integer, String, DateTime,func

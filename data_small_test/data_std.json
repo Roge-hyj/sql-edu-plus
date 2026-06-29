@@ -1,0 +1,202 @@
+[
+  {
+    "id": 1,
+    "difficulty": 1.5,
+    "l1": "KP_BASIC",
+    "l2": ["PROJ_COL", "PROJ_EXPR", "ALIAS_COL"],
+    "schema": "instructor(ID, name, dept_name, salary)",
+    "q": "Find the names of all instructors along with their salary increased by 10%, and rename that column to 'new_salary'.",
+    "ans_sql": "SELECT name, salary * 1.1 AS new_salary FROM instructor;",
+    "source": "Silberschatz 7e (3.1.1)"
+  },
+  {
+    "id": 2,
+    "difficulty": 2.5,
+    "l1": "KP_FILTER",
+    "l2": ["RANGE_BET", "LOGIC_AND_OR"],
+    "schema": "instructor(ID, name, salary)",
+    "q": "Find the names of all instructors with a salary between 90,000 and 100,000.",
+    "ans_sql": "SELECT name FROM instructor WHERE salary BETWEEN 90000 AND 100000;",
+    "source": "Silberschatz 7e (3.4.1.2)"
+  },
+  {
+    "id": 3,
+    "difficulty": 4.5,
+    "l1": "KP_JOIN",
+    "l2": ["JOIN_LEFT", "JOIN_NATURAL"],
+    "schema": "student(ID, name), takes(ID, course_id)",
+    "q": "Find a list of all students and the course sections that they have taken. Include students who have not taken any course (using Natural Left Join).",
+    "ans_sql": "SELECT * FROM student NATURAL LEFT OUTER JOIN takes;",
+    "source": "Silberschatz 7e (4.1.1)"
+  },
+  {
+    "id": 4,
+    "difficulty": 6.5,
+    "l1": "KP_SUBQUERY",
+    "l2": ["SUB_IN_ALL_ANY"],
+    "schema": "instructor(name, salary, dept_name)",
+    "q": "Find the names of instructors whose salary is greater than the salary of at least one instructor in the Biology department.",
+    "ans_sql": "SELECT name FROM instructor WHERE salary > SOME (SELECT salary FROM instructor WHERE dept_name = 'Biology');",
+    "source": "Silberschatz 7e (3.5.2)"
+  },
+  {
+    "id": 5,
+    "difficulty": 7.5,
+    "l1": "KP_ADVANCED",
+    "l2": ["SET_UNION", "SET_INTERSECT"],
+    "schema": "PROJECT(Pnumber, Pname, Dnum), DEPARTMENT(Dnumber, Mgr_ssn), EMPLOYEE(Ssn, Lname), WORKS_ON(Essn, Pno)",
+    "q": "Retrieve project numbers for projects that involve an employee whose last name is 'Smith', either as a worker or as a manager of the department that controls the project.",
+    "ans_sql": "(SELECT Pnumber FROM PROJECT, DEPARTMENT, EMPLOYEE WHERE Dnum=Dnumber AND Mgr_ssn=Ssn AND Lname='Smith') UNION (SELECT Pnumber FROM PROJECT, WORKS_ON, EMPLOYEE WHERE Pnumber=Pno AND Essn=Ssn AND Lname='Smith');",
+    "source": "Elmasri 7e (Ch 6.3.3)"
+  },
+  {
+    "id": 6,
+    "difficulty": 3.5,
+    "l1": "KP_FILTER",
+    "l2": ["LIKE_STR"],
+    "schema": "EMPLOYEE(Fname, Lname, Address)",
+    "q": "Retrieve all employees whose address is in Houston, Texas (using LIKE).",
+    "ans_sql": "SELECT Fname, Lname FROM EMPLOYEE WHERE Address LIKE '%Houston, TX%';",
+    "source": "Elmasri 7e (5.1.2)"
+  },
+  {
+    "id": 7,
+    "difficulty": 5.0,
+    "l1": "KP_JOIN",
+    "l2": ["JOIN_INNER", "JOIN_NATURAL"],
+    "schema": "student(ID, name, dept_name), takes(ID, course_id), course(course_id, dept_name)",
+    "q": "For all students in the University who have taken at least one course, find their names and the names of the departments to which the courses belong.",
+    "ans_sql": "SELECT name, dept_name FROM student NATURAL JOIN takes NATURAL JOIN course;",
+    "source": "Silberschatz 7e (Practice Ex 3.11)"
+  },
+  {
+    "id": 8,
+    "difficulty": 6.0,
+    "l1": "KP_AGG",
+    "l2": ["GB_SIMPLE", "HV_SIMPLE", "AGG_BASIC"],
+    "schema": "instructor(dept_name, salary)",
+    "q": "Find the names of all departments where the average salary of instructors is greater than 42,000.",
+    "ans_sql": "SELECT dept_name, AVG(salary) FROM instructor GROUP BY dept_name HAVING AVG(salary) > 42000;",
+    "source": "Silberschatz 7e (3.7.3)"
+  },
+  {
+    "id": 9,
+    "difficulty": 5.5,
+    "l1": "KP_JOIN",
+    "l2": ["JOIN_SELF"],
+    "schema": "EMPLOYEE(Fname, Lname, Ssn, Super_ssn)",
+    "q": "For each employee, retrieve the employee’s first and last name and the first and last name of his or her immediate supervisor.",
+    "ans_sql": "SELECT E.Fname, E.Lname, S.Fname, S.Lname FROM EMPLOYEE E, EMPLOYEE S WHERE E.Super_ssn = S.Ssn;",
+    "source": "Elmasri 7e (Ch 6.2)"
+  },
+  {
+    "id": 10,
+    "difficulty": 7.0,
+    "l1": "KP_SUBQUERY",
+    "l2": ["SUB_CORR", "SUB_SCALAR"],
+    "schema": "department(dept_name), instructor(ID, dept_name)",
+    "q": "List all departments along with the number of instructors in each department (using a correlated scalar subquery).",
+    "ans_sql": "SELECT dept_name, (SELECT COUNT(*) FROM instructor WHERE instructor.dept_name = department.dept_name) AS num_instructors FROM department;",
+    "source": "Silberschatz 7e (3.8.2)"
+  },
+  {
+    "id": 11,
+    "difficulty": 3.0,
+    "l1": "KP_BASIC",
+    "l2": ["LIMIT_OFF", "SORT_DESC"],
+    "schema": "Orders(OrderID, OrderDate)",
+    "q": "Retrieve all columns from the Orders table, sorted by OrderDate in descending order, and limited to the first 5 records.",
+    "ans_sql": "SELECT * FROM Orders ORDER BY OrderDate DESC LIMIT 5;",
+    "source": "Learn SQL Fast (Ch 3)"
+  },
+  {
+    "id": 12,
+    "difficulty": 5.5,
+    "l1": "KP_FUNC",
+    "l2": ["CASE_SEARCH"],
+    "schema": "instructor(name, salary)",
+    "q": "Divide instructors into salary grades: if salary < 50k increase by 5%, else increase by 3%.",
+    "ans_sql": "SELECT name, CASE WHEN salary < 50000 THEN salary * 1.05 ELSE salary * 1.03 END FROM instructor;",
+    "source": "Silberschatz 7e (4.1.3)"
+  },
+  {
+    "id": 13,
+    "difficulty": 5.5,
+    "l1": "KP_JOIN",
+    "l2": ["JOIN_FULL"],
+    "schema": "EMPLOYEE(Lname, Dno), DEPARTMENT(Dnumber, Dname)",
+    "q": "Retrieve a list of all employees and their department names, including those with no department and departments with no employees.",
+    "ans_sql": "SELECT E.Lname, D.Dname FROM EMPLOYEE E FULL OUTER JOIN DEPARTMENT D ON E.Dno = D.Dnumber;",
+    "source": "Elmasri 7e (Ch 7.2.1)"
+  },
+  {
+    "id": 14,
+    "difficulty": 8.0,
+    "l1": "KP_ADVANCED",
+    "l2": ["WIN_RANK", "WIN_OVER"],
+    "schema": "instructor(ID, salary, dept_name)",
+    "q": "Find the rank of each instructor by their salary.",
+    "ans_sql": "SELECT ID, RANK() OVER (ORDER BY salary DESC) AS s_rank FROM instructor;",
+    "source": "Silberschatz 7e (4.4.1)"
+  },
+  {
+    "id": 15,
+    "difficulty": 8.5,
+    "l1": "KP_SUBQUERY",
+    "l2": ["SUB_EXISTS", "LOGIC_NOT"],
+    "schema": "section(course_id, semester, year)",
+    "q": "Find all courses taught in the Fall 2009 semester but not in the Spring 2010 semester (using EXISTS).",
+    "ans_sql": "SELECT course_id FROM section AS S WHERE semester = 'Fall' AND year = 2009 AND NOT EXISTS (SELECT * FROM section AS T WHERE semester = 'Spring' AND year = 2010 AND S.course_id = T.course_id);",
+    "source": "Silberschatz 7e (3.5.3)"
+  },
+  {
+    "id": 16,
+    "difficulty": 6.5,
+    "l1": "KP_FUNC",
+    "l2": ["DATE_EXT", "DATE_DIFF"],
+    "schema": "Orders(OrderID, OrderDate, ShipDate)",
+    "q": "Calculate the number of days between OrderDate and ShipDate for each order.",
+    "ans_sql": "SELECT OrderID, DATEDIFF(ShipDate, OrderDate) FROM Orders;",
+    "source": "Learn SQL Fast (Ch 6)"
+  },
+  {
+    "id": 17,
+    "difficulty": 9.5,
+    "l1": "KP_ADVANCED",
+    "l2": ["WIN_FRAME"],
+    "schema": "all_credits(year, credits_sum)",
+    "q": "Find a three-year moving average of total credits (current year plus two previous years).",
+    "ans_sql": "SELECT year, AVG(credits_sum) OVER (ORDER BY year ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) FROM all_credits;",
+    "source": "Silberschatz 7e (5.2.3)"
+  },
+  {
+    "id": 18,
+    "difficulty": 10.0,
+    "l1": "KP_ADVANCED",
+    "l2": ["CTE_RECURSIVE"],
+    "schema": "prereq(course_id, prereq_id)",
+    "q": "Find all courses that are prerequisites (at any level) of a given course (Recursive CTE).",
+    "ans_sql": "WITH RECURSIVE rec_prereq(course_id, prereq_id) AS (SELECT course_id, prereq_id FROM prereq UNION SELECT rec_prereq.course_id, prereq.prereq_id FROM rec_prereq, prereq WHERE rec_prereq.prereq_id = prereq.course_id) SELECT * FROM rec_prereq;",
+    "source": "Silberschatz 7e (4.4.2)"
+  },
+  {
+    "id": 19,
+    "difficulty": 7.5,
+    "l1": "KP_ADVANCED",
+    "l2": ["SET_EXCEPT"],
+    "schema": "WORKS_ON(Essn, Pno)",
+    "q": "Find the SSNs of employees who work on project 1 but not on project 2.",
+    "ans_sql": "SELECT Essn FROM WORKS_ON WHERE Pno = 1 EXCEPT SELECT Essn FROM WORKS_ON WHERE Pno = 2;",
+    "source": "Elmasri 7e (Ch 6.3.4)"
+  },
+  {
+    "id": 20,
+    "difficulty": 4.5,
+    "l1": "KP_FUNC",
+    "l2": ["TYPE_CAST", "NUM_ROUND"],
+    "schema": "Orders(OrderDate, TotalAmount)",
+    "q": "Format OrderDate as a simple DATE type and round the TotalAmount to 2 decimal places.",
+    "ans_sql": "SELECT CAST(OrderDate AS DATE), ROUND(TotalAmount, 2) FROM Orders;",
+    "source": "Learn SQL Fast (Ch 5)"
+  }
+]

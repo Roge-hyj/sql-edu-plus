@@ -1,7 +1,7 @@
 """测试 API 集成（需要运行中的服务）。"""
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from main import app
 
 
@@ -11,7 +11,8 @@ class TestAIApi:
 
     async def test_sql_hint_endpoint(self):
         """测试简化版 SQL 提示接口。"""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
                 "/ai/sql-hint",
                 json={"sql": "SELECT * FROM users WHERE age > 18"}
@@ -24,7 +25,8 @@ class TestAIApi:
 
     async def test_check_sql_without_auth(self):
         """测试未认证的请求应该被拒绝。"""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
                 "/ai/check-sql",
                 json={
@@ -40,4 +42,4 @@ class TestAIApi:
         """测试不存在的题目 ID。"""
         # 注意：这个测试需要有效的 Token
         # 在实际测试中，应该先登录获取 Token
-        pass  # 需要 mock 认证或使用测试 Token
+        pytest.skip("需要 mock 认证或使用测试 Token，暂不在集成测试中执行")

@@ -1,3 +1,15 @@
+"""
+模型与数据库会话工厂汇总（models package）
+
+本模块聚合：
+- 所有 ORM 模型的 import（便于 Alembic 自动发现 metadata）
+- async engine 与 `AsyncSessionFactory` 的初始化
+
+注意：
+- `engine` 使用 `settings.DB_URL`
+- `AsyncSessionFactory` 用于依赖注入（见 `dependencies.get_session`）
+"""
+
 from .base import Base
 from .user import User
 from .question import Question
@@ -5,6 +17,7 @@ from .submission import Submission
 from .auth import EmailCaptcha
 from .chat import ChatMessage
 from .question_feedback import QuestionDifficultyFeedback
+from .knowledge_mastery import KnowledgeMastery
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from settings.config import settings
 
@@ -31,7 +44,7 @@ AsyncSessionFactory = async_sessionmaker(
 )
 
 
-__all__ = ["Base", "User", "Question", "Submission", "EmailCaptcha", "ChatMessage", "QuestionDifficultyFeedback"]
+__all__ = ["Base", "User", "Question", "Submission", "EmailCaptcha", "ChatMessage", "QuestionDifficultyFeedback", "KnowledgeMastery"]
 
 
 
