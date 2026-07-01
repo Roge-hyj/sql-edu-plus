@@ -150,7 +150,21 @@ def generate_test_database(
     *,
     max_rows_per_table: int = 8,
 ) -> dict[str, list[dict[str, Any]]]:
+    """
+    根据 Schema 以及标答和学生 SQL 提取的语法约束，动态为各表生成隔离测试数据。
+    Generates test data dynamically for target database tables based on Schema and SQL predicate constraints.
+
+    实现流程 (Implementation steps):
+    1. 提取标答与学生 SQL 中所有的字面量约束条件 (如 WHERE, IN, LIKE, HAVING 等)；
+    2. 计算查询语句涉及的目标物理表集合，过滤无关的表；
+    3. 构建主外键拓扑对齐的值池 (Shared Values)，保证 JOIN 连接能匹配上；
+    4. 逐行填充基础数值种子数据 (_base_value)，然后将谓词三态和空值探针约束注入源数据；
+    5. 针对 DISTINCT 去重进行数据行的重复复制探测 (_add_duplicate_probe)。
+    """
+    # 1. 抽取标答与作答 SQL 内的所有比较、LIKE、IN、BETWEEN 和 NULL 等谓词字面量约束
     constraints = _extract_literal_constraints(standard_sql) + _extract_literal_constraints(student_sql)
+    
+    # 2. 筛选查询涉及到的表，仅为其生成测试数据以节省内存和执行开销
     tables_in_queries = _extract_table_names(standard_sql) | _extract_table_names(student_sql)
     if tables_in_queries:
         target_tables = {
@@ -165,7 +179,10 @@ def generate_test_database(
     else:
         target_tables = schema
 
+    # 3. 限制生成行数在 4 至 8 行之间，保证 LIMIT/OFFSET 查询能有切片效果
     row_count = max(4, min(max_rows_per_table, 8))
+    
+    # 4. 构建关联表的主外键种子池，保证 JOIN 条件不为空，解决拓扑对齐与多外键错位偏移
     shared_values = _build_shared_values(target_tables, row_count)
     data: dict[str, list[dict[str, Any]]] = {}
 
@@ -174,10 +191,16 @@ def generate_test_database(
         for idx in range(row_count):
             row = {}
             for col in columns:
+                # 填充各字段的基础值（包括 Outer Join 不对称悬浮元组的 None 填充）
                 row[col] = _base_value(col, idx, shared_values)
             rows.append(row)
+        
+        # 5. 注入数值边界三态值、HAVING 聚合以及 NULL 空值探针数据
         _apply_constraints(rows, columns, constraints)
+        
+        # 6. 在 Row 0 和 Row 1 的非主键字段注入完全重复的行，用以探测去重 DISTINCT 的缺失
         _add_duplicate_probe(rows, columns)
+        
         data[table] = rows[:max_rows_per_table]
 
     return data
@@ -298,6 +321,18 @@ def _literal_value(node: exp.Expression | None) -> Any:
 
 
 def _apply_constraints(rows: list[dict[str, Any]], columns: list[str], constraints: list[dict[str, Any]]) -> None:
+    """
+    根据提取的语法约束，将特定值写入数据行中的对应列，并生成对抗性反例值（Counter-Value）。
+    Applies extracted predicate constraints to columns by setting values in database rows
+    and generating counter-values in the last row to expose logic errors.
+
+    策略解析 (Strategy details):
+    1. 分组：将约束按目标列分类。
+    2. 阳性测试数据 (Positive Cases)：在前一半的数据行中，循环填入该谓词约束中出现的字面量值（如 18, 'Alice' 等），确保有符合条件的行。
+    3. 阴性测试数据 / 对抗反例 (Negative Cases/Counter-Values)：在最后一行注入对抗反例（_counter_value，如 18+999 = 1017, 'not_Alice' 等）。
+       如果学生逻辑有漏洞（例如无条件选择、或操作符写反），反例行的数据会暴露此错误。
+    """
+    # 按列对约束进行聚合分组
     by_col: dict[str, list[dict[str, Any]]] = {}
     column_lookup = {_norm_name(col): col for col in columns}
     for constraint in constraints:
@@ -305,6 +340,7 @@ def _apply_constraints(rows: list[dict[str, Any]], columns: list[str], constrain
         if col:
             by_col.setdefault(col, []).append(constraint)
 
+    # 逐列应用数值和文本边界值
     for col, items in by_col.items():
         values: list[Any] = []
         for item in items:
@@ -313,30 +349,48 @@ def _apply_constraints(rows: list[dict[str, Any]], columns: list[str], constrain
             else:
                 values.append(item.get("value"))
         values = [v for v in values if v is not None]
+        
+        # 如果列约束是 IS NULL / IS NOT NULL，设置第一行为 None，其余非空
         if not values:
             if rows:
                 rows[0][col] = None
             continue
+            
+        # 阳性覆盖：将谓词值分布在前一半数据行中
         for idx, value in enumerate(values[: max(1, len(rows) // 2)]):
             rows[idx % len(rows)][col] = value
+            
+        # 阴性覆写 / 对抗性三态：在最后一行注入对抗性的异常反例，强制打破假等价
         if len(rows) > 1:
             rows[-1][col] = _counter_value(col, values[0])
 
 
 def _add_duplicate_probe(rows: list[dict[str, Any]], columns: list[str]) -> None:
+    """
+    去重探测机制：在 Row 0 和 Row 1 的非主键字段上，复制生成完全重复的数据行。
+    Distinct probe mechanism: clones values from Row 0 to Row 1 for non-key columns
+    to trigger duplication mismatches if DISTINCT is missing in student SQL.
+    """
     if len(rows) < 3 or not columns:
         return
+    # 避开 ID、SSN 等核心表主键，只针对普通列（如 department, course_id, credit 等）复制
     probe_cols = [col for col in columns if not _is_key_column(col)]
     if not probe_cols:
         probe_cols = columns[:1]
+    # 在 Row 1 的对应位置上复制 Row 0 的值
     for col in probe_cols[:2]:
         rows[1][col] = rows[0][col]
 
 
 def _build_shared_values(schema: dict[str, list[str]], row_count: int) -> dict[str, list[Any]]:
+    """
+    拓扑对齐机制：识别 schema 中的连接键字段，并为具有关联性的列建立共享值池，防止 JOIN 时出现空关联。
+    Topology alignment: builds shared values groups for join keys across tables to avoid empty JOIN outputs.
+    """
     groups: dict[str, list[Any]] = {}
     for columns in schema.values():
         for col in columns:
+            # _join_group_key 会提取列的根部语义（例如 e_id, s_id 均归类为 id）
             key = _join_group_key(col)
             if key not in groups:
                 groups[key] = [_seed_value(col, idx) for idx in range(row_count)]
@@ -344,6 +398,10 @@ def _build_shared_values(schema: dict[str, list[str]], row_count: int) -> dict[s
 
 
 def _base_value(col: str, idx: int, shared_values: dict[str, list[Any]]) -> Any:
+    """
+    主外键关联填充：如果当前列属于某个共享关联组，则从种子池中取值以保障表间能够成功连接。
+    Fetches base value aligned with foreign key value pools if the column is part of a join group.
+    """
     key = _join_group_key(col)
     if key in shared_values:
         return shared_values[key][idx % len(shared_values[key])]
@@ -351,15 +409,30 @@ def _base_value(col: str, idx: int, shared_values: dict[str, list[Any]]) -> Any:
 
 
 def _seed_value(col: str, idx: int) -> Any:
+    """
+    根据列名分发基础测试数据，并强制包含单调性以检测 ORDER BY 错误。
+    Generates a mock seed value for a column based on token name heuristics,
+    ensuring monotonicity to expose ORDER BY/sorting logic bugs.
+    """
     name = col.lower()
+    
+    # 姓名列循环生成
     if name == "name":
         return ["Alice", "Bob", "Carol", "Dave"][idx % 4]
+        
+    # 地理数据类型填充
     if name == "location":
         return f"POINT({idx} {idx})"
+        
+    # 日期字段：自增递增（单调性，支持 ORDER BY 校验）
     if any(token in name for token in DATE_HINTS):
         return f"2024-01-{(idx % 9) + 1:02d}"
+        
+    # 数字类型：idx + 1 单调递增自增，用于检测 >、>=、LIMIT 和聚合运算
     if _is_numeric_column(col):
         return idx + 1
+        
+    # 教学系统常用分类字段循环填充
     if "semester" in name:
         return ["Fall", "Spring", "Summer", "Winter"][idx % 4]
     if "grade" in name:
@@ -372,6 +445,8 @@ def _seed_value(col: str, idx: int) -> Any:
         return ["Comp. Sci.", "Math", "Physics", "History"][idx % 4]
     if "name" in name:
         return ["Alice", "Bob", "Carol", "Dave"][idx % 4]
+        
+    # 兜底生成唯一字符串，避免碰撞
     return f"{_clean_identifier(col)}_{idx + 1}"
 
 
@@ -393,8 +468,13 @@ def _execute_sqlite(
     rows: dict[str, list[dict[str, Any]]],
     sql: str,
 ) -> tuple[list[str], list[tuple[Any, ...]]]:
+    """
+    在内存 SQLite 隔离沙盒中建表、插入模拟数据并执行 SQL 查询，带有无限递归熔断机制。
+    Executes SQL inside an in-memory SQLite sandbox with mock UDFs and infinite recursion guards.
+    """
     conn = sqlite3.connect(":memory:")
     try:
+        # 1. 注册自定义标量函数与空间地理占位函数，避免执行报错
         conn.create_function("AVG_SALARY", 1, lambda _company: 50000)
         conn.create_function("avg_salary", 1, lambda _company: 50000)
         conn.create_function("ST_WITHIN", 2, lambda _point, _poly: 1)
@@ -402,7 +482,13 @@ def _execute_sqlite(
         conn.create_function("ST_DISTANCE", 2, lambda a, b: 0 if a == b else 1)
         conn.create_function("WIDTH_BUCKET", 4, _width_bucket)
         conn.create_function("ROLLUP", 1, lambda value: value)
+        
+        # 2. 注册进度挂接器 (Progress Handler)，指令达到 10w 条时触发熔断中断，防御 Recursive CTE 死循环
+        # Sandbox Guard: interrupts connection if query takes more than 100,000 instructions
+        conn.set_progress_handler(lambda: 1, 100000)
+        
         cur = conn.cursor()
+        # 3. 动态创建测试表并批量插入当前模拟的元组数据
         for table, columns in schema.items():
             if table not in rows:
                 continue
@@ -414,6 +500,8 @@ def _execute_sqlite(
             values = [tuple(row.get(col) for col in columns) for row in rows[table]]
             if values:
                 cur.executemany(insert_sql, values)
+                
+        # 4. 执行 SQL 并读取数据列和数据行
         cur.execute(sql)
         result_rows = cur.fetchall()
         result_cols = [item[0] for item in (cur.description or [])]
@@ -477,6 +565,11 @@ def _run_mutation_tests(
     standard_rows: list[tuple[Any, ...]],
     ordered: bool,
 ) -> dict[str, Any]:
+    """
+    变分隔离测试核心入口：基于 AST 对各算子进行单变量替换与移除测试，收集 Mutant 执行证据。
+    Runs mutation tests by creating mutated student SQL variants (replacing/removing clauses)
+    and evaluating them in the sandbox to isolate and locate specific faulty operators.
+    """
     standard_ast = _parse_sql(standard_sql)
     student_ast = _parse_sql(student_sql)
     if standard_ast is None or student_ast is None:
@@ -487,6 +580,7 @@ def _run_mutation_tests(
             "error": "parse_failed",
         }
 
+    # 定义要参与变分比对的核心算子列表
     specs = [
         {"clause": "WHERE", "knowledge_point_id": "where", "arg": "where", "node_type": exp.Where},
         {"clause": "GROUP BY", "knowledge_point_id": "group-by", "arg": "group", "node_type": exp.Group},
@@ -495,15 +589,24 @@ def _run_mutation_tests(
         {"clause": "LIMIT", "knowledge_point_id": "limit", "arg": "limit", "node_type": exp.Limit},
     ]
     tests: list[dict[str, Any]] = []
+    
+    # 遍历算子进行替换与移除测试
     for spec in specs:
         std_node = standard_ast.args.get(spec["arg"]) or standard_ast.find(spec["node_type"])
         stu_node = student_ast.args.get(spec["arg"]) or student_ast.find(spec["node_type"])
+        
+        # 两者均没有该子句，跳过
         if std_node is None and stu_node is None:
             continue
+        # 两者子句结构完全等价，跳过
         if std_node is not None and stu_node is not None and _sql_of(std_node) == _sql_of(stu_node):
             continue
+            
+        # 1. 替换变体 (Replacement Mutant)：用标准答案子句替换学生出错的子句
         replacement_sql = _mutate_select_arg(student_ast, spec["arg"], std_node)
+        # 2. 移除变体 (Removal Mutant)：剔除学生多写或写错的冗余子句
         removal_sql = _mutate_select_arg(student_ast, spec["arg"], None) if stu_node is not None else None
+        
         tests.append(_execute_mutation_case(
             schema=schema,
             rows=rows,
@@ -516,6 +619,7 @@ def _run_mutation_tests(
             ordered=ordered,
         ))
 
+    # 3. 针对 JOIN ON 进行专项的连接条件变分测试
     join_test = _run_join_on_mutation(
         schema=schema,
         rows=rows,
