@@ -1,46 +1,45 @@
-# SQL DQL 数据集构建方案
+# SQL DQL 数据集构建与评测验证方案 (data_construct_test)
 
-本目录用于构建新的大规模 SQL DQL 题库和后续学生作答数据。
+本目录是 SQL 智能教学系统 **阶段一（Observe：证据采集与感知）** 的核心数据集构建、模拟作答生成以及评测完备性校验的独立测试工程。目前，全量 PDF 抽题、四类学生作答模拟以及 20 道初始诊断题目的筛选工作已全部完成。
 
-## 目录结构
+为了保持工作区的极致清爽，所有大体量的中间缓存与图表均已清理归档，目录内仅保留了最终的核心数据集资产、数学规约与评测脚本。
 
-- `source_pdfs/`: 三本教材 PDF 原始来源。
-- `reference/`: SQL 知识点初步划分图片等参考材料。
-- `prompts/`: 给外部 AI、Figma/FigJam 使用的提示词。
-- `templates/`: 数据结构模板和字段规范。
-- `outputs/`: 后续抽取题目、学生作答、判分整理后的输出目录。
+---
 
-## 构建目标
+## 目录结构索引
 
-从 `source_pdfs/` 中三本 PDF 提取所有 SQL DQL 相关题目，按教材知识点出现顺序组织成一个大的标准题库 JSON。题目需要统一包含：
+本测试工程划分为以下四个核心子目录，各自配有详细说明文档：
 
-- `id`: 全局递增题号。
-- `difficulty`: 1.0 到 10.0 的难度值，由题目复杂度、SQL 结构和知识点数量综合评估。
-- `l1`: 一级知识点。
-- `l2`: 二级原子知识点数组。
-- `schema`: 题目涉及的表结构。
-- `q`: 题目文本。
-- `ans_sql`: 标准答案 SQL。
-- `source`: 题目来源，至少包含教材名、章节或页码。
+1. **[`outputs/`](./outputs/README.md) — 数据集输出目录**
+   - 包含最终生成的全量标准题库（`data_std_full.json`）、多画像模拟学生作答集（`data_student_full.json`）以及核心 20 道初始诊断题（`initial_diagnostic_20.json`）。
+2. **[`scripts/`](./scripts/README.md) — 构建与评测验证脚本**
+   - 包含从零构建数据集、LLM 作答模拟、诊断题自动筛选，以及 **16类经典 SQL 算子评测** 和 **23项 ParSEval 动态造数策略完备性检验** 的核心运行脚本。
+3. **[`templates/`](./templates/README.md) — 数据规约与设计规约**
+   - 包含用于核验数据集格式规范的 JSON Schemas，以及系统感知层的 Mermaid 控制流设计流图。
+4. **[`prompts/`](./prompts/README.md) — 提示词资产**
+   - 包含供外部大模型进行学生作答模拟与 PDF 题目抽取的 Prompt 工程设计文档。
 
-## 总体流程
+---
 
-1. 读取三本 PDF，并定位 SQL DQL 章节、例题、练习题、课后题。
-2. 只保留 DQL 查询题，排除 DDL、DML、DCL、TCL、纯概念题和数据库设计题。
-3. 按教材知识点出现顺序整理题目，而不是按抽取时间排序。
-4. 使用 `reference/SQL知识点初步划分.png` 对题目打 L1/L2 标签。
-5. 如果图片中的划分覆盖不全，按 `knowledge_taxonomy.md` 的补充规则扩展 L2 标签。
-6. 生成标准题库 JSON，结构参考 `templates/question_dataset.schema.json`。
-7. 将标准题库交给外部 AI 模拟不同学生回答。
-8. 将学生回答再输入判分流程，判断正确性、错因和知识点掌握度。
-9. 按 `data_small_test/data_student.json` 的聚合格式整理成新的学生数据。
+## 核心实现说明
 
-## 输出数据
+1. **ParSEval 动态造数完备性 (23种造数策略)**
+   - 通过静态解析 DQL 语句，自动在内存沙盒数据库中生成符合数值三态边界（$c$, $c+1$, $c-1$）、外连接悬浮元组、GROUP BY 分组多样性、HAVING 聚合三态值等多维度的高质量评测数据集。
+2. **变分隔离测试机制 (Mutation Testing)**
+   - 系统支持单变量变分。通过将学生 SQL 中的错漏子句（如 `WHERE`、`JOIN ON`、`HAVING` 等）替换为标答子句，在沙盒中执行比对。若 Mutant-SQL 执行结果变为正确，则在实验上证明该算子错误是导致不匹配的充分必要原因，实现细粒度错因的精准定位。
+3. **安全沙盒熔断守护**
+   - 在沙盒内执行 DQL 时，限制最大执行 VM 指令上限为 10 万周期，彻底规避了递归 CTE 题目和学生错误死循环查询挂死系统的高危风险。
 
-- `outputs/data_std_full.json`: 全量标准题库。
-- `outputs/data_student_full.json`: 判分后整理成与小规模数据一致的模拟学生数据。
-- `outputs/initial_diagnostic_20.json`: 针对核心知识点筛选出的 20 道诊断题。
+---
 
-## 当前阶段
+## 快速开始
 
-全量 PDF 抽题、学生作答模拟以及 20 道诊断题筛选已全部完成。核心构建脚本与验证代码留存在 `scripts/` 目录下，输出数据集均已保存在 `outputs/` 目录中。为了工作区清爽，原始模拟中间文件（如 `data_student_raw_full.json`）已予清理，可通过运行 `scripts/simulate_student_answers.py` 和 `scripts/build_data_student_full.py` 重新跑通构建流程。
+在项目根目录下，您可以直接运行完备性测试集：
+
+```bash
+# 运行 16 类经典 SQL 算子感知判题测试
+python data_construct_test/scripts/run_all_operator_tests.py
+
+# 运行 23 种动态造数策略的数学边界完备性检验
+python data_construct_test/scripts/run_generation_completeness_tests.py
+```
