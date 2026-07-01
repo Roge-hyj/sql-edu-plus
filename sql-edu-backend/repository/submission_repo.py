@@ -1,12 +1,3 @@
-"""
-提交仓库（SubmissionRepository）
-
-负责 `submissions` 的创建与查询统计，常用于：
-- 判题记录落库（create）
-- 统计失败次数/正确次数（提示策略、经验值计算）
-- 拉取最近提交列表（用于控制策略的 session_duration 估算）
-"""
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from models.submission import Submission

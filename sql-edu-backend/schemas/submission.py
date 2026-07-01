@@ -1,9 +1,3 @@
-"""
-提交记录 Schemas
-
-包含 submissions 表对应的创建/返回结构，用于路由层序列化。
-"""
-
 from datetime import datetime
 
 from pydantic import BaseModel

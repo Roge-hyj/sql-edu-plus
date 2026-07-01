@@ -1,14 +1,3 @@
-"""
-认证相关模型（EmailCaptcha）
-
-用于邮箱验证码的发放与校验，常见于：
-- 注册
-- 登录/找回密码（如未来扩展）
-
-说明：
-- 本表只记录验证码与是否使用；有效期校验在 repository 层完成。
-"""
-
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, String

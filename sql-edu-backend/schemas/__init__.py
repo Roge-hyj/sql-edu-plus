@@ -1,16 +1,13 @@
-"""
-Pydantic Schemas 汇总入口
-
-本模块集中导出路由层常用的请求/响应模型（schemas），避免在路由里写大量导入路径。
-"""
-
-from pydantic import BaseModel, Field
-from typing import Annotated, Literal
+from pydantic import BaseModel,Field
+from typing import Annotated,Literal
 
 class ResponseOut(BaseModel):
-    """通用操作结果返回结构（用于仅返回 success/failure 的接口）。"""
-    result: Annotated[Literal["success", "failure"], Field("success", description="操作结果")]
-    detail: str | None = None  # 可选错误原因，便于前端提示
+    #用于一些视图函数，只要返回操作结果的模型
+    result:Annotated[Literal["success","failure"], Field("success",description="操作的结果!")]
+    # 加上这一行，允许返回具体的错误原因，给前端看
+    detail: str | None = None
+
+"""Pydantic 模型入口。"""
 
 from .user import RegisterIn, UserCreateSchema
 from schemas.question import QuestionBase, QuestionCreate, QuestionOut

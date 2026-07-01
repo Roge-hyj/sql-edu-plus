@@ -1,11 +1,3 @@
-"""
-聊天相关 Schemas
-
-用于：
-- 返回聊天记录列表
-- 发送消息请求体与回复结构
-"""
-
 from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import Annotated, Literal

@@ -1,12 +1,3 @@
-"""
-聊天仓库（ChatRepository）
-
-负责对 `chat_messages` 表的读写：
-- 写入：system/user/assistant 三种角色消息
-- 查询：按 user_id + question_id 聚合读取
-- 统计：用于经验值投入度（chat_count）等计算
-"""
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
 

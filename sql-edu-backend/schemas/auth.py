@@ -1,9 +1,3 @@
-"""
-认证相关 Schemas（邮箱验证码）
-
-用于邮箱验证码的创建/返回结构；具体发送逻辑在 `routers/auth.py`。
-"""
-
 from datetime import datetime
 
 from pydantic import BaseModel, EmailStr

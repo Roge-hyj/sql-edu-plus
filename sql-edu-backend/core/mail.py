@@ -1,12 +1,4 @@
-"""
-邮件发送配置（FastMail）
-
-本模块负责创建 FastMail 实例，供路由通过依赖注入使用。
-注意：
-- 邮件服务器参数来自 `settings.config.settings`
-- 生产环境建议开启证书校验（VALIDATE_CERTS=True），开发环境可临时关闭便于调试
-"""
-
+# core/mail.py
 from fastapi_mail import FastMail, ConnectionConfig
 from settings.config import settings
 

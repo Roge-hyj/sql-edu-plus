@@ -1,14 +1,3 @@
-"""
-认证与用户相关路由（/auth）
-
-包含：
-- 发送邮箱验证码
-- 注册/登录
-- 刷新 token
-- 用户资料读取与更新
-- 修改密码、注销账户、退出登录等
-"""
-
 from fastapi import APIRouter, Depends, Query,HTTPException,status 
 from pydantic import EmailStr
 from typing import Annotated

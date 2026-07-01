@@ -1,11 +1,3 @@
-"""
-AI 判题/提示相关 Schemas
-
-这些模型用于约束 AI 输出的结构（当采用结构化输出时），以及在代码内部传递判题诊断信息。
-当前实现中：
-- `SQLCheckResultSchema.overall_comment` 会作为主要提示文本返回给前端
-"""
-
 from pydantic import BaseModel, Field
 from typing import List, Annotated, Literal
 

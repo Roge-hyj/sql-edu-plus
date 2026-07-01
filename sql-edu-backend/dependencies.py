@@ -1,16 +1,3 @@
-"""
-FastAPI 依赖注入入口（Dependencies）
-
-本模块集中提供路由层常用依赖：
-- `get_session()`: 生成一个异步 SQLAlchemy Session（请求级生命周期）
-- `get_mail()`: 生成邮件发送实例（FastMail）
-- `require_teacher()`: 角色鉴权（仅教师可访问）
-
-约定：
-- 数据库事务由路由层在业务写入完成后统一 `commit/rollback`；
-  这里的依赖只负责“创建与校验”，不主动提交事务。
-"""
-
 from core.mail import create_mail_instance
 from fastapi_mail import FastMail
 from fastapi import Depends, HTTPException, status

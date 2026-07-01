@@ -1,4 +1,4 @@
-y"""add chat_messages table
+"""add chat_messages table
 
 本迁移作用：
   新建 chat_messages 表，用于存储用户与 AI 的对话历史（按 user_id、question_id 维度）。

@@ -1,13 +1,3 @@
-"""
-用户相关 Schemas
-
-包含：
-- 注册/登录请求体
-- 登录响应（含 token）
-- 用户资料展示与更新
-- 密码变更/注销账户请求体
-"""
-
 from pydantic import BaseModel, EmailStr, Field, model_validator
 from typing import Annotated, Literal
 from datetime import datetime

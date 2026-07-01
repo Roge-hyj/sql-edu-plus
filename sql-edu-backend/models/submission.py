@@ -1,13 +1,3 @@
-"""
-提交记录模型（Submission）
-
-本模块定义学生每次提交 SQL 的行为日志：
-- `student_sql`: 学生 SQL 原文
-- `ai_hint`: 本轮生成的提示话术（自然语言）
-- `is_correct`: 判题结果
-- `hint_level`: 提示支架等级（1/2/3），用于提示策略与数据分析
-"""
-
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, SmallInteger, Text
