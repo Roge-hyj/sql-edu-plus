@@ -35,13 +35,12 @@
 8. 将学生回答再输入判分流程，判断正确性、错因和知识点掌握度。
 9. 按 `data_small_test/data_student.json` 的聚合格式整理成新的学生数据。
 
-## 输出命名建议
+## 输出数据
 
 - `outputs/data_std_full.json`: 全量标准题库。
-- `outputs/data_student_raw_full.json`: 外部 AI 模拟学生后的原始作答。
-- `outputs/data_student_full.json`: 判分后整理成与小规模数据一致的新学生数据。
-- `outputs/perception_audit_full.json`: 判分和知识点诊断审计日志。
+- `outputs/data_student_full.json`: 判分后整理成与小规模数据一致的模拟学生数据。
+- `outputs/initial_diagnostic_20.json`: 针对核心知识点筛选出的 20 道诊断题。
 
 ## 当前阶段
 
-当前任务是完成数据集构建流程图设计材料，即 `prompts/figma_dataset_construction_prompt.md`。真正的 PDF 全量抽题和学生作答模拟属于后续阶段。
+全量 PDF 抽题、学生作答模拟以及 20 道诊断题筛选已全部完成。核心构建脚本与验证代码留存在 `scripts/` 目录下，输出数据集均已保存在 `outputs/` 目录中。为了工作区清爽，原始模拟中间文件（如 `data_student_raw_full.json`）已予清理，可通过运行 `scripts/simulate_student_answers.py` 和 `scripts/build_data_student_full.py` 重新跑通构建流程。

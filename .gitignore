@@ -22,3 +22,7 @@ dist/
 *.log
 .DS_Store
 .idea/
+
+# AI Agent Cache and Symbol Indexes
+.agents/
+.codex/
