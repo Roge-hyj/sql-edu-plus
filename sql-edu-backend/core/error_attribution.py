@@ -1,12 +1,12 @@
-"""阶段 1/2：SQL 错误证据采集与知识点归因。
+"""
+SQL Error Evidence Gathering and Knowledge Point Attribution (Observe & Diagnose Phases).
 
-本模块对应闭环图中的：
-- Observe: E_AST / E_data / Mutation Testing / LLM Arbitration Input
-- Diagnosis: evidence_weights_from_observation -> KP 错因
+Collects and compiles diagnostic signals from various sensory inputs:
+- Abstract Syntax Tree mismatches (E_AST)
+- Execution output discrepancies (E_data)
+- Mutation test results (E_MUT)
 
-目标是先给出稳定、可解释、可测试的知识点级错误归因。这里不直接调用 LLM，
-而是把 Intended KP / Observed KP / mismatch evidence 打包出来，后续可作为
-阶段 2 LLM attribution input 或提示生成上下文。
+Determines the most probable knowledge point root-cause for a student's error.
 """
 
 from __future__ import annotations
@@ -20,11 +20,19 @@ from sqlglot import ErrorLevel, exp
 
 @dataclass
 class ASTError:
-    """Local structural error shape consumed by BKT and ActionSelector.
+    """
+    Local structural error shape consumed by BKT and ActionSelector.
 
     It intentionally mirrors core.ast_analyzer.ASTError without importing that
     module, because ast_analyzer initializes AI settings for LLM filtering.
     Phase 1/2 offline evidence packaging must not require backend .env values.
+
+    Attributes:
+        error_type (str): Category classification of the error (e.g. "missing_clause").
+        clause (str): Affected SQL clause (e.g. "GROUP BY").
+        knowledge_point_id (str): BKT taxonomy identifier.
+        severity (float): Error severity rating scaled [0.0, 1.0].
+        detail (str): Plain-text feedback description.
     """
 
     error_type: str
@@ -36,7 +44,15 @@ class ASTError:
 
 @dataclass
 class EvidenceItem:
-    """单条可解释证据。"""
+    """
+    Individually explainable piece of diagnostic evidence.
+
+    Attributes:
+        source (str): Sensor source of the signal (e.g., E_AST, E_data, E_MUT).
+        signal (str): Specific code representing the diagnostic observation.
+        detail (str): Human-readable descriptive explanation of the finding.
+        weight (float): Relative diagnostic weight / confidence.
+    """
 
     source: str
     signal: str
@@ -46,7 +62,20 @@ class EvidenceItem:
 
 @dataclass
 class KPAttribution:
-    """知识点层级错因归因。"""
+    """
+    Pedagogical attribution matching errors to specific SQL knowledge points.
+
+    Attributes:
+        knowledge_point_id (str): Reference taxonomy identifier.
+        l1_code (str): High-level category code.
+        l2_code (str): Fine-grained category code.
+        clause (str): SQL clause token.
+        error_type (str): Category classification.
+        severity (float): Error severity.
+        confidence (float): Confidence score for BKT update calculations.
+        detail (str): Summary detail message.
+        evidence (list[EvidenceItem]): List of supporting evidence items.
+    """
 
     knowledge_point_id: str
     l1_code: str
@@ -59,7 +88,12 @@ class KPAttribution:
     evidence: list[EvidenceItem] = field(default_factory=list)
 
     def to_ast_error(self) -> ASTError:
-        """转换为现有 BKT / ActionSelector 可消费的 ASTError。"""
+        """
+        Adapts the attribution record into a legacy ASTError consumer format.
+
+        Returns:
+            ASTError: Corresponding legacy shape.
+        """
         return ASTError(
             error_type=self.error_type,
             clause=self.clause,
@@ -69,6 +103,12 @@ class KPAttribution:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """
+        Serializes the attribution record into a dictionary.
+
+        Returns:
+            dict[str, Any]: Dictionary representation.
+        """
         data = asdict(self)
         data["evidence"] = [asdict(item) for item in self.evidence]
         return data
@@ -76,16 +116,35 @@ class KPAttribution:
 
 @dataclass
 class AttributionResult:
-    """阶段 1/2 的完整输出。"""
+    """
+    Aggregated outcome containing the observation data and final attributions.
+
+    Attributes:
+        observation (dict[str, Any]): Raw telemetry gathered by sensors.
+        attributions (list[KPAttribution]): Deduced errors ranked by severity.
+        llm_arbitration_input (dict[str, Any]): Bundled context ready for LLM arbitration.
+    """
 
     observation: dict[str, Any]
     attributions: list[KPAttribution]
     llm_arbitration_input: dict[str, Any]
 
     def to_ast_errors(self) -> list[ASTError]:
+        """
+        Converts all contained attributions into a list of legacy ASTErrors.
+
+        Returns:
+            list[ASTError]: List of legacy shapes.
+        """
         return [item.to_ast_error() for item in self.attributions]
 
     def to_dict(self) -> dict[str, Any]:
+        """
+        Serializes the result payload.
+
+        Returns:
+            dict[str, Any]: Dictionary payload.
+        """
         return {
             "observation": self.observation,
             "attributions": [item.to_dict() for item in self.attributions],
@@ -93,6 +152,7 @@ class AttributionResult:
         }
 
 
+# Metadata dictionary mapping knowledge points to L1/L2 syllabus classification categories
 KP_META: dict[str, dict[str, str]] = {
     "select-basic": {"l1": "KP_BASIC", "l2": "PROJ_COL", "clause": "SELECT"},
     "where": {"l1": "KP_FILTER", "l2": "COMP_VAL", "clause": "WHERE"},
@@ -129,6 +189,7 @@ COMPLEXITY_KPS = {
 
 
 def _parse(sql: str) -> exp.Expression | None:
+    """Parses SQL string into an AST, checking multiple dialects for fallback tolerance."""
     for dialect in ("tsql", "sqlite", "mysql"):
         try:
             parsed = sqlglot.parse_one(sql, dialect=dialect, error_level=ErrorLevel.IGNORE)
@@ -140,18 +201,21 @@ def _parse(sql: str) -> exp.Expression | None:
 
 
 def _nodes(ast: exp.Expression | None, *types: type[exp.Expression]) -> list[exp.Expression]:
+    """Finds all child nodes in the AST matching target node classes."""
     if ast is None:
         return []
     return list(ast.find_all(*types))
 
 
 def _first(ast: exp.Expression | None, node_type: type[exp.Expression]) -> exp.Expression | None:
+    """Finds the first child node in the AST matching a target class."""
     if ast is None:
         return None
     return ast.find(node_type)
 
 
 def _node_sql(node: exp.Expression | None) -> str:
+    """Converts a single AST node back into formatted MySQL query text."""
     if node is None:
         return ""
     try:
@@ -161,6 +225,7 @@ def _node_sql(node: exp.Expression | None) -> str:
 
 
 def _join_sides(ast: exp.Expression | None) -> list[str]:
+    """Resolves join properties (e.g. LEFT, RIGHT, FULL) for all JOIN clauses in query."""
     sides: list[str] = []
     for join in _nodes(ast, exp.Join):
         side = str(join.args.get("side") or join.args.get("kind") or "INNER").upper()
@@ -169,14 +234,17 @@ def _join_sides(ast: exp.Expression | None) -> list[str]:
 
 
 def _has_join_on(ast: exp.Expression | None) -> bool:
+    """Verifies if join nodes include ON join condition arguments."""
     return any(bool(join.args.get("on")) for join in _nodes(ast, exp.Join))
 
 
 def _agg_names(ast: exp.Expression | None) -> set[str]:
+    """Retrieves list of aggregate functions used in query (e.g. COUNT, SUM)."""
     return {type(node).__name__.upper() for node in _nodes(ast, *AGG_NODE_TYPES)}
 
 
 def _select_projection_count(ast: exp.Expression | None) -> int:
+    """Calculates number of columns/expressions projected in select list."""
     select = _first(ast, exp.Select)
     if not isinstance(select, exp.Select):
         return 0
@@ -184,6 +252,7 @@ def _select_projection_count(ast: exp.Expression | None) -> int:
 
 
 def _features(ast: exp.Expression | None) -> dict[str, Any]:
+    """Extracts structural features (clause presence, join count, aggregations) from AST."""
     return {
         "parse_ok": ast is not None,
         "has_select": _first(ast, exp.Select) is not None,
@@ -208,14 +277,17 @@ def _features(ast: exp.Expression | None) -> dict[str, Any]:
 
 
 def _clause_node(ast: exp.Expression | None, node_type: type[exp.Expression]) -> exp.Expression | None:
+    """Wraps AST single node search calls."""
     return _first(ast, node_type)
 
 
 def _node_has(node: exp.Expression | None, *types: type[exp.Expression]) -> bool:
+    """Checks if a given sub-tree contains target AST nodes."""
     return bool(node and (isinstance(node, types) or any(True for _ in node.find_all(*types))))
 
 
 def _node_items_sql(node: exp.Expression | None, *types: type[exp.Expression]) -> list[str]:
+    """Serializes all matching child nodes inside sub-tree back to list of SQL strings."""
     if node is None:
         return []
     items: list[exp.Expression] = []
@@ -233,6 +305,7 @@ def _node_items_sql(node: exp.Expression | None, *types: type[exp.Expression]) -
 
 
 def _comparison_locations(ast: exp.Expression | None) -> dict[str, list[str]]:
+    """Maps comparison predicates (e.g. =, LIKE) to their containing SQL clauses."""
     if ast is None:
         return {}
     locations: dict[str, list[str]] = {}
@@ -258,6 +331,7 @@ def _comparison_locations(ast: exp.Expression | None) -> dict[str, list[str]]:
 
 
 def _aggregate_locations(ast: exp.Expression | None) -> dict[str, list[str]]:
+    """Maps aggregate function occurrences to their containing SQL clauses."""
     if ast is None:
         return {}
     locations: dict[str, list[str]] = {}
@@ -280,6 +354,7 @@ def _aggregate_locations(ast: exp.Expression | None) -> dict[str, list[str]]:
 
 
 def _structural_kps(features: dict[str, Any]) -> list[str]:
+    """Infers taxonomy knowledge point IDs covered based on structural AST features."""
     kps = ["select-basic"] if features.get("has_select") else []
     for kp_id, key in [
         ("where", "has_where"),
@@ -308,6 +383,7 @@ def _structural_kps(features: dict[str, Any]) -> list[str]:
 
 
 def _clause_sql_map(ast: exp.Expression | None) -> dict[str, str]:
+    """Reconstructs text representation segments for each clause in the parsed query."""
     if ast is None:
         return {}
     clauses = {
@@ -336,6 +412,7 @@ def _kp_profile(
     features: dict[str, Any],
     question_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Constructs a profile summary detailing targeted or observed query knowledge points."""
     question_context = question_context or {}
     aggregate_locations = _aggregate_locations(ast)
     illegal_aggregate_locations = [name for name in aggregate_locations if name == "WHERE"]
@@ -361,8 +438,11 @@ def _add_misalignment_evidence(
     judge: dict[str, Any],
     is_correct: bool,
 ) -> list[dict[str, Any]]:
-    """Bidirectional Target KP vs Observed KP comparison."""
+    """
+    Performs bidirectional comparison between target KP requirements and student's query.
 
+    Logs diagnostic evidence if requirements are not met or if mismatches exist.
+    """
     misalignments: list[dict[str, Any]] = []
     target_kps = set(intended.get("structural_kps") or [])
     observed_kps = set(observed.get("structural_kps") or [])
@@ -392,6 +472,7 @@ def _add_misalignment_evidence(
         })
         builder.add(kp_id, error_type or category.lower(), source, signal, detail, weight)
 
+    # 1. Check for expected structural knowledge points that are missing in student query
     for kp_id in sorted(target_kps - observed_kps):
         if kp_id == "select-basic":
             continue
@@ -405,6 +486,7 @@ def _add_misalignment_evidence(
             error_type="lacking",
         )
 
+    # 2. Check for clause confusion (e.g. placing WHERE filtering logic inside HAVING)
     intended_cmp = intended.get("comparison_locations") or {}
     observed_cmp = observed.get("comparison_locations") or {}
     for src, dst, kp_id in [("HAVING", "WHERE", "having"), ("WHERE", "HAVING", "where")]:
@@ -420,6 +502,7 @@ def _add_misalignment_evidence(
                 clause=f"{src}/{dst}",
             )
 
+    # 3. Check for aggregate functions placed inside WHERE clauses (invalid SQL syntax)
     if intended.get("features", {}).get("has_agg") and observed.get("illegal_aggregate_locations"):
         add(
             category="Confusion",
@@ -431,6 +514,7 @@ def _add_misalignment_evidence(
             error_type="confusion",
         )
 
+    # 4. Check for JOIN constructs missing ON join predicates
     if observed.get("features", {}).get("join_count", 0) > 0 and not observed.get("features", {}).get("has_join_on"):
         add(
             category="Confusion",
@@ -442,6 +526,7 @@ def _add_misalignment_evidence(
             error_type="confusion",
         )
 
+    # 5. Check for structural mismatches (such as mismatching ORDER BY or GROUP BY values)
     intended_clauses = intended.get("clause_sql") or {}
     observed_clauses = observed.get("clause_sql") or {}
     clause_to_kp = {
@@ -465,6 +550,7 @@ def _add_misalignment_evidence(
                 clause=clause,
             )
 
+    # 6. Check for equivalence validation failures on generated counter-example test data
     generated_equiv = judge.get("is_equivalent_on_generated_data")
     if is_correct and generated_equiv is False:
         for kp_id in sorted((target_kps & observed_kps) or target_kps or {"where"}):
@@ -478,6 +564,7 @@ def _add_misalignment_evidence(
                 error_type="generality",
             )
 
+    # 7. Check for redundant complexities (e.g. student used an unnecessary subquery)
     extra_complexity = sorted(set(observed.get("complexity_kps") or []) - set(intended.get("complexity_kps") or []))
     if is_correct and extra_complexity:
         for kp_id in extra_complexity:
@@ -495,6 +582,7 @@ def _add_misalignment_evidence(
 
 
 def _judge_features(judge_detail: dict[str, Any] | None, error_message: str | None) -> dict[str, Any]:
+    """Extracts execution and sandbox properties from the judge output metadata."""
     detail = judge_detail or {}
     comparison = detail.get("comparison") or {}
     return {
@@ -513,10 +601,17 @@ def _judge_features(judge_detail: dict[str, Any] | None, error_message: str | No
 
 
 class _AttributionBuilder:
+    """
+    Builder utility consolidating multiple evidence records into discrete KP attributions.
+
+    Keeps track of severity and confidence updates for each BKT knowledge point dimensions.
+    """
+
     def __init__(self) -> None:
         self._items: dict[str, KPAttribution] = {}
 
     def add(self, kp_id: str, error_type: str, source: str, signal: str, detail: str, weight: float) -> None:
+        """Adds or updates diagnostic evidence for a specific knowledge point ID."""
         meta = KP_META.get(kp_id, {"l1": "KP_BASIC", "l2": kp_id.upper(), "clause": kp_id.upper()})
         item = self._items.get(kp_id)
         evidence = EvidenceItem(source=source, signal=signal, detail=detail, weight=round(weight, 3))
@@ -535,18 +630,22 @@ class _AttributionBuilder:
             self._items[kp_id] = item
         else:
             item.evidence.append(evidence)
+            # Take the maximum severity seen among all related error signals
             item.severity = round(min(1.0, max(item.severity, weight)), 3)
+            # Scale attribution confidence incrementally as more evidence reports arrive
             item.confidence = round(min(1.0, item.confidence + weight * 0.18), 3)
             if weight >= item.severity:
                 item.detail = detail
 
     def build(self) -> list[KPAttribution]:
+        """Finalizes the attribution records, sorting by severity and confidence levels."""
         items = list(self._items.values())
         items.sort(key=lambda item: (item.severity, item.confidence, len(item.evidence)), reverse=True)
         return items
 
 
 def _add_ast_evidence(builder: _AttributionBuilder, std: dict[str, Any], stu: dict[str, Any]) -> None:
+    """Infers missing AST constructs based on differences between student and reference features."""
     expected_flags = [
         ("where", "has_where", "标准答案需要 WHERE 过滤，但学生 SQL 缺少过滤条件"),
         ("order-by", "has_order", "标准答案需要 ORDER BY 排序，但学生 SQL 缺少排序结构"),
@@ -584,10 +683,12 @@ def _add_data_evidence(
     std: dict[str, Any],
     stu: dict[str, Any],
 ) -> None:
+    """Infers error causes based on sandbox execution result mismatches (e.g. row/column counts)."""
     message = str(judge.get("error_message") or "")
     if not message:
         return
 
+    # Check for row count issues, pointing to filter conditions, joins or group/having boundaries
     if "行数" in message:
         if std["has_where"]:
             builder.add("where", "data_mismatch", "E_data", "row_count", "结果行数不匹配，优先怀疑过滤条件边界、比较符或逻辑组合", 0.72)
@@ -601,15 +702,18 @@ def _add_data_evidence(
         if std["has_having"]:
             builder.add("having", "data_mismatch", "E_data", "row_count_having", "结果行数不匹配且题目涉及 HAVING，可能分组后筛选条件错误", 0.72)
 
+    # Check for column schema problems or missing required aliases
     if "列结构" in message or "列数" in message or "缺少列" in message or "多余列" in message:
         builder.add("select-basic", "data_mismatch", "E_data", "column_shape", "结果列结构不匹配，可能 SELECT 投影列错误", 0.76)
         if judge.get("alias_enforced"):
             builder.add("alias", "data_mismatch", "E_data", "alias_required", "题目要求输出列名/别名，学生 SQL 的别名结构不一致", 0.72)
 
+    # Check for order mismatches, indicating ORDER BY issues
     ordered_compare = bool(judge.get("ordered_compare"))
     if ("ORDER BY" in message or (ordered_compare and "顺序" in message)) and (std["has_order"] or stu["has_order"] or ordered_compare):
         builder.add("order-by", "data_mismatch", "E_data", "row_order", "结果顺序不一致，可能 ORDER BY 字段或 ASC/DESC 方向错误", 0.78)
 
+    # Check for cell values mismatch, pointing to logic components like filter boundaries, subqueries, etc.
     if "结果数据不匹配" in message or "不一致" in message:
         if std["has_where"]:
             builder.add("where", "data_mismatch", "E_data", "value_mismatch_filter", "结果值不匹配，且题目包含 WHERE，可能过滤语义错误", 0.58)
@@ -625,6 +729,7 @@ def _add_mutation_evidence(
     student_ast: exp.Expression | None,
     mutation_detail: dict[str, Any] | None = None,
 ) -> None:
+    """Infers error attributions using clause mutation/replacement logic logs."""
     if mutation_detail:
         for test in mutation_detail.get("tests") or []:
             kp_id = test.get("knowledge_point_id")
@@ -632,6 +737,7 @@ def _add_mutation_evidence(
                 continue
             clause = test.get("clause") or kp_id
             action = test.get("action") or "mutation"
+            # If replacing this specific student clause with the standard one passes the sandbox checks
             if test.get("fixed_by_replacement"):
                 builder.add(
                     kp_id,
@@ -660,6 +766,7 @@ def _add_mutation_evidence(
                     0.48,
                 )
 
+    # Perform structural query component value diffs
     clause_map = [
         ("where", exp.Where, "WHERE 子句与标准答案不一致，替换该子句是优先隔离方向"),
         ("group-by", exp.Group, "GROUP BY 子句与标准答案不一致，分组粒度是优先隔离方向"),
@@ -698,7 +805,21 @@ def evidence_weights_from_observation(
     question_context: dict[str, Any] | None = None,
     mutation_detail: dict[str, Any] | None = None,
 ) -> AttributionResult:
-    """从观察证据中融合 KP 错因权重。"""
+    """
+    Fuses multiple diagnostic evidence elements into ranked Knowledge Point attributions.
+
+    Args:
+        student_sql (str): SQL statement submitted by the student.
+        answer_sql (str): Reference standard solution SQL.
+        is_correct (bool): Flag indicating execution correctness status.
+        error_message (str | None, optional): Plain execution error string if failed.
+        judge_detail (dict[str, Any] | None, optional): Standardized judge output logs.
+        question_context (dict[str, Any] | None, optional): Metadata tags for the question.
+        mutation_detail (dict[str, Any] | None, optional): Detail metrics from mutation runs.
+
+    Returns:
+        AttributionResult: Packed diagnostic result structure.
+    """
     standard_ast = _parse(answer_sql)
     student_ast = _parse(student_sql)
     std_features = _features(standard_ast)
@@ -707,6 +828,7 @@ def evidence_weights_from_observation(
     intended_kp = _kp_profile(role="intended", ast=standard_ast, features=std_features, question_context=question_context)
     observed_kp = _kp_profile(role="observed", ast=student_ast, features=stu_features)
 
+    # Structure sensory telemetry dict
     observation = {
         "E_AST": {
             "student_parse_ok": stu_features["parse_ok"],
@@ -726,6 +848,8 @@ def evidence_weights_from_observation(
 
     builder = _AttributionBuilder()
     misalignments: list[dict[str, Any]] = []
+    
+    # Check if student SQL query is syntactically invalid
     if student_ast is None:
         builder.add("select-basic", "syntax_fatal", "E_AST", "parse_error", "学生 SQL 无法解析为合法查询语法，先归因到 SELECT 基础结构", 1.0)
     else:
@@ -736,6 +860,8 @@ def evidence_weights_from_observation(
             _add_mutation_evidence(builder, standard_ast, student_ast, mutation_detail)
 
     attributions = builder.build()
+    
+    # Formulate bundle input context for upstream LLM arbitration
     llm_input = {
         "question": (question_context or {}).get("q"),
         "question_context": question_context or {},

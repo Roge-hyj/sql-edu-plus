@@ -1,17 +1,11 @@
 """
-AST 结构差异分析（f_AST）
+AST Difference Analyzer (f_AST).
 
-目标：
-- 在不执行 SQL 的前提下，从“结构层面”解释学生 SQL 为什么错（或可能等价）。
-- 输出一组结构化错误向量（ASTError 列表），供后续的 BKT 更新、控制策略计算、提示动作选择使用。
-
-设计取舍：
-- 仅靠 AST 规则会产生“等价写法”的假阳性（例如：LEFT JOIN + IS NULL vs NOT EXISTS）。
-- 因此这里引入一次 *轻量* LLM 过滤：只对“结构差异清单”做真假错误判定，避免把风格差异当成能力缺陷。
-- 如果 LLM 调用失败，会退回纯 AST 结果（偏保守，但可用）。
-
-注意：
-- 这个模块刻意不 import `core.ai_service`，避免与提示生成出现循环依赖。
+This module parses and analyzes SQL queries at a structural syntax level using sqlglot:
+- Extracts structural representations (AST) from student and standard solution SQL queries.
+- Compares AST nodes to detect missing clauses or structural mismatches.
+- Resolves syntax equivalencies (e.g. JOIN variations, IN vs EXISTS) using a lightweight LLM filter.
+- Outputs structured error vectors (ASTError instances) utilized in downstream BKT updates and hints generation.
 """
 
 import traceback
@@ -29,18 +23,27 @@ _settings = get_settings()
 
 @dataclass
 class ASTError:
-    r"""
-    【数据结构：结构化错误向量】
-    记录学生 SQL 中确实缺少或错误的数学结构节点，作为控制系统中的观测值。
-    数学定义：\mathbf{E}_t = [\min \sum_{i \in \text{path}_1} w(e_i), \dots, \min \sum_{i \in \text{path}_n} w(e_i)]^T
     """
-    error_type: str          # 错误类型分类 (如: "missing_clause")
-    clause: str              # 该错误的物理表征 (如: "GROUP BY", "JOIN")
-    knowledge_point_id: str  # 对应数据库里用于 BKT 追踪的特定知识点 ID (如 "group-by")
-    severity: float          # 权重/严重度 0.0-1.0，权重要大则下放到 A* 动作选择的优先级更高
-    detail: str              # 通俗易懂的说明，用来输入给大模型当系统提示的根据
+    Structured syntax error representation.
 
-# 用于把知识点 id 映射成更直观的子句名（用于提示与动作选择）
+    Acts as an observation vector consumed by the BKT and pedagogical controller.
+    Formulaic: E_t = [min sum w(e_i), ..., min sum w(e_n)]^T
+
+    Attributes:
+        error_type (str): Category classification of the error (e.g., "missing_clause").
+        clause (str): Physical SQL clause identifier (e.g., "GROUP BY").
+        knowledge_point_id (str): BKT taxonomy identifier (e.g., "group-by").
+        severity (float): Error severity rating scaled [0.0, 1.0] for pedagogical prioritizing.
+        detail (str): Plain-text feedback description.
+    """
+    error_type: str          # Error classification (e.g. "missing_clause")
+    clause: str              # Affected SQL construct name (e.g. "GROUP BY", "JOIN")
+    knowledge_point_id: str  # Matching taxonomy point ID in knowledge base
+    severity: float          # Severity weight for tutoring system prioritization
+    detail: str              # Explanatory text description
+
+
+# Maps knowledge point IDs to user-friendly clause representations
 KP_CLAUSE_NAME: Dict[str, str] = {
     "select-basic": "SELECT",
     "where": "WHERE",
@@ -62,15 +65,29 @@ KP_CLAUSE_NAME: Dict[str, str] = {
 }
 
 def _get_client() -> AsyncOpenAI:
-    # 这里自己构建 OpenAI 客户端，避免与 core.ai_service 相互 import 导致循环导入。
-    # 只用于“等价过滤”这一小步，不负责生成对学生的最终提示话术。
+    """
+    Creates an isolated OpenAI client specifically for the equivalence filter.
+
+    Done to prevent circular import dependencies with core.ai_service.
+
+    Returns:
+        AsyncOpenAI: OpenAI client wrapper instance.
+    """
     return AsyncOpenAI(
         api_key=_settings.AI_API_KEY,
         base_url=_settings.AI_BASE_URL,
     )
 
 def _as_nodes(res: Any) -> List[exp.Expression]:
-    """把 extractor 的返回值统一成 Expression list，用于正确的 bool/len 判断。"""
+    """
+    Coerces query extractor output into a standard list of sqlglot Expressions.
+
+    Args:
+        res (Any): Extractor output, which can be an expression, a list, or None.
+
+    Returns:
+        List[exp.Expression]: Standardized flat list of AST nodes.
+    """
     if res is None:
         return []
     if isinstance(res, exp.Expression):
@@ -85,8 +102,9 @@ def _as_nodes(res: Any) -> List[exp.Expression]:
         return out
     return []
 
-# 【规则引擎】将知识点 ID 映射为对应的 SQLGlot 语法树节点的查询规则
-# 这里定义了如何依靠树匹配找到学生到底缺了什么节点
+
+# Mapping dictionary linking knowledge point IDs to AST query extractors (lambda search calls)
+# Utilizes sqlglot's tree exploration methods (find, find_all) to scan nodes
 CLAUSE_EXTRACTORS = {
     "select-basic":       lambda ast: ast.find(exp.Select),
     "where":              lambda ast: ast.find(exp.Where),
@@ -109,13 +127,16 @@ CLAUSE_EXTRACTORS = {
 
 def infer_knowledge_points_from_sql(sql: str, dialect: str = "mysql") -> List[str]:
     """
-    【推断题目知识覆盖库】
-    解析题目的标准答案，并基于其本身的树节点逆向推导出该题考核了哪些知识。
-    无需修改现存数据库手动录入知识关联表，极大方便教学题库的更新。
+    Parses a reference SQL query and infers which SQL knowledge points it covers.
 
-    返回值：
-    - 若解析成功：返回该题“可能覆盖”的知识点 id 列表（与 CLAUSE_EXTRACTORS 对齐）
-    - 若解析失败：退回 ["select-basic"]，保证下游 BKT 至少有一个维度可更新
+    Allows the system to automatically tag question requirements dynamically.
+
+    Args:
+        sql (str): SQL statement to parse.
+        dialect (str, optional): Target SQL dialect. Defaults to "mysql".
+
+    Returns:
+        List[str]: List of covered knowledge point IDs.
     """
     try:
         ast = sqlglot.parse_one(sql, dialect=dialect, error_level=ErrorLevel.WARN)
@@ -125,47 +146,48 @@ def infer_knowledge_points_from_sql(sql: str, dialect: str = "mysql") -> List[st
     kps = []
     for kp_id, extractor in CLAUSE_EXTRACTORS.items():
         nodes = _as_nodes(extractor(ast))
-        # 如果能在树中抽取到节点，说明含有此知识点考查
         if nodes:
             kps.append(kp_id)
 
     return kps if kps else ["select-basic"]
 
 def _extract_ast_differences(student_ast: exp.Expression, answer_ast: exp.Expression) -> List[ASTError]:
-    r"""
-    【算法 1 步：粗粒度的 AST 节点集对比】
-    提取 AST 语法树关键节点，对比标答树和学生树的子节点差距。
-    此部相当于 Tree Edit Distance 的功能化落地，产出初始可能错位的节点集 \mathbf{E}'_t。
+    """
+    Extracts structural discrepancies between the student and standard solution ASTs.
 
-    重要：
-    - 这里的差异是“结构级”的，不等同于“执行结果错”。
-    - 输出只是候选差异，后续会经过 _llm_equivalence_filter 清洗降低误报。
+    Acts as a lightweight, rule-based Tree Edit Distance proxy to build a candidate list.
+
+    Args:
+        student_ast (exp.Expression): Student's parsed SQL syntax tree.
+        answer_ast (exp.Expression): Reference solution's parsed SQL syntax tree.
+
+    Returns:
+        List[ASTError]: Extracted candidate AST errors.
     """
     differences = []
 
     for kp_id, extractor in CLAUSE_EXTRACTORS.items():
-        # 分别抽取学生代码与标准代码里的特定维度语法节点
         student_nodes = _as_nodes(extractor(student_ast))
         answer_nodes = _as_nodes(extractor(answer_ast))
         clause_name = KP_CLAUSE_NAME.get(kp_id, kp_id.upper())
 
-        # 1. 完全缺失类错误 (标答有的知识结构，学生完全没写)
+        # 1. Detect completely missing clauses
         if answer_nodes and not student_nodes:
             differences.append(ASTError(
                 error_type="missing_clause",
                 clause=clause_name,
                 knowledge_point_id=kp_id,
-                severity=1.0, # 完全缺失惩罚权重高
+                severity=1.0,
                 detail=f"预期使用了 {kp_id} 相关的结构，但学生代码完全缺失该节点"
             ))
 
-        # 2. 局部数量不足/嵌套深度不足错误 (如：应连接3张表，只连接了2张)
+        # 2. Detect missing occurrences (e.g. joined tables count is less than expected)
         elif answer_nodes and student_nodes and len(student_nodes) < len(answer_nodes):
              differences.append(ASTError(
                 error_type="missing_partial",
                 clause=clause_name,
                 knowledge_point_id=kp_id,
-                severity=0.6, # 部分缺失权重偏中等
+                severity=0.6,
                 detail=f"预期需要至少 {len(answer_nodes)} 处 {kp_id} 结构，学生代码数量不足"
             ))
 
@@ -177,15 +199,18 @@ async def _llm_equivalence_filter(
     raw_differences: List[ASTError]
 ) -> List[ASTError]:
     """
-    【算法 2 步：LLM 等量语意推想兜底】
-    纯编译器级别的 AST 会因为细微拼法(如 LEFT JOIN 与 RIGHT JOIN对调、IN vs EXISTS)
-    报出极大差距，这对因材施教极不公平。
-    我们会将第一步算出的结构级差异清单，再次投入一个快速廉价的 LLM 模型过滤逻辑。
-    剔除假阳性的误判定。
+    Filters out false-positive structural warnings (e.g. JOIN ordering) using an LLM.
 
-    失败策略：
-    - LLM 异常（网络/配额/解析失败）时直接返回 raw_differences，
-      这样系统仍可继续运行，只是会更“保守”（多提示一些可能不存在的结构点）。
+    Ensures semantic equivalents (such as subquery replacements or join directions)
+    are not falsely counted as capability flaws during scoring or BKT updates.
+
+    Args:
+        student_sql (str): Raw string of student's query.
+        answer_sql (str): Raw string of standard solution.
+        raw_differences (List[ASTError]): Initial candidates from AST comparisons.
+
+    Returns:
+        List[ASTError]: Filtered array of true structural error findings.
     """
     if not raw_differences:
         return []
@@ -200,7 +225,7 @@ async def _llm_equivalence_filter(
 
     system_prompt = (
         "你是一个极其理性的 SQL 语法等价逻辑判别裁判。\n"
-        "我会提供标准答案与学生的写法，以及一层简单抽象语法树比较器(AST)提出的若干个『结构变动预警』节点。\n"
+        "我会提供标准答案与学生的写法，以及一层简单语法树比较器(AST)提出的若干个『结构变动预警』节点。\n"
         "【任务要求】：\n"
         "不要看错字这种小错。只要学生的写法能够起到和标答一样的业务目的（如用 LEFT JOIN 实现标答的 NOT EXISTS需求），"
         "或者只是顺序写反但不影响数据库实际提取过程（如表的关联先后不同但结果必同），你需要将其判定为 'false_positive' (不是真错误)。\n"
@@ -225,37 +250,36 @@ async def _llm_equivalence_filter(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.1,  # 采用低温确保推理稳定性
+            temperature=0.1,  # Low temperature for highly deterministic reasoning
         )
 
         content = response.choices[0].message.content.strip()
-        # 兼容大模型习惯包围的 Markdown 标识进行字符串裸取
+        # Parse output and remove possible markdown tags wrap
         if content.startswith('```'):
             lines = content.split('\n')
             if len(lines) > 2:
                 content = '\n'.join(lines[1:-1])
 
-        # 解析 JSON 若被多套了一层 object 的自动平铺
+        # Safely handle JSON root nesting variations
         result_data = json.loads(content)
         if isinstance(result_data, dict) and len(result_data.keys()) == 1:
             result_data = list(result_data.values())[0]
 
         filtered_diffs = []
         for diff in raw_differences:
-            # 默认保守设定：如果分析挂了，这个算作真实错误
             is_real = True
             for validation in result_data:
                 if validation.get("kp_id") == diff.knowledge_point_id:
                     is_real = validation.get("is_real_error", True)
                     break
 
-            # 仅仅收放 LLM 判实了的部分存入最终要返回的差异向量
             if is_real:
                 filtered_diffs.append(diff)
 
         return filtered_diffs
 
     except Exception as e:
+        # Fallback to conservative AST reports if the AI service fails
         print(f"LLM 语意判等失败，回退纯粹 AST 比对: {e}")
         traceback.print_exc()
         return raw_differences
@@ -266,16 +290,20 @@ async def compute_error_vector(
     answer_sql: str,
     dialect: str = "mysql",
 ) -> List[ASTError]:
-    r"""
-    【总管式函数 $f_{\text{AST}}(S, A) \\to \\mathbf{E}_t$ 】
+    """
+    Orchestrates the complete AST analysis workflow.
 
-    1. 解析源和答案文本进入语法树格式。
-    2. 计算获得原始报错集 \mathbf{E}'_t。
-    3. LLM 清洗后抛出极高精度的确切错失节点向量 \mathbf{E}_t 提供给下层的贝叶斯追踪与提示组装使用。
+    1. Parses queries into structured syntax trees.
+    2. Runs structural check rules to find raw discrepancies.
+    3. Triggers the LLM validation to filter false alarms.
 
-    输入输出约定：
-    - 返回 List[ASTError]；为空代表“结构上未发现高置信度缺陷”（不代表一定执行正确）
-    - 若学生 SQL 语法严重崩溃：返回一个 syntax_fatal 的 ASTError，促使提示系统从基础引导
+    Args:
+        student_sql (str): SQL query submitted by the student.
+        answer_sql (str): Standard reference solution SQL query.
+        dialect (str, optional): Parsing dialect. Defaults to "mysql".
+
+    Returns:
+        List[ASTError]: List of verified structural discrepancies.
     """
     try:
         answer_ast = sqlglot.parse_one(answer_sql, dialect=dialect, error_level=ErrorLevel.WARN)
@@ -286,8 +314,7 @@ async def compute_error_vector(
     try:
         student_ast = sqlglot.parse_one(student_sql, dialect=dialect, error_level=ErrorLevel.WARN)
     except Exception as e:
-        # 学生写的代码崩溃严重到语法树都无法组装
-        # 返还一个全盘报废类型的 ASTError 向量，直接要求教学系统从最基础从头教
+        # Fall back to a fatal syntax error type if parser fails completely
         return [ASTError(
             error_type="syntax_fatal",
             clause="SYNTAX",
@@ -296,10 +323,7 @@ async def compute_error_vector(
             detail="基础 SQL 树语法严重崩盘，存在未闭合的括号或拼错的主关键字片段。"
         )]
 
-    # 1. 精简的粗提取过程
     raw_differences = _extract_ast_differences(student_ast, answer_ast)
-
-    # 2. 清洗过程
     verified_differences = await _llm_equivalence_filter(student_sql, answer_sql, raw_differences)
 
     return verified_differences

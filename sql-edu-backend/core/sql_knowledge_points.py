@@ -1,27 +1,41 @@
-"""SQL 从入门到精通的知识点分类，供教师端按知识点生成题目。
+"""
+SQL Knowledge Point Taxonomy.
 
-支持多语言字段（name_i18n/level_i18n/description_i18n），前端可按 ai_language 选择显示。
+This module defines the classification, levels (Beginner, Intermediate, Advanced), and
+localization mapping (Simplified Chinese, English, Traditional Chinese) for all SQL
+knowledge points. These points are referenced across the system for auto-generated exercises
+and Bayesian Knowledge Tracing (BKT) student models.
 """
 
 from typing import TypedDict
 
 
 class KnowledgePoint(TypedDict):
+    """
+    TypedDict schema representing a standard SQL knowledge point.
+
+    Attributes:
+        id (str): Unique identifier for the knowledge point.
+        name (str): Chinese name of the knowledge point.
+        level (str): Category level: "入门" (Beginner), "进阶" (Intermediate), or "精通" (Advanced).
+        description (str): Short description of covered SQL features.
+        name_i18n (dict[str, str]): Multi-language mapping for the name (zh-CN, en, zh-TW).
+        level_i18n (dict[str, str]): Multi-language mapping for the level.
+        description_i18n (dict[str, str]): Multi-language mapping for the description.
+    """
     id: str
     name: str
     level: str  # 入门 / 进阶 / 精通
     description: str
-    # 多语言（可选显示；默认字段仍为中文，便于兼容旧前端）
+    # Multi-language support (Chinese, English, and Traditional Chinese)
     name_i18n: dict[str, str]  # keys: zh-CN / en / zh-TW
     level_i18n: dict[str, str]
     description_i18n: dict[str, str]
 
 
-# 入门：基础查询与筛选
-# 进阶：聚合、多表、子查询
-# 精通：窗口函数、CTE、高级技巧
+# Defined taxonomy list categorized by complexity
 SQL_KNOWLEDGE_POINTS: list[KnowledgePoint] = [
-    # ---------- 入门 ----------
+    # ---------- 入门 (Beginner) ----------
     {
         "id": "select-basic",
         "name": "SELECT 基础查询",
@@ -113,7 +127,7 @@ SQL_KNOWLEDGE_POINTS: list[KnowledgePoint] = [
             "zh-TW": "加減乘除、CONCAT、LENGTH、UPPER/LOWER、日期函數等",
         },
     },
-    # ---------- 进阶 ----------
+    # ---------- 进阶 (Intermediate) ----------
     {
         "id": "agg-count",
         "name": "聚合函数 COUNT/SUM/AVG",
@@ -257,7 +271,7 @@ SQL_KNOWLEDGE_POINTS: list[KnowledgePoint] = [
             "zh-TW": "CASE WHEN THEN ELSE END、條件分支",
         },
     },
-    # ---------- 精通 ----------
+    # ---------- 精通 (Advanced) ----------
     {
         "id": "window-row-number",
         "name": "窗口函数 ROW_NUMBER/RANK",
@@ -325,17 +339,31 @@ SQL_KNOWLEDGE_POINTS: list[KnowledgePoint] = [
     },
 ]
 
+# Order levels sequentially for sorting logic
 LEVEL_ORDER = ("入门", "进阶", "精通")
 
 
 def get_all_knowledge_points() -> list[KnowledgePoint]:
-    """返回所有知识点（按入门→进阶→精通、同级别按列表顺序）。"""
+    """
+    Retrieves all registered knowledge points sorted by levels and then list order.
+
+    Returns:
+        list[KnowledgePoint]: Sorted list of knowledge point records.
+    """
     order = {l: i for i, l in enumerate(LEVEL_ORDER)}
     return sorted(SQL_KNOWLEDGE_POINTS, key=lambda x: (order.get(x["level"], 99), x["id"]))
 
 
 def get_knowledge_point_by_id(point_id: str) -> KnowledgePoint | None:
-    """根据 id 返回单个知识点。"""
+    """
+    Locates and returns a single knowledge point by its ID.
+
+    Args:
+        point_id (str): The unique ID of the target knowledge point.
+
+    Returns:
+        KnowledgePoint | None: The matching KnowledgePoint record if found, else None.
+    """
     for p in SQL_KNOWLEDGE_POINTS:
         if p["id"] == point_id:
             return p
