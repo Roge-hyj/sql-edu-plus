@@ -19,6 +19,9 @@ class Question(Base):
     content_zh_tw: Mapped[str | None] = mapped_column(Text, nullable=True)
     difficulty: Mapped[int] = mapped_column(Integer, default=1, nullable=False)  # 教师设定难度 1～10，作为基础
     correct_sql: Mapped[str] = mapped_column(Text, nullable=False)
+    # 标准答案所属 SQL 方言。判题执行器按该字段选择原生引擎或兼容层。
+    sql_dialect: Mapped[str] = mapped_column(String(20), default="mysql", nullable=False)
+    engine_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # 限时挑战可选时长（秒），为空则可由前端根据难度推算
     time_limit_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 表结构预览（JSON：tables[{name,columns,rows}]），供学生查看列名与示例数据

@@ -1,0 +1,3190 @@
+{
+  "summary": {
+    "generated_at": "2026-07-23T14:10:59.129985+00:00",
+    "total": 42,
+    "buckets": {
+      "supported": 40,
+      "known_gap": 2
+    },
+    "category_buckets": {
+      "Aggregate": {
+        "supported": 1
+      },
+      "CASE": {
+        "supported": 1
+      },
+      "CTE": {
+        "supported": 1
+      },
+      "Comparison": {
+        "supported": 3
+      },
+      "Correlated Subquery": {
+        "supported": 1
+      },
+      "DISTINCT": {
+        "supported": 2
+      },
+      "Dialect Boundary": {
+        "known_gap": 2
+      },
+      "GROUP BY": {
+        "supported": 2
+      },
+      "HAVING": {
+        "supported": 1
+      },
+      "IN/BETWEEN/LIKE": {
+        "supported": 3
+      },
+      "JOIN": {
+        "supported": 2
+      },
+      "JOIN ON": {
+        "supported": 2
+      },
+      "LIMIT/OFFSET": {
+        "supported": 2
+      },
+      "Logic": {
+        "supported": 2
+      },
+      "NULL": {
+        "supported": 2
+      },
+      "ORDER BY": {
+        "supported": 2
+      },
+      "Recursive CTE": {
+        "supported": 1
+      },
+      "SELECT": {
+        "supported": 4
+      },
+      "Set Operation": {
+        "supported": 2
+      },
+      "Subquery": {
+        "supported": 2
+      },
+      "WHERE": {
+        "supported": 2
+      },
+      "Window": {
+        "supported": 2
+      }
+    },
+    "ir_to_ast_category_coverage": [
+      {
+        "category": "Aggregate",
+        "ir_supported_cases": 2,
+        "ir_known_gap_cases": 1,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 1,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "CASE",
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 1,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "CTE",
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 1,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "Comparison",
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 3,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "Correlated Subquery",
+        "ir_supported_cases": 2,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 1,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "DISTINCT",
+        "ir_supported_cases": 2,
+        "ir_known_gap_cases": 1,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "Dialect Boundary",
+        "ir_supported_cases": 0,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 4,
+        "ast_supported_cases": 0,
+        "ast_known_gap_cases": 2,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_known_gap"
+      },
+      {
+        "category": "GROUP BY",
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 1,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "HAVING",
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 1,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "IN/BETWEEN/LIKE",
+        "ir_supported_cases": 5,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 3,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "JOIN",
+        "ir_supported_cases": 5,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "JOIN ON",
+        "ir_supported_cases": 4,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "LIMIT/OFFSET",
+        "ir_supported_cases": 4,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "Logic",
+        "ir_supported_cases": 2,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "NULL",
+        "ir_supported_cases": 2,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "ORDER BY",
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "Recursive CTE",
+        "ir_supported_cases": 1,
+        "ir_known_gap_cases": 1,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 1,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "SELECT",
+        "ir_supported_cases": 6,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 4,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "Set Operation",
+        "ir_supported_cases": 4,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "Subquery",
+        "ir_supported_cases": 5,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "WHERE",
+        "ir_supported_cases": 2,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      },
+      {
+        "category": "Window",
+        "ir_supported_cases": 4,
+        "ir_known_gap_cases": 0,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 2,
+        "ast_known_gap_cases": 0,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
+      }
+    ],
+    "support_rate": 0.9523809523809523,
+    "unexpected_failure_count": 0
+  },
+  "results": [
+    {
+      "id": "select_column_dropped",
+      "category": "SELECT",
+      "standard": "SELECT name, age FROM student",
+      "student": "SELECT name FROM student",
+      "expected_clauses": [
+        "SELECT"
+      ],
+      "expected_diff_types": [
+        "column_dropped"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "column_dropped",
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "select-basic"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "name, age",
+          "student_sql": "name",
+          "extra": {
+            "standard_sql": "name, age",
+            "student_sql": "name"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "age",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "age",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "age",
+            "student_sql": "",
+            "position": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "select_column_added",
+      "category": "SELECT",
+      "standard": "SELECT name FROM student",
+      "student": "SELECT name, age FROM student",
+      "expected_clauses": [
+        "SELECT"
+      ],
+      "expected_diff_types": [
+        "column_added"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "column_added",
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "select-basic"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "name",
+          "student_sql": "name, age",
+          "extra": {
+            "standard_sql": "name",
+            "student_sql": "name, age"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_added",
+          "table": null,
+          "column": "age",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "age",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "age",
+            "position": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "select_expression_changed",
+      "category": "SELECT",
+      "standard": "SELECT salary * 1.1 AS adjusted FROM instructor",
+      "student": "SELECT salary AS adjusted FROM instructor",
+      "expected_clauses": [
+        "SELECT"
+      ],
+      "expected_diff_types": [
+        "projection_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 3,
+      "actual_clauses": [
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "column_added",
+        "column_dropped",
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "select-basic"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "salary * 1.1 AS adjusted",
+          "student_sql": "salary AS adjusted",
+          "extra": {
+            "standard_sql": "salary * 1.1 AS adjusted",
+            "student_sql": "salary AS adjusted"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "salary",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "salary * 1.1 AS adjusted",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "salary * 1.1 AS adjusted",
+            "student_sql": "",
+            "position": 0
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_added",
+          "table": null,
+          "column": "salary",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "salary AS adjusted",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "salary AS adjusted",
+            "position": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "select_order_changed",
+      "category": "SELECT",
+      "standard": "SELECT name, dept FROM student",
+      "student": "SELECT dept, name FROM student",
+      "expected_clauses": [
+        "SELECT"
+      ],
+      "expected_diff_types": [
+        "projection_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "select-basic"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "name, dept",
+          "student_sql": "dept, name",
+          "extra": {
+            "standard_sql": "name, dept",
+            "student_sql": "dept, name"
+          }
+        }
+      ]
+    },
+    {
+      "id": "distinct_missing",
+      "category": "DISTINCT",
+      "standard": "SELECT DISTINCT dept FROM student",
+      "student": "SELECT dept FROM student",
+      "expected_clauses": [
+        "DISTINCT"
+      ],
+      "expected_diff_types": [
+        "distinct_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "DISTINCT"
+      ],
+      "actual_diff_types": [
+        "distinct_changed"
+      ],
+      "actual_kps": [
+        "distinct"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "DISTINCT",
+          "diff_type": "distinct_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "distinct",
+          "severity": 0.5,
+          "standard_sql": "DISTINCT",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "True",
+            "student_sql": "False"
+          }
+        }
+      ]
+    },
+    {
+      "id": "count_distinct_missing",
+      "category": "DISTINCT",
+      "standard": "SELECT COUNT(DISTINCT dept) FROM student",
+      "student": "SELECT COUNT(dept) FROM student",
+      "expected_clauses": [
+        "DISTINCT"
+      ],
+      "expected_diff_types": [
+        "distinct_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 4,
+      "actual_clauses": [
+        "DISTINCT",
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "column_added",
+        "column_dropped",
+        "distinct_changed",
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "distinct",
+        "select-basic"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "COUNT(DISTINCT dept)",
+          "student_sql": "COUNT(dept)",
+          "extra": {
+            "standard_sql": "COUNT(DISTINCT dept)",
+            "student_sql": "COUNT(dept)"
+          }
+        },
+        {
+          "clause": "DISTINCT",
+          "diff_type": "distinct_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "distinct",
+          "severity": 0.5,
+          "standard_sql": "DISTINCT dept",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "True",
+            "student_sql": "False"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "dept",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "COUNT(DISTINCT dept)",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "COUNT(DISTINCT dept)",
+            "student_sql": "",
+            "position": 0
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_added",
+          "table": null,
+          "column": "dept",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "COUNT(dept)",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "COUNT(dept)",
+            "position": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "where_missing",
+      "category": "WHERE",
+      "standard": "SELECT name FROM student WHERE age > 18",
+      "student": "SELECT name FROM student",
+      "expected_clauses": [
+        "WHERE"
+      ],
+      "expected_diff_types": [
+        "where_changed",
+        "predicate_missing"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "predicate_missing",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "age > 18",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "age > 18",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "predicate_missing",
+          "table": null,
+          "column": "age",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "age > 18",
+          "student_sql": "",
+          "extra": {
+            "column": "age",
+            "op": "GT",
+            "value": 18,
+            "value_is_null": false,
+            "sql": "age > 18",
+            "node": "age > 18",
+            "standard_sql": "age > 18",
+            "student_sql": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "where_extra",
+      "category": "WHERE",
+      "standard": "SELECT name FROM student",
+      "student": "SELECT name FROM student WHERE age > 18",
+      "expected_clauses": [
+        "WHERE"
+      ],
+      "expected_diff_types": [
+        "where_changed",
+        "predicate_added"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "predicate_added",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "age > 18",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "age > 18"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "predicate_added",
+          "table": null,
+          "column": "age",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "age > 18",
+          "extra": {
+            "column": "age",
+            "op": "GT",
+            "value": 18,
+            "value_is_null": false,
+            "sql": "age > 18",
+            "node": "age > 18",
+            "standard_sql": "",
+            "student_sql": "age > 18"
+          }
+        }
+      ]
+    },
+    {
+      "id": "comparison_gt_to_gte",
+      "category": "Comparison",
+      "standard": "SELECT * FROM t WHERE age > 18",
+      "student": "SELECT * FROM t WHERE age >= 18",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "comparison_operator_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "comparison_operator_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "age > 18",
+          "student_sql": "age >= 18",
+          "extra": {
+            "standard_sql": "age > 18",
+            "student_sql": "age >= 18"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "comparison_operator_changed",
+          "table": null,
+          "column": "age",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "age > 18",
+          "student_sql": "age >= 18",
+          "extra": {
+            "column": "age",
+            "standard_op": "GT",
+            "student_op": "GTE",
+            "value": 18,
+            "student_value": 18,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "age > 18",
+            "student_sql": "age >= 18"
+          }
+        }
+      ]
+    },
+    {
+      "id": "comparison_literal_changed",
+      "category": "Comparison",
+      "standard": "SELECT * FROM t WHERE age = 18",
+      "student": "SELECT * FROM t WHERE age = 20",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "literal_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "literal_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "age = 18",
+          "student_sql": "age = 20",
+          "extra": {
+            "standard_sql": "age = 18",
+            "student_sql": "age = 20"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "literal_changed",
+          "table": null,
+          "column": "age",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "age = 18",
+          "student_sql": "age = 20",
+          "extra": {
+            "column": "age",
+            "standard_op": "EQ",
+            "student_op": "EQ",
+            "value": 18,
+            "student_value": 20,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "age = 18",
+            "student_sql": "age = 20"
+          }
+        }
+      ]
+    },
+    {
+      "id": "comparison_column_changed",
+      "category": "Comparison",
+      "standard": "SELECT * FROM t WHERE start_date <= end_date",
+      "student": "SELECT * FROM t WHERE start_date < end_date",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "comparison_operator_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "comparison_operator_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "start_date <= end_date",
+          "student_sql": "start_date < end_date",
+          "extra": {
+            "standard_sql": "start_date <= end_date",
+            "student_sql": "start_date < end_date"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "comparison_operator_changed",
+          "table": null,
+          "column": "start_date",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "start_date <= end_date",
+          "student_sql": "start_date < end_date",
+          "extra": {
+            "column": "start_date",
+            "standard_op": "LTE",
+            "student_op": "LT",
+            "value": "end_date",
+            "student_value": "end_date",
+            "values": null,
+            "student_values": null,
+            "standard_sql": "start_date <= end_date",
+            "student_sql": "start_date < end_date"
+          }
+        }
+      ]
+    },
+    {
+      "id": "null_is_null_to_equals_null",
+      "category": "NULL",
+      "standard": "SELECT * FROM student WHERE advisor_id IS NULL",
+      "student": "SELECT * FROM student WHERE advisor_id = NULL",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "comparison_operator_changed",
+        "null_equality_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 3,
+      "actual_clauses": [
+        "NULL",
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "comparison_operator_changed",
+        "null_equality_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "null",
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "advisor_id IS NULL",
+          "student_sql": "advisor_id = NULL",
+          "extra": {
+            "standard_sql": "advisor_id IS NULL",
+            "student_sql": "advisor_id = NULL"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "comparison_operator_changed",
+          "table": null,
+          "column": "advisor_id",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "advisor_id IS NULL",
+          "student_sql": "advisor_id = NULL",
+          "extra": {
+            "column": "advisor_id",
+            "standard_op": "IS",
+            "student_op": "EQ",
+            "value": null,
+            "student_value": null,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "advisor_id IS NULL",
+            "student_sql": "advisor_id = NULL"
+          }
+        },
+        {
+          "clause": "NULL",
+          "diff_type": "null_equality_changed",
+          "table": null,
+          "column": "advisor_id",
+          "knowledge_point_id": "null",
+          "severity": 0.5,
+          "standard_sql": "advisor_id IS NULL",
+          "student_sql": "advisor_id = NULL",
+          "extra": {
+            "column": "advisor_id",
+            "value": null,
+            "standard_sql": "advisor_id IS NULL",
+            "student_sql": "advisor_id = NULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": "null_is_null_to_is_not_null",
+      "category": "NULL",
+      "standard": "SELECT * FROM student WHERE advisor_id IS NULL",
+      "student": "SELECT * FROM student WHERE advisor_id IS NOT NULL",
+      "expected_clauses": [
+        "WHERE"
+      ],
+      "expected_diff_types": [
+        "where_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "advisor_id IS NULL",
+          "student_sql": "NOT advisor_id IS NULL",
+          "extra": {
+            "standard_sql": "advisor_id IS NULL",
+            "student_sql": "NOT advisor_id IS NULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": "in_list_member_removed",
+      "category": "IN/BETWEEN/LIKE",
+      "standard": "SELECT * FROM course WHERE dept IN ('CS', 'Math', 'Bio')",
+      "student": "SELECT * FROM course WHERE dept IN ('CS', 'Math')",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "in_list_member_removed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "in_list_member_removed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "dept IN ('CS', 'Math', 'Bio')",
+          "student_sql": "dept IN ('CS', 'Math')",
+          "extra": {
+            "standard_sql": "dept IN ('CS', 'Math', 'Bio')",
+            "student_sql": "dept IN ('CS', 'Math')"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "in_list_member_removed",
+          "table": null,
+          "column": "dept",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "dept IN ('CS', 'Math', 'Bio')",
+          "student_sql": "dept IN ('CS', 'Math')",
+          "extra": {
+            "column": "dept",
+            "standard_op": "IN",
+            "student_op": "IN",
+            "value": "CS",
+            "student_value": "CS",
+            "values": [
+              "CS",
+              "Math",
+              "Bio"
+            ],
+            "student_values": [
+              "CS",
+              "Math"
+            ],
+            "standard_sql": "dept IN ('CS', 'Math', 'Bio')",
+            "student_sql": "dept IN ('CS', 'Math')"
+          }
+        }
+      ]
+    },
+    {
+      "id": "between_boundary_changed",
+      "category": "IN/BETWEEN/LIKE",
+      "standard": "SELECT * FROM course WHERE credits BETWEEN 2 AND 4",
+      "student": "SELECT * FROM course WHERE credits BETWEEN 3 AND 4",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "literal_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "literal_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "credits BETWEEN 2 AND 4",
+          "student_sql": "credits BETWEEN 3 AND 4",
+          "extra": {
+            "standard_sql": "credits BETWEEN 2 AND 4",
+            "student_sql": "credits BETWEEN 3 AND 4"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "literal_changed",
+          "table": null,
+          "column": "credits",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "credits BETWEEN 2 AND 4",
+          "student_sql": "credits BETWEEN 3 AND 4",
+          "extra": {
+            "column": "credits",
+            "standard_op": "BETWEEN",
+            "student_op": "BETWEEN",
+            "value": 2,
+            "student_value": 3,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "credits BETWEEN 2 AND 4",
+            "student_sql": "credits BETWEEN 3 AND 4"
+          }
+        }
+      ]
+    },
+    {
+      "id": "like_pattern_changed",
+      "category": "IN/BETWEEN/LIKE",
+      "standard": "SELECT * FROM course WHERE title LIKE 'Intro%'",
+      "student": "SELECT * FROM course WHERE title LIKE 'Advanced%'",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "literal_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "literal_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "title LIKE 'Intro%'",
+          "student_sql": "title LIKE 'Advanced%'",
+          "extra": {
+            "standard_sql": "title LIKE 'Intro%'",
+            "student_sql": "title LIKE 'Advanced%'"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "literal_changed",
+          "table": null,
+          "column": "title",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "title LIKE 'Intro%'",
+          "student_sql": "title LIKE 'Advanced%'",
+          "extra": {
+            "column": "title",
+            "standard_op": "LIKE",
+            "student_op": "LIKE",
+            "value": "Intro%",
+            "student_value": "Advanced%",
+            "values": null,
+            "student_values": null,
+            "standard_sql": "title LIKE 'Intro%'",
+            "student_sql": "title LIKE 'Advanced%'"
+          }
+        }
+      ]
+    },
+    {
+      "id": "logic_and_to_or",
+      "category": "Logic",
+      "standard": "SELECT * FROM t WHERE a = 1 AND b = 2",
+      "student": "SELECT * FROM t WHERE a = 1 OR b = 2",
+      "expected_clauses": [
+        "LOGICAL"
+      ],
+      "expected_diff_types": [
+        "logical_operator_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "LOGICAL",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "logical_operator_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "a = 1 AND b = 2",
+          "student_sql": "a = 1 OR b = 2",
+          "extra": {
+            "standard_sql": "a = 1 AND b = 2",
+            "student_sql": "a = 1 OR b = 2"
+          }
+        },
+        {
+          "clause": "LOGICAL",
+          "diff_type": "logical_operator_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.8,
+          "standard_sql": "WHERE a = 1 AND b = 2",
+          "student_sql": "WHERE a = 1 OR b = 2",
+          "extra": {
+            "standard_operators": [
+              "AND"
+            ],
+            "student_operators": [
+              "OR"
+            ],
+            "leaves": [
+              "a = 1",
+              "b = 2"
+            ],
+            "standard_sql": "WHERE a = 1 AND b = 2",
+            "student_sql": "WHERE a = 1 OR b = 2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "logic_not_removed",
+      "category": "Logic",
+      "standard": "SELECT * FROM t WHERE NOT (a = 1)",
+      "student": "SELECT * FROM t WHERE a = 1",
+      "expected_clauses": [
+        "WHERE"
+      ],
+      "expected_diff_types": [
+        "where_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "NOT (a = 1)",
+          "student_sql": "a = 1",
+          "extra": {
+            "standard_sql": "NOT (a = 1)",
+            "student_sql": "a = 1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "join_missing",
+      "category": "JOIN",
+      "standard": "SELECT s.name FROM student s JOIN takes t ON s.id = t.s_id",
+      "student": "SELECT s.name FROM student s",
+      "expected_clauses": [
+        "JOIN"
+      ],
+      "expected_diff_types": [
+        "join_missing"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "JOIN",
+        "JOIN ON"
+      ],
+      "actual_diff_types": [
+        "join_missing",
+        "join_on_changed"
+      ],
+      "actual_kps": [
+        "join-inner",
+        "join-on"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "JOIN",
+          "diff_type": "join_missing",
+          "table": "takes",
+          "column": null,
+          "knowledge_point_id": "join-inner",
+          "severity": 0.5,
+          "standard_sql": "JOIN takes AS t ON s.id = t.s_id",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "JOIN takes AS t ON s.id = t.s_id",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "JOIN ON",
+          "diff_type": "join_on_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "join-on",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "s.id = t.s_id",
+            "student_sql": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "join_type_left_to_inner",
+      "category": "JOIN",
+      "standard": "SELECT s.name FROM student s LEFT JOIN takes t ON s.id = t.s_id",
+      "student": "SELECT s.name FROM student s JOIN takes t ON s.id = t.s_id",
+      "expected_clauses": [
+        "JOIN_TYPE"
+      ],
+      "expected_diff_types": [
+        "join_type_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "JOIN_TYPE"
+      ],
+      "actual_diff_types": [
+        "join_type_changed"
+      ],
+      "actual_kps": [
+        "join-left"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "JOIN_TYPE",
+          "diff_type": "join_type_changed",
+          "table": "takes",
+          "column": null,
+          "knowledge_point_id": "join-left",
+          "severity": 0.5,
+          "standard_sql": "LEFT JOIN takes AS t ON s.id = t.s_id",
+          "student_sql": "JOIN takes AS t ON s.id = t.s_id",
+          "extra": {
+            "standard_side": "LEFT",
+            "student_side": "INNER",
+            "right_table": "takes",
+            "standard_sql": "LEFT JOIN takes AS t ON s.id = t.s_id",
+            "student_sql": "JOIN takes AS t ON s.id = t.s_id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "join_on_key_changed",
+      "category": "JOIN ON",
+      "standard": "SELECT s.name FROM student s JOIN advisor a ON s.id = a.s_id",
+      "student": "SELECT s.name FROM student s JOIN advisor a ON s.id = a.i_id",
+      "expected_clauses": [
+        "JOIN ON"
+      ],
+      "expected_diff_types": [
+        "join_on_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "JOIN ON"
+      ],
+      "actual_diff_types": [
+        "join_on_changed"
+      ],
+      "actual_kps": [
+        "join-on"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "JOIN ON",
+          "diff_type": "join_on_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "join-on",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "s.id = a.s_id",
+            "student_sql": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "join_on_predicate_removed",
+      "category": "JOIN ON",
+      "standard": "SELECT * FROM a JOIN b ON a.id = b.a_id AND b.score > 10",
+      "student": "SELECT * FROM a JOIN b ON a.id = b.a_id",
+      "expected_clauses": [
+        "JOIN ON"
+      ],
+      "expected_diff_types": [
+        "join_on_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "JOIN ON"
+      ],
+      "actual_diff_types": [
+        "join_on_changed"
+      ],
+      "actual_kps": [
+        "join-on"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "JOIN ON",
+          "diff_type": "join_on_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "join-on",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "b.score > 10",
+            "student_sql": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "group_by_column_changed",
+      "category": "GROUP BY",
+      "standard": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+      "student": "SELECT year, COUNT(*) FROM student GROUP BY year",
+      "expected_clauses": [
+        "SELECT",
+        "GROUP BY"
+      ],
+      "expected_diff_types": [
+        "projection_changed",
+        "group_by_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 4,
+      "actual_clauses": [
+        "GROUP BY",
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "column_added",
+        "column_dropped",
+        "group_by_changed",
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "group-by",
+        "select-basic"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "dept, COUNT(*)",
+          "student_sql": "year, COUNT(*)",
+          "extra": {
+            "standard_sql": "dept, COUNT(*)",
+            "student_sql": "year, COUNT(*)"
+          }
+        },
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.5,
+          "standard_sql": "GROUP BY dept",
+          "student_sql": "GROUP BY year",
+          "extra": {
+            "standard_sql": "GROUP BY dept",
+            "student_sql": "GROUP BY year"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "dept",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "dept",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "dept",
+            "student_sql": "",
+            "position": 0
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_added",
+          "table": null,
+          "column": "year",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "year",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "year",
+            "position": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "group_by_column_missing",
+      "category": "GROUP BY",
+      "standard": "SELECT dept, year, COUNT(*) FROM takes GROUP BY dept, year",
+      "student": "SELECT dept, COUNT(*) FROM takes GROUP BY dept",
+      "expected_clauses": [
+        "SELECT",
+        "GROUP BY"
+      ],
+      "expected_diff_types": [
+        "column_dropped",
+        "group_by_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 3,
+      "actual_clauses": [
+        "GROUP BY",
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "column_dropped",
+        "group_by_changed",
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "group-by",
+        "select-basic"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "dept, year, COUNT(*)",
+          "student_sql": "dept, COUNT(*)",
+          "extra": {
+            "standard_sql": "dept, year, COUNT(*)",
+            "student_sql": "dept, COUNT(*)"
+          }
+        },
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.5,
+          "standard_sql": "GROUP BY dept, year",
+          "student_sql": "GROUP BY dept",
+          "extra": {
+            "standard_sql": "GROUP BY dept, year",
+            "student_sql": "GROUP BY dept"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "year",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "year",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "year",
+            "student_sql": "",
+            "position": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "having_operator_changed",
+      "category": "HAVING",
+      "standard": "SELECT dept FROM student GROUP BY dept HAVING COUNT(*) > 3",
+      "student": "SELECT dept FROM student GROUP BY dept HAVING COUNT(*) >= 3",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "comparison_operator_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 2,
+      "actual_clauses": [
+        "HAVING",
+        "PREDICATE"
+      ],
+      "actual_diff_types": [
+        "comparison_operator_changed",
+        "having_changed"
+      ],
+      "actual_kps": [
+        "having",
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "HAVING",
+          "diff_type": "having_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "having",
+          "severity": 0.5,
+          "standard_sql": "HAVING COUNT(*) > 3",
+          "student_sql": "HAVING COUNT(*) >= 3",
+          "extra": {
+            "standard_sql": "HAVING COUNT(*) > 3",
+            "student_sql": "HAVING COUNT(*) >= 3"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "comparison_operator_changed",
+          "table": null,
+          "column": "COUNT(*)",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "COUNT(*) > 3",
+          "student_sql": "COUNT(*) >= 3",
+          "extra": {
+            "column": "COUNT(*)",
+            "standard_op": "GT",
+            "student_op": "GTE",
+            "value": 3,
+            "student_value": 3,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "COUNT(*) > 3",
+            "student_sql": "COUNT(*) >= 3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "aggregate_sum_to_avg",
+      "category": "Aggregate",
+      "standard": "SELECT SUM(salary) FROM instructor",
+      "student": "SELECT AVG(salary) FROM instructor",
+      "expected_clauses": [
+        "AGGREGATE"
+      ],
+      "expected_diff_types": [
+        "aggregate_function_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 4,
+      "actual_clauses": [
+        "AGGREGATE",
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "aggregate_function_changed",
+        "column_added",
+        "column_dropped",
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "aggregate",
+        "select-basic"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "SUM(salary)",
+          "student_sql": "AVG(salary)",
+          "extra": {
+            "standard_sql": "SUM(salary)",
+            "student_sql": "AVG(salary)"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "salary",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "SUM(salary)",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "SUM(salary)",
+            "student_sql": "",
+            "position": 0
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_added",
+          "table": null,
+          "column": "salary",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "AVG(salary)",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "AVG(salary)",
+            "position": 0
+          }
+        },
+        {
+          "clause": "AGGREGATE",
+          "diff_type": "aggregate_function_changed",
+          "table": null,
+          "column": "salary",
+          "knowledge_point_id": "aggregate",
+          "severity": 0.7,
+          "standard_sql": "SUM(salary)",
+          "student_sql": "AVG(salary)",
+          "extra": {
+            "standard_func": "SUM",
+            "student_func": "AVG",
+            "column": "salary",
+            "standard_sql": "SUM(salary)",
+            "student_sql": "AVG(salary)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "order_direction_changed",
+      "category": "ORDER BY",
+      "standard": "SELECT name FROM student ORDER BY age DESC",
+      "student": "SELECT name FROM student ORDER BY age ASC",
+      "expected_clauses": [
+        "ORDER BY"
+      ],
+      "expected_diff_types": [
+        "order_by_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "ORDER BY"
+      ],
+      "actual_diff_types": [
+        "order_by_changed"
+      ],
+      "actual_kps": [
+        "order-by"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "ORDER BY",
+          "diff_type": "order_by_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "order-by",
+          "severity": 0.5,
+          "standard_sql": "ORDER BY age DESC",
+          "student_sql": "ORDER BY age ASC",
+          "extra": {
+            "standard_sql": "ORDER BY age DESC",
+            "student_sql": "ORDER BY age ASC"
+          }
+        }
+      ]
+    },
+    {
+      "id": "order_secondary_key_missing",
+      "category": "ORDER BY",
+      "standard": "SELECT name FROM student ORDER BY age DESC, name ASC",
+      "student": "SELECT name FROM student ORDER BY age DESC",
+      "expected_clauses": [
+        "ORDER BY"
+      ],
+      "expected_diff_types": [
+        "order_by_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "ORDER BY"
+      ],
+      "actual_diff_types": [
+        "order_by_changed"
+      ],
+      "actual_kps": [
+        "order-by"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "ORDER BY",
+          "diff_type": "order_by_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "order-by",
+          "severity": 0.5,
+          "standard_sql": "ORDER BY age DESC, name ASC",
+          "student_sql": "ORDER BY age DESC",
+          "extra": {
+            "standard_sql": "ORDER BY age DESC, name ASC",
+            "student_sql": "ORDER BY age DESC"
+          }
+        }
+      ]
+    },
+    {
+      "id": "limit_changed",
+      "category": "LIMIT/OFFSET",
+      "standard": "SELECT name FROM student LIMIT 5",
+      "student": "SELECT name FROM student LIMIT 3",
+      "expected_clauses": [
+        "LIMIT"
+      ],
+      "expected_diff_types": [
+        "limit_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "LIMIT"
+      ],
+      "actual_diff_types": [
+        "limit_changed"
+      ],
+      "actual_kps": [
+        "limit"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "LIMIT",
+          "diff_type": "limit_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "limit",
+          "severity": 0.5,
+          "standard_sql": "LIMIT 5",
+          "student_sql": "LIMIT 3",
+          "extra": {
+            "standard_sql": "LIMIT 5",
+            "student_sql": "LIMIT 3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "offset_changed",
+      "category": "LIMIT/OFFSET",
+      "standard": "SELECT name FROM student LIMIT 5 OFFSET 2",
+      "student": "SELECT name FROM student LIMIT 5 OFFSET 3",
+      "expected_clauses": [
+        "LIMIT"
+      ],
+      "expected_diff_types": [
+        "limit_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "LIMIT"
+      ],
+      "actual_diff_types": [
+        "limit_changed"
+      ],
+      "actual_kps": [
+        "limit"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "LIMIT",
+          "diff_type": "limit_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "limit",
+          "severity": 0.5,
+          "standard_sql": "OFFSET 2",
+          "student_sql": "OFFSET 3",
+          "extra": {
+            "standard_sql": "OFFSET 2",
+            "student_sql": "OFFSET 3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "subquery_removed",
+      "category": "Subquery",
+      "standard": "SELECT name FROM student WHERE id IN (SELECT s_id FROM advisor)",
+      "student": "SELECT name FROM student",
+      "expected_clauses": [
+        "SUBQUERY"
+      ],
+      "expected_diff_types": [
+        "subquery_removed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 3,
+      "actual_clauses": [
+        "PREDICATE",
+        "SUBQUERY",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "predicate_missing",
+        "subquery_removed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "subquery",
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "id IN (SELECT s_id FROM advisor)",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "id IN (SELECT s_id FROM advisor)",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "predicate_missing",
+          "table": null,
+          "column": "id",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "id IN (SELECT s_id FROM advisor)",
+          "student_sql": "",
+          "extra": {
+            "column": "id",
+            "op": "IN",
+            "value": null,
+            "values": [],
+            "sql": "id IN (SELECT s_id FROM advisor)",
+            "node": "id IN (SELECT s_id FROM advisor)",
+            "standard_sql": "id IN (SELECT s_id FROM advisor)",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "SUBQUERY",
+          "diff_type": "subquery_removed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "subquery",
+          "severity": 0.5,
+          "standard_sql": "SELECT s_id FROM advisor",
+          "student_sql": "",
+          "extra": {
+            "subquery_depth": 1,
+            "standard_sql": "SELECT s_id FROM advisor",
+            "student_sql": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "subquery_predicate_changed",
+      "category": "Subquery",
+      "standard": "SELECT name FROM student WHERE id IN (SELECT s_id FROM advisor WHERE i_id = 1)",
+      "student": "SELECT name FROM student WHERE id IN (SELECT s_id FROM advisor WHERE i_id = 2)",
+      "expected_clauses": [
+        "PREDICATE"
+      ],
+      "expected_diff_types": [
+        "literal_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 3,
+      "actual_clauses": [
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "literal_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "id IN (SELECT s_id FROM advisor WHERE i_id = 1)",
+          "student_sql": "id IN (SELECT s_id FROM advisor WHERE i_id = 2)",
+          "extra": {
+            "standard_sql": "id IN (SELECT s_id FROM advisor WHERE i_id = 1)",
+            "student_sql": "id IN (SELECT s_id FROM advisor WHERE i_id = 2)"
+          }
+        },
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "i_id = 1",
+          "student_sql": "i_id = 2",
+          "extra": {
+            "standard_sql": "i_id = 1",
+            "student_sql": "i_id = 2",
+            "subquery_depth": 1
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "literal_changed",
+          "table": null,
+          "column": "i_id",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "i_id = 1",
+          "student_sql": "i_id = 2",
+          "extra": {
+            "column": "i_id",
+            "standard_op": "EQ",
+            "student_op": "EQ",
+            "value": 1,
+            "student_value": 2,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "i_id = 1",
+            "student_sql": "i_id = 2",
+            "subquery_depth": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "correlated_subquery_column_changed",
+      "category": "Correlated Subquery",
+      "standard": "SELECT s.name FROM student s WHERE EXISTS (SELECT 1 FROM advisor a WHERE a.s_id = s.id)",
+      "student": "SELECT s.name FROM student s WHERE EXISTS (SELECT 1 FROM advisor a WHERE a.i_id = s.id)",
+      "expected_clauses": [
+        "CORRELATED SUBQUERY"
+      ],
+      "expected_diff_types": [
+        "correlated_predicate_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 4,
+      "actual_clauses": [
+        "CORRELATED SUBQUERY",
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "correlated_predicate_changed",
+        "predicate_added",
+        "predicate_missing",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "subquery-correlated",
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
+          "student_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.i_id = s.id)",
+          "extra": {
+            "standard_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
+            "student_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.i_id = s.id)"
+          }
+        },
+        {
+          "clause": "CORRELATED SUBQUERY",
+          "diff_type": "correlated_predicate_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "subquery-correlated",
+          "severity": 0.78,
+          "standard_sql": "SELECT 1 FROM advisor AS a WHERE a.s_id = s.id",
+          "student_sql": "SELECT 1 FROM advisor AS a WHERE a.i_id = s.id",
+          "extra": {
+            "subquery_depth": 1,
+            "standard_sql": "SELECT 1 FROM advisor AS a WHERE a.s_id = s.id",
+            "student_sql": "SELECT 1 FROM advisor AS a WHERE a.i_id = s.id"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "predicate_missing",
+          "table": null,
+          "column": "s_id",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "a.s_id = s.id",
+          "student_sql": "",
+          "extra": {
+            "column": "s_id",
+            "op": "EQ",
+            "value": "s.id",
+            "right_column": "id",
+            "sql": "a.s_id = s.id",
+            "node": "a.s_id = s.id",
+            "standard_sql": "a.s_id = s.id",
+            "student_sql": "",
+            "subquery_depth": 1
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "predicate_added",
+          "table": null,
+          "column": "i_id",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "a.i_id = s.id",
+          "extra": {
+            "column": "i_id",
+            "op": "EQ",
+            "value": "s.id",
+            "right_column": "id",
+            "sql": "a.i_id = s.id",
+            "node": "a.i_id = s.id",
+            "standard_sql": "",
+            "student_sql": "a.i_id = s.id",
+            "subquery_depth": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "cte_body_changed",
+      "category": "CTE",
+      "standard": "WITH c AS (SELECT id FROM student WHERE dept = 'CS') SELECT id FROM c",
+      "student": "WITH c AS (SELECT id FROM student WHERE dept = 'Math') SELECT id FROM c",
+      "expected_clauses": [
+        "CTE"
+      ],
+      "expected_diff_types": [
+        "cte_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 3,
+      "actual_clauses": [
+        "CTE",
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "cte_changed",
+        "literal_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "cte",
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "dept = 'CS'",
+          "student_sql": "dept = 'Math'",
+          "extra": {
+            "standard_sql": "dept = 'CS'",
+            "student_sql": "dept = 'Math'"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "literal_changed",
+          "table": null,
+          "column": "dept",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "dept = 'CS'",
+          "student_sql": "dept = 'Math'",
+          "extra": {
+            "column": "dept",
+            "standard_op": "EQ",
+            "student_op": "EQ",
+            "value": "CS",
+            "student_value": "Math",
+            "values": null,
+            "student_values": null,
+            "standard_sql": "dept = 'CS'",
+            "student_sql": "dept = 'Math'"
+          }
+        },
+        {
+          "clause": "CTE",
+          "diff_type": "cte_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "cte",
+          "severity": 0.5,
+          "standard_sql": "c AS (SELECT id FROM student WHERE dept = 'CS')",
+          "student_sql": "c AS (SELECT id FROM student WHERE dept = 'Math')",
+          "extra": {
+            "standard_sql": "c AS (SELECT id FROM student WHERE dept = 'CS')",
+            "student_sql": "c AS (SELECT id FROM student WHERE dept = 'Math')"
+          }
+        }
+      ]
+    },
+    {
+      "id": "recursive_cte_boundary_changed",
+      "category": "Recursive CTE",
+      "standard": "WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 5) SELECT n FROM nums",
+      "student": "WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 3) SELECT n FROM nums",
+      "expected_clauses": [
+        "CTE_RECURSIVE"
+      ],
+      "expected_diff_types": [
+        "recursive_cte_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 3,
+      "actual_clauses": [
+        "CTE_RECURSIVE",
+        "PREDICATE",
+        "WHERE"
+      ],
+      "actual_diff_types": [
+        "literal_changed",
+        "recursive_cte_changed",
+        "where_changed"
+      ],
+      "actual_kps": [
+        "cte-recursive",
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "n < 5",
+          "student_sql": "n < 3",
+          "extra": {
+            "standard_sql": "n < 5",
+            "student_sql": "n < 3"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "literal_changed",
+          "table": null,
+          "column": "n",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "n < 5",
+          "student_sql": "n < 3",
+          "extra": {
+            "column": "n",
+            "standard_op": "LT",
+            "student_op": "LT",
+            "value": 5,
+            "student_value": 3,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "n < 5",
+            "student_sql": "n < 3"
+          }
+        },
+        {
+          "clause": "CTE_RECURSIVE",
+          "diff_type": "recursive_cte_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "cte-recursive",
+          "severity": 0.5,
+          "standard_sql": "WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 5)",
+          "student_sql": "WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 3)",
+          "extra": {
+            "standard_sql": "nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 5)",
+            "student_sql": "nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 3)",
+            "standard_recursive": true,
+            "student_recursive": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "set_union_to_union_all",
+      "category": "Set Operation",
+      "standard": "SELECT id FROM a UNION SELECT id FROM b",
+      "student": "SELECT id FROM a UNION ALL SELECT id FROM b",
+      "expected_clauses": [
+        "UNION"
+      ],
+      "expected_diff_types": [
+        "set_operator_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "UNION"
+      ],
+      "actual_diff_types": [
+        "set_operator_changed"
+      ],
+      "actual_kps": [
+        "union"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "UNION",
+          "diff_type": "set_operator_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "union",
+          "severity": 0.5,
+          "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+          "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+          "extra": {
+            "standard_op": "UNION",
+            "student_op": "UNION",
+            "standard_modifier": "DISTINCT",
+            "student_modifier": "ALL",
+            "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+            "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b"
+          }
+        }
+      ]
+    },
+    {
+      "id": "set_intersect_to_union",
+      "category": "Set Operation",
+      "standard": "SELECT id FROM a INTERSECT SELECT id FROM b",
+      "student": "SELECT id FROM a UNION SELECT id FROM b",
+      "expected_clauses": [
+        "INTERSECT"
+      ],
+      "expected_diff_types": [
+        "set_operator_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "INTERSECT"
+      ],
+      "actual_diff_types": [
+        "set_operator_changed"
+      ],
+      "actual_kps": [
+        "intersect"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "INTERSECT",
+          "diff_type": "set_operator_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "intersect",
+          "severity": 0.5,
+          "standard_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
+          "student_sql": "SELECT id FROM a UNION SELECT id FROM b",
+          "extra": {
+            "standard_op": "INTERSECT",
+            "student_op": "UNION",
+            "standard_modifier": "DISTINCT",
+            "student_modifier": "DISTINCT",
+            "standard_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
+            "student_sql": "SELECT id FROM a UNION SELECT id FROM b"
+          }
+        }
+      ]
+    },
+    {
+      "id": "case_branch_changed",
+      "category": "CASE",
+      "standard": "SELECT CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END FROM exam",
+      "student": "SELECT CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END FROM exam",
+      "expected_clauses": [
+        "SELECT"
+      ],
+      "expected_diff_types": [
+        "projection_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 4,
+      "actual_clauses": [
+        "PREDICATE",
+        "SELECT"
+      ],
+      "actual_diff_types": [
+        "column_added",
+        "column_dropped",
+        "literal_changed",
+        "projection_changed"
+      ],
+      "actual_kps": [
+        "select-basic",
+        "where"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "extra": {
+            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+            "student_sql": "",
+            "position": 0
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_added",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+            "position": 0
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "literal_changed",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "score >= 60",
+          "student_sql": "score >= 70",
+          "extra": {
+            "column": "score",
+            "standard_op": "GTE",
+            "student_op": "GTE",
+            "value": 60,
+            "student_value": 70,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "score >= 60",
+            "student_sql": "score >= 70"
+          }
+        }
+      ]
+    },
+    {
+      "id": "window_partition_changed",
+      "category": "Window",
+      "standard": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+      "student": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor",
+      "expected_clauses": [
+        "WINDOW"
+      ],
+      "expected_diff_types": [
+        "window_over_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 4,
+      "actual_clauses": [
+        "SELECT",
+        "WINDOW"
+      ],
+      "actual_diff_types": [
+        "column_added",
+        "column_dropped",
+        "projection_changed",
+        "window_over_changed"
+      ],
+      "actual_kps": [
+        "select-basic",
+        "window-row-number"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
+          "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
+          "extra": {
+            "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
+            "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "dept",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
+            "student_sql": "",
+            "position": 0
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_added",
+          "table": null,
+          "column": "name",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
+            "position": 0
+          }
+        },
+        {
+          "clause": "WINDOW",
+          "diff_type": "window_over_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "window-row-number",
+          "severity": 0.5,
+          "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
+          "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
+          "extra": {
+            "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
+            "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "window_function_changed",
+      "category": "Window",
+      "standard": "SELECT RANK() OVER (ORDER BY salary DESC) FROM instructor",
+      "student": "SELECT ROW_NUMBER() OVER (ORDER BY salary DESC) FROM instructor",
+      "expected_clauses": [
+        "WINDOW"
+      ],
+      "expected_diff_types": [
+        "window_over_changed"
+      ],
+      "expected_kps": [],
+      "representation": "supported",
+      "note": "",
+      "error": null,
+      "diff_count": 4,
+      "actual_clauses": [
+        "SELECT",
+        "WINDOW"
+      ],
+      "actual_diff_types": [
+        "column_added",
+        "column_dropped",
+        "projection_changed",
+        "window_over_changed"
+      ],
+      "actual_kps": [
+        "select-basic",
+        "window-row-number"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "RANK() OVER (ORDER BY salary DESC)",
+          "student_sql": "ROW_NUMBER() OVER (ORDER BY salary DESC)",
+          "extra": {
+            "standard_sql": "RANK() OVER (ORDER BY salary DESC)",
+            "student_sql": "ROW_NUMBER() OVER (ORDER BY salary DESC)"
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "salary",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "RANK() OVER (ORDER BY salary DESC)",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "RANK() OVER (ORDER BY salary DESC)",
+            "student_sql": "",
+            "position": 0
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_added",
+          "table": null,
+          "column": "salary",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "ROW_NUMBER() OVER (ORDER BY salary DESC)",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "ROW_NUMBER() OVER (ORDER BY salary DESC)",
+            "position": 0
+          }
+        },
+        {
+          "clause": "WINDOW",
+          "diff_type": "window_over_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "window-row-number",
+          "severity": 0.5,
+          "standard_sql": "RANK() OVER (ORDER BY salary DESC)",
+          "student_sql": "ROW_NUMBER() OVER (ORDER BY salary DESC)",
+          "extra": {
+            "standard_sql": "RANK() OVER (ORDER BY salary DESC)",
+            "student_sql": "ROW_NUMBER() OVER (ORDER BY salary DESC)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "distinct_on_gap",
+      "category": "Dialect Boundary",
+      "standard": "SELECT DISTINCT ON (dept) dept, name FROM student ORDER BY dept, name",
+      "student": "SELECT DISTINCT dept, name FROM student ORDER BY dept, name",
+      "expected_clauses": [],
+      "expected_diff_types": [],
+      "expected_kps": [],
+      "representation": "known_gap",
+      "note": "PostgreSQL DISTINCT ON is outside current AST diff typing.",
+      "error": null,
+      "diff_count": 0,
+      "actual_clauses": [],
+      "actual_diff_types": [],
+      "actual_kps": [],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "known_gap",
+      "ast_diffs": []
+    },
+    {
+      "id": "rollup_gap",
+      "category": "Dialect Boundary",
+      "standard": "SELECT region, SUM(amount) FROM sales GROUP BY ROLLUP(region)",
+      "student": "SELECT region, SUM(amount) FROM sales GROUP BY region",
+      "expected_clauses": [],
+      "expected_diff_types": [],
+      "expected_kps": [],
+      "representation": "known_gap",
+      "note": "ROLLUP is parsed but current SQLite-oriented semantic path treats it as boundary.",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "GROUP BY"
+      ],
+      "actual_diff_types": [
+        "group_by_changed"
+      ],
+      "actual_kps": [
+        "group-by"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "known_gap",
+      "ast_diffs": [
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.5,
+          "standard_sql": "GROUP BY ROLLUP (region)",
+          "student_sql": "GROUP BY region",
+          "extra": {
+            "standard_sql": "GROUP BY ROLLUP (region)",
+            "student_sql": "GROUP BY region"
+          }
+        }
+      ]
+    }
+  ]
+}

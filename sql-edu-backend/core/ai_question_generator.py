@@ -78,6 +78,7 @@ async def generate_questions_for_knowledge_point(
         "\"title_en\": \"题目标题(English)\", \"content_en\": \"题目描述(English)\", "
         "\"title_zh_tw\": \"題目標題(繁體中文)\", \"content_zh_tw\": \"題目描述(繁體中文)\", "
         "\"correct_sql\": \"标准答案 SELECT 语句\", \"difficulty\": 1-10 的整数, "
+        "\"sql_dialect\": \"mysql\", \"engine_version\": null, "
         "\"schema_preview\": {\"tables\": [{\"name\": \"表名\", \"columns\": [\"列1\", \"列2\"], \"rows\": [{\"列1\": 值1, \"列2\": 值2}]}]}}"
         "schema_preview 必须包含 correct_sql 中涉及的所有表（多表则输出多个表）。每个表的 columns 必须列出该表在 SQL 中出现的全部列名，确保学生能据此完成 SQL；示例数据 rows 可少（每表 2～4 行即可），但列名要齐全。"
         "title/content 必须为简体中文；title_zh_tw/content_zh_tw 为繁体中文；title_en/content_en 为英文。若不确定翻译，可直接复用简体中文。"
@@ -144,6 +145,8 @@ async def generate_questions_for_knowledge_point(
             title_zh_tw = (item.get("title_zh_tw") or "").strip() or None
             content_zh_tw = (item.get("content_zh_tw") or "").strip() or None
             correct_sql = (item.get("correct_sql") or "").strip()
+            sql_dialect = _normalize_generated_sql_dialect(item.get("sql_dialect"))
+            engine_version = (item.get("engine_version") or None)
             
             # Reformat difficulty to integer bounds [1, 10]
             difficulty = item.get("difficulty")
@@ -170,6 +173,8 @@ async def generate_questions_for_knowledge_point(
                     "title_zh_tw": title_zh_tw[:200] if isinstance(title_zh_tw, str) else None,
                     "content_zh_tw": content_zh_tw,
                     "correct_sql": correct_sql,
+                    "sql_dialect": sql_dialect,
+                    "engine_version": engine_version if isinstance(engine_version, str) else None,
                     "difficulty": difficulty,
                     "schema_preview": schema_str,
                 })
@@ -178,6 +183,19 @@ async def generate_questions_for_knowledge_point(
         print("--- generate_questions_for_knowledge_point 异常 ---")
         traceback.print_exc()
         return []
+
+
+def _normalize_generated_sql_dialect(value: Any) -> str:
+    normalized = str(value or "mysql").strip().lower()
+    aliases = {
+        "postgresql": "postgres",
+        "pg": "postgres",
+        "sqlserver": "tsql",
+        "mssql": "tsql",
+        "sql_server": "tsql",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in {"mysql", "postgres", "tsql", "sqlite"} else "mysql"
 
 
 async def infer_difficulty_from_question(content: str, correct_sql: str) -> int:

@@ -15,6 +15,8 @@ class QuestionCreate(BaseModel):
     title_zh_tw: str | None = None
     content_zh_tw: str | None = None
     correct_sql: str
+    sql_dialect: str = "mysql"
+    engine_version: str | None = None
     difficulty: int | None = None  # 留空则由 AI 根据题目内容与 SQL 自动判断；1～10
     time_limit_seconds: int | None = None
     schema_preview: str | None = None  # JSON：tables[{name,columns,rows}]，供学生查看
@@ -27,10 +29,28 @@ class QuestionCreate(BaseModel):
             raise ValueError("难度必须在 1～10 之间")
         return v
 
+    @field_validator("sql_dialect")
+    @classmethod
+    def sql_dialect_supported(cls, v: str) -> str:
+        normalized = (v or "mysql").strip().lower()
+        aliases = {
+            "postgresql": "postgres",
+            "pg": "postgres",
+            "sqlserver": "tsql",
+            "mssql": "tsql",
+            "sql_server": "tsql",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized not in {"mysql", "postgres", "tsql", "sqlite"}:
+            raise ValueError("SQL 方言必须是 mysql/postgres/tsql/sqlite")
+        return normalized
+
 
 class QuestionOut(QuestionBase):
     id: int
     correct_sql: str
+    sql_dialect: str = "mysql"
+    engine_version: str | None = None
     time_limit_seconds: int | None = None
     schema_preview: str | None = None  # JSON：tables[{name,columns,rows}]，供学生查看
     required_output_columns: str | None = None  # 要求的结果列名或完整说明，供学生端显著展示

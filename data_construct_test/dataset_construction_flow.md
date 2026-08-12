@@ -1,6 +1,6 @@
 # 数据集构建流程图蓝图
 
-本图用于说明 SQL DQL 数据集从教材 PDF 到标准题库、学生模拟作答、知识点掌握矩阵和 20 题初始诊断集的完整构建链路。
+本图用于说明 SQL DQL 数据集从教材 PDF 到标准题库、学生模拟作答、知识点掌握矩阵、20 题初始诊断集，以及面向 SQL 语义判等/归因系统的外部语料与对抗收敛证据构建链路。
 
 已生成 SVG 图：
 
@@ -26,15 +26,23 @@ flowchart LR
 
     H["8. 人工筛选 20 道关键题<br/><br/>输入：data_std_full.json、全量题库实际出现的 L1/L2<br/>工具/方法：人工筛选 + select_initial_diagnostic_20.py；覆盖知识点与难度梯度；题干局部改写用于诊断<br/>输出：initial_diagnostic_20.json；initial_diagnostic_20_report.md"]
 
+    I["9. 外部 SQL 语料抓取<br/><br/>输入：web_sql_corpus_manifest.json、授权下载的 Spider/BIRD 等本地文件、WikiSQL 官方归档<br/>工具/方法：collect_web_sql_corpus.py；原始缓存；JSON/JSONL/SQL/压缩包抽取；SQL/schema 归一化；来源去重<br/>输出：web_sql_corpus.jsonl；web_sql_corpus_report.json"]
+
+    J["10. 定向攻击与经验收敛评测<br/><br/>输入：CFG 片段攻击、参数化 fuzzer、web_sql_corpus.jsonl、数据库 profile<br/>工具/方法：run_phase1_cfg_convergence_benchmark.py；边界/NULL/集合/排序/LIMIT/Join/窗口/CTE 变异；Wilson 区间；新增失败签名饱和统计<br/>输出：phase1_cfg_convergence_report；supported/failures/detailed_evidence JSONL"]
+
     Q["质量控制与复核<br/><br/>source 可追溯；JSON schema 校验；SQL 答案清洗；L1/L2 覆盖统计；data_std_full_tag_audit 逐题审计；20 题覆盖验证"]
 
     A --> B --> C --> D --> E --> F --> G
     E --> H
+    I --> J
+    E --> J
     Q -.-> B
     Q -.-> D
     Q -.-> E
     Q -.-> G
     Q -.-> H
+    Q -.-> I
+    Q -.-> J
 ```
 
 ## 节点展开
@@ -49,6 +57,8 @@ flowchart LR
 | 6. 四类学生模拟 | `data_std_full.json` | 外部 AI 按四类学生画像生成 SQL 作答 | `data_student_raw_full.json` |
 | 7. 掌握矩阵聚合 | 学生原始作答与正确性 | `build_data_student_full.py`；按 L1/L2 聚合正确率；平滑补全矩阵 | `data_student_full.json` |
 | 8. 20 题诊断集 | `data_std_full.json` 与全量 L1/L2 覆盖情况 | 人工筛选；`select_initial_diagnostic_20.py`；覆盖和难度梯度校验 | `initial_diagnostic_20.json` |
+| 9. 外部 SQL 语料抓取 | `web_sql_corpus_manifest.json`、在线归档、本地授权数据文件 | `collect_web_sql_corpus.py`；缓存原始下载；递归抽取 SQL；结构化 WikiSQL 转 SQL；schema 推断；来源去重 | `web_sql_corpus.jsonl`、`web_sql_corpus_report.json` |
+| 10. 定向攻击与经验收敛评测 | CFG 片段攻击、参数化 fuzzer、外部 SQL 语料、数据库实例 profile | `run_phase1_cfg_convergence_benchmark.py`；默认 100k 参数化攻击 + 50k 外部语料派生样本；统计新增失败签名、Wilson 区间、来源分布 | `phase1_cfg_convergence_report.*`、`phase1_cfg_convergence_*.jsonl` |
 
 ## 产物关系
 
@@ -56,3 +66,5 @@ flowchart LR
 - `data_student_raw_full.json` 保存四类学生的原始 SQL 作答。
 - `data_student_full.json` 在原始作答基础上生成 `records`、`kp1_matrix`、`kp2_matrix`。
 - `initial_diagnostic_20.json` 从标准题库中人工筛选 20 道关键题，用于前端初始能力诊断。
+- `web_sql_corpus.jsonl` 是外部 SQL 语料归一化结果，用于减少教材题库和手写攻击样本的分布偏见。
+- `phase1_cfg_convergence_report.*` 是对当前 SQL 语义判等/归因流水线的经验收敛证据。它可以近似说明在给定语法片段、外部语料来源、数据库规模和攻击策略下未发现新增失败签名，但不能替代“任意 SQL 与任意数据库”的形式化语义完备证明。

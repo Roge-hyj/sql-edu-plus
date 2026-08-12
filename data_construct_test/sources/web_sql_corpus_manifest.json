@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "description": "External SQL corpus sources used to diversify Phase 1 convergence evidence beyond textbook questions and local handcrafted attacks.",
+  "sources": [
+    {
+      "id": "wikisql_official_archive",
+      "name": "WikiSQL official archive",
+      "kind": "text_to_sql_benchmark",
+      "enabled": true,
+      "reference_only": false,
+      "url": "https://github.com/salesforce/WikiSQL/raw/master/data.tar.bz2",
+      "format": "archive",
+      "dialect": "generic",
+      "license_note": "Use according to the upstream WikiSQL repository terms.",
+      "bias_risk": "Single-table benchmark distribution; useful for projection, aggregation and simple predicates but insufficient for joins, nesting, windows and dialect edges.",
+      "extraction": {
+        "mode": "wikisql_structured"
+      }
+    },
+    {
+      "id": "spider_benchmark_reference",
+      "name": "Spider text-to-SQL benchmark",
+      "kind": "text_to_sql_benchmark",
+      "enabled": false,
+      "reference_only": true,
+      "url": "https://yale-lily.github.io/spider",
+      "format": "external_download",
+      "dialect": "generic",
+      "license_note": "Download and use according to the upstream Spider terms.",
+      "bias_risk": "Academic benchmark distribution; strong for cross-domain schemas but still benchmark-shaped rather than production query logs.",
+      "extraction": {
+        "mode": "json_recursive",
+        "sql_keys": ["query", "sql"]
+      }
+    },
+    {
+      "id": "bird_benchmark_reference",
+      "name": "BIRD text-to-SQL benchmark",
+      "kind": "text_to_sql_benchmark",
+      "enabled": false,
+      "reference_only": true,
+      "url": "https://bird-bench.github.io/",
+      "format": "external_download",
+      "dialect": "generic",
+      "license_note": "Download and use according to the upstream BIRD terms.",
+      "bias_risk": "Large real-database benchmark, useful for schema realism; availability and redistribution are controlled upstream.",
+      "extraction": {
+        "mode": "json_recursive",
+        "sql_keys": ["SQL", "query", "sql"]
+      }
+    },
+    {
+      "id": "sqlancer_reference",
+      "name": "SQLancer targeted DBMS testing reference",
+      "kind": "targeted_attack_reference",
+      "enabled": false,
+      "reference_only": true,
+      "url": "https://github.com/sqlancer/sqlancer",
+      "format": "reference",
+      "dialect": "multi_dbms",
+      "license_note": "Use according to the upstream SQLancer repository terms.",
+      "bias_risk": "Not a text-to-SQL corpus; use as a source of oracle and metamorphic attack tactics rather than as raw educational questions.",
+      "extraction": {
+        "mode": "reference_only"
+      }
+    }
+  ]
+}

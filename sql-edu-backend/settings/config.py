@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     # 你的数据库连接字符串
     DB_URL: str
 
+    # --- 2.1 ParSEval 判题执行器 ---
+    # auto: MySQL 题目在 PARSEVAL_MYSQL_URL 存在时走原生 MySQL，否则走 SQLite 兼容层
+    # sqlite: 始终使用 SQLite 兼容层
+    # mysql: 强制使用原生 MySQL 判题执行器，未配置 PARSEVAL_MYSQL_URL 时返回 ENGINE_ERROR
+    PARSEVAL_EXECUTION_BACKEND: str = "auto"
+    PARSEVAL_MYSQL_URL: str = ""
+
     # --- 3. 安全与认证 (JWT) ---
     # 在终端运行 `openssl rand -hex 32` 可以生成一个安全的随机字符串，需在 .env 中设置
     SECRET_KEY: str = ""
@@ -93,7 +100,6 @@ def get_settings() -> Settings:
 
 
 __all__ = ["Settings", "get_settings"]
-
 
 
 

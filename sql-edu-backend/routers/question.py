@@ -240,6 +240,8 @@ async def generate_questions_by_ai(
             content_zh_tw=item.get("content_zh_tw"),
             difficulty=max(1, min(10, item["difficulty"])),
             correct_sql=correct_sql,
+            sql_dialect=item.get("sql_dialect") or "mysql",
+            engine_version=item.get("engine_version"),
             time_limit_seconds=None,
             schema_preview=item.get("schema_preview"),
             required_output_columns=required_cols,
@@ -385,6 +387,8 @@ async def create_question(
             content_zh_tw=question_data.content_zh_tw,
             difficulty=difficulty,
             correct_sql=question_data.correct_sql,
+            sql_dialect=question_data.sql_dialect,
+            engine_version=question_data.engine_version,
             time_limit_seconds=question_data.time_limit_seconds,
             schema_preview=question_data.schema_preview,
             required_output_columns=required_cols,
@@ -438,6 +442,7 @@ async def update_question(
             "content": question_data.content,
             "difficulty": difficulty,
             "correct_sql": question_data.correct_sql,
+            "sql_dialect": question_data.sql_dialect,
             "required_output_columns": required_cols,
         }
         fields_set = getattr(question_data, "model_fields_set", set())
@@ -445,6 +450,8 @@ async def update_question(
             values["time_limit_seconds"] = question_data.time_limit_seconds
         if "schema_preview" in fields_set:
             values["schema_preview"] = question_data.schema_preview
+        if "engine_version" in fields_set:
+            values["engine_version"] = question_data.engine_version
         if "title_en" in fields_set:
             values["title_en"] = question_data.title_en
         if "content_en" in fields_set:

@@ -388,6 +388,8 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         "checks": checks,
         "passed": (not is_correct) and all(item["ok"] for item in checks),
         "data_evidence": run.data_evidence,
+        "ast_diffs": run.data_evidence.get("ast_diffs", []),
+        "generation_tactics": run.data_evidence.get("generation_tactics", []),
         "test_database": run.test_database,
         "standard_rows": run.standard_rows[:5],
         "student_rows": run.student_rows[:5],
@@ -454,6 +456,8 @@ def render_report(results: list[dict[str, Any]]) -> str:
                 f"```sql\n{result['student']}\n```",
                 f"* **沙盒判定等价性**: `{result['is_correct']}`",
                 f"* **归因 KP**: `{result['kp_ids']}`",
+                f"* **AST 差异子树**: `{result['ast_diffs']}`",
+                f"* **差异驱动造数策略**: `{result['generation_tactics']}`",
                 "* **策略检查结果**:",
             ]
         )
@@ -472,19 +476,54 @@ def render_report(results: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def render_operator_summary() -> str:
+    rows = [
+        ("选择", "WHERE", "`exp.Where`, `exp.Comparison`", "谓词边界三态 `[c, c+1, c-1]`", "替换/移除 WHERE", "`where`"),
+        ("空值过滤", "`IS NULL` / `= NULL`", "`exp.Is`, `exp.Null`", "注入 `None` 行，区分 `IS NULL` 与 `= NULL`", "伴随 WHERE 证据归因", "`comp-null`"),
+        ("投影", "SELECT", "`exp.Select`", "按引用列生成并校验列结构", "不单独变分，随数据证据归因", "`select-basic`"),
+        ("去重", "DISTINCT", "`exp.Distinct`", "对 DISTINCT 投影列注入重复值", "不单独变分，随行数/重复证据归因", "`distinct`"),
+        ("连接", "JOIN ON / USING", "`exp.Join`", "共享键池、同组外键漂移、外连接悬浮元组", "JOIN ON 条件替换", "`join-on`, `join-inner`, `join-left`, `join-right`, `join-full`"),
+        ("分组", "GROUP BY", "`exp.Group`", "生成多组分类键，暴露分组粒度错误", "替换 GROUP BY", "`group-by`"),
+        ("分组过滤", "HAVING", "`exp.Having`", "SUM/AVG/MIN/MAX 聚合三态；COUNT 组大小三态", "替换/移除 HAVING", "`having`"),
+        ("排序", "ORDER BY", "`exp.Order`", "生成单调/乱序值并启用有序精确比对", "替换 ORDER BY", "`order-by`"),
+        ("限制", "LIMIT / OFFSET", "`exp.Limit`, `exp.Offset`", "校验标准/学生输出行数边界", "替换 LIMIT/OFFSET", "`limit`"),
+        ("简单子查询", "IN / EXISTS / 标量子查询", "`exp.Subquery`, `exp.In`, `exp.Exists`", "父子表值域重合与子查询过滤探针", "随 WHERE 子句变分", "`subquery-scalar`, `subquery-in`, `subquery-exists`"),
+        ("相关子查询", "引用外层表的子查询", "`exp.Subquery`, `exp.Exists`", "内外层关联列交叉数据与过滤边界", "随 WHERE 子句变分", "`subquery-correlated`"),
+        ("简单 CTE", "WITH", "`exp.CTE`", "只生成底层基表，CTE 由 SQLite 原生执行", "暂不单独变分", "`cte`"),
+        ("递归 CTE", "WITH RECURSIVE", "`exp.CTE`, `exp.With`", "递归终止边界与 SQLite progress handler 熔断", "暂不单独变分", "`cte-recursive`"),
+        ("并集", "UNION / UNION ALL", "`exp.Union`", "两侧谓词联合造数并校验去重差异", "集合算子差异归因", "`union`"),
+        ("交集", "INTERSECT", "`exp.Intersect`", "构造左侧、右侧、交集三类记录", "集合算子差异归因", "`intersect`"),
+        ("差集", "EXCEPT", "`exp.Except`", "抽取右侧过滤条件并生成排他数据行", "集合算子差异归因", "`except`"),
+        ("条件分支", "CASE WHEN", "`exp.Case`", "CASE 条件边界三态并遍历分支", "CASE 差异归因", "`case`"),
+        ("窗口函数", "OVER", "`exp.Window`", "重复分区键与乱序排序值，验证分区/排名", "窗口 OVER 差异归因", "`window-row-number`"),
+    ]
+    lines = [
+        "## 七、阶段一 SQL 算子覆盖与策略总结表",
+        "",
+        "本表按当前主链路整理：`generate_and_compare` 负责动态造数、沙盒执行与变分证据，`evidence_weights_from_observation` 负责阶段一归因合并。",
+        "",
+        "| 算子类别 | SQL 表现 | Sqlglot AST 节点 | 动态造数策略 | 变分/归因机制 | KP ID |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- |",
+    ]
+    lines.extend(f"| {row[0]} | {row[1]} | {row[2]} | {row[3]} | {row[4]} | {row[5]} |" for row in rows)
+    return "\n".join(lines)
+
+
 def write_reports(results: list[dict[str, Any]]) -> None:
-    section = render_report(results)
-    standalone = PROJECT_ROOT / "task" / "task2_generation_completeness.md"
+    section = render_report(results) + "\n\n" + render_operator_summary()
+    standalone = PROJECT_ROOT / "task2_generation_completeness.md"
     standalone.write_text("# 动态造数策略完备性专项检验\n\n" + section, encoding="utf-8")
 
-    task2 = PROJECT_ROOT / "task" / "task2.md"
+    task2 = PROJECT_ROOT / "task2.md"
     marker = "## 六、动态造数策略完备性专项检验"
     content = task2.read_text(encoding="utf-8") if task2.exists() else ""
     if marker in content:
         content = content[: content.index(marker)].rstrip()
-    task2.write_text(content.rstrip() + "\n\n" + section + "\n", encoding="utf-8")
+    if task2.exists():
+        task2.write_text(content.rstrip() + "\n\n" + section + "\n", encoding="utf-8")
     print(f"Generation completeness report written to {standalone}")
-    print(f"Generation completeness section appended to {task2}")
+    if task2.exists():
+        print(f"Generation completeness section appended to {task2}")
 
 
 def main() -> None:
