@@ -202,7 +202,7 @@ SELECT name FROM student WHERE grade = NULL;
 * **AST 差异子树**: `[{'standard_sql': 'grade IS NULL', 'student_sql': 'grade = NULL', 'clause': 'WHERE', 'diff_type': 'where_changed', 'column': None, 'table': None}, {'column': 'grade', 'standard_op': 'IS', 'student_op': 'EQ', 'value': None, 'student_value': None, 'values': None, 'student_values': None, 'standard_sql': 'grade IS NULL', 'student_sql': 'grade = NULL', 'clause': 'PREDICATE', 'diff_type': 'comparison_operator_changed', 'table': None}, {'column': 'grade', 'value': None, 'standard_sql': 'grade IS NULL', 'student_sql': 'grade = NULL', 'clause': 'NULL', 'diff_type': 'null_equality_changed', 'table': None}]`
 * **差异驱动造数策略**: `[{'tactic': 'predicate_counterexample', 'clause': 'WHERE', 'diff_type': 'where_changed'}, {'tactic': 'comparison_boundary_tristate', 'clause': 'PREDICATE', 'diff_type': 'comparison_operator_changed'}, {'tactic': 'null_probe', 'clause': 'NULL', 'diff_type': 'null_equality_changed'}]`
 * **策略检查结果**:
-  1. `PASS` - student.grade values=[None, 'B', 'C', None, 'A', 'B', 'C', None]
+  1. `PASS` - student.grade values=[None, 2, 3, 4, 5, 6, 7, 8]
   2. `PASS` - expected KP=comp-null, actual=['where', 'comp-null']
 * **动态生成的数据集**:
 ```json
@@ -216,42 +216,42 @@ SELECT name FROM student WHERE grade = NULL;
     {
       "ID": 2,
       "name": "Bob__predicate_row_001",
-      "grade": "B"
+      "grade": 2
     },
     {
       "ID": 3,
       "name": "Carol__predicate_row_002",
-      "grade": "C"
+      "grade": 3
     },
     {
       "ID": 4,
       "name": "Dave__predicate_row_003",
-      "grade": null
+      "grade": 4
     },
     {
       "ID": 5,
       "name": "Alice__predicate_row_004",
-      "grade": "A"
+      "grade": 5
     },
     {
       "ID": 6,
       "name": "Bob__predicate_row_005",
-      "grade": "B"
+      "grade": 6
     },
     {
       "ID": 7,
       "name": "Carol__predicate_row_006",
-      "grade": "C"
+      "grade": 7
     },
     {
       "ID": 8,
       "name": "Dave__predicate_row_007",
-      "grade": null
+      "grade": 8
     }
   ]
 }
 ```
-* **标准输出样本**: `[('Alice__predicate_row_000',), ('Dave__predicate_row_003',), ('Dave__predicate_row_007',)]`
+* **标准输出样本**: `[('Alice__predicate_row_000',)]`
 * **学生输出样本**: `[]`
 
 ### DISTINCT 去重探针
@@ -281,64 +281,64 @@ SELECT course_id FROM takes;
       "course_id": 1,
       "sec_id": 1,
       "semester": "Fall",
-      "year": 1,
-      "grade": "A"
+      "year": "2024-01-01",
+      "grade": 1
     },
     {
       "ID": 2,
       "course_id": 1,
       "sec_id": 2,
       "semester": "Spring",
-      "year": 2,
-      "grade": "B"
+      "year": "2024-01-02",
+      "grade": 2
     },
     {
       "ID": 3,
       "course_id": 3,
       "sec_id": 3,
       "semester": "Summer",
-      "year": 3,
-      "grade": "C"
+      "year": "2024-01-03",
+      "grade": 3
     },
     {
       "ID": 4,
       "course_id": 4,
       "sec_id": 4,
       "semester": "Winter",
-      "year": 4,
-      "grade": null
+      "year": "2024-01-04",
+      "grade": 4
     },
     {
       "ID": 5,
       "course_id": 5,
       "sec_id": 5,
       "semester": "Fall",
-      "year": 5,
-      "grade": "A"
+      "year": "2024-01-05",
+      "grade": 5
     },
     {
       "ID": 6,
       "course_id": 6,
       "sec_id": 6,
       "semester": "Spring",
-      "year": 6,
-      "grade": "B"
+      "year": "2024-01-06",
+      "grade": 6
     },
     {
       "ID": 7,
       "course_id": 7,
       "sec_id": 7,
       "semester": "Summer",
-      "year": 7,
-      "grade": "C"
+      "year": "2024-01-07",
+      "grade": 7
     },
     {
       "ID": 8,
       "course_id": 8,
       "sec_id": 8,
       "semester": "Winter",
-      "year": 8,
-      "grade": null
+      "year": "2024-01-08",
+      "grade": 8
     }
   ]
 }
@@ -359,8 +359,8 @@ SELECT student.name FROM student JOIN advisor ON student.ID = advisor.i_ID;
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['join-on']`
-* **AST 差异子树**: `[{'standard_sql': 'student.id = advisor.s_id', 'student_sql': '', 'clause': 'JOIN ON', 'diff_type': 'join_on_changed', 'column': None, 'table': None}]`
-* **差异驱动造数策略**: `[{'tactic': 'join_key_drift_probe', 'clause': 'JOIN ON', 'diff_type': 'join_on_changed'}]`
+* **AST 差异子树**: `[{'standard_sql': 'student.id = advisor.s_id', 'student_sql': '', 'clause': 'JOIN ON', 'diff_type': 'join_on_changed', 'column': None, 'table': None}, {'standard_sql': '', 'student_sql': 'student.id = advisor.i_id', 'clause': 'JOIN ON', 'diff_type': 'join_on_changed', 'column': None, 'table': None}, {'standard_sql': 'student.id = advisor.s_id', 'student_sql': 'student.id = advisor.i_id', 'standard_columns': ['id', 's_id'], 'student_columns': ['id', 'i_id'], 'clause': 'JOIN ON', 'diff_type': 'join_key_column_changed', 'column': None, 'table': None}]`
+* **差异驱动造数策略**: `[{'tactic': 'join_key_drift_probe', 'clause': 'JOIN ON', 'diff_type': 'join_on_changed'}, {'tactic': 'join_key_drift_probe', 'clause': 'JOIN ON', 'diff_type': 'join_on_changed'}]`
 * **策略检查结果**:
   1. `PASS` - student.ID=[1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007], advisor.s_ID=[1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007], advisor.i_ID=[1000, 9101, 1002, 9103, 1004, 9105, 1006, 9107]
   2. `PASS` - expected KP=join-on, actual=['join-on']
@@ -461,10 +461,10 @@ SELECT student.name, takes.course_id FROM student INNER JOIN takes ON student.ID
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['join-left']`
-* **AST 差异子树**: `[{'standard_side': 'LEFT', 'student_side': 'INNER', 'right_table': 'takes', 'standard_sql': 'LEFT JOIN takes ON student.id = takes.id', 'student_sql': 'INNER JOIN takes ON student.id = takes.id', 'clause': 'JOIN_TYPE', 'diff_type': 'join_type_changed', 'column': None, 'table': 'takes'}]`
+* **AST 差异子树**: `[{'standard_side': 'LEFT', 'student_side': 'INNER', 'right_table': 'takes', 'standard_sql': 'LEFT JOIN takes ON student.id = takes.id', 'student_sql': 'INNER JOIN takes ON student.id = takes.id', 'clause': 'JOIN_TYPE', 'diff_type': 'join_type_changed', 'column': None, 'table': 'takes'}, {'standard_sources': (('TABLE:student', (('takes', 'LEFT'),)),), 'student_sources': (('TABLE:student', (('takes', 'INNER'),)),), 'standard_sql': 'FROM student', 'student_sql': 'FROM student', 'clause': 'FROM', 'diff_type': 'from_source_changed', 'column': None, 'table': None}]`
 * **差异驱动造数策略**: `[{'tactic': 'outer_join_dangling_tuple_probe', 'clause': 'JOIN_TYPE', 'diff_type': 'join_type_changed'}]`
 * **策略检查结果**:
-  1. `PASS` - takes.ID values=[1, 2, 3, 4, 5, 6, 7, None], evidence={'sandbox_executed': True, 'student_exec_ok': True, 'student_exec_error': None, 'is_equivalent_on_generated_data': False, 'ordered_compare': False, 'row_count_match': False, 'standard_row_count': 8, 'student_row_count': 7, 'columns_match': True, 'column_names_match': True, 'standard_columns': ['name', 'course_id'], 'student_columns': ['name', 'course_id'], 'standard_duplicate_row_count': 0, 'student_duplicate_row_count': 0, 'suspected_cartesian_product': False, 'only_in_standard_sample': [('Dave', None)], 'only_in_student_sample': [], 'standard_sample_rows': [('Alice', 1), ('Bob', 2), ('Carol', 3), ('Dave', 4), ('Alice', 5)], 'student_sample_rows': [('Alice', 1), ('Bob', 2), ('Carol', 3), ('Dave', 4), ('Alice', 5)], 'ast_diffs': [{'standard_side': 'LEFT', 'student_side': 'INNER', 'right_table': 'takes', 'standard_sql': 'LEFT JOIN takes ON student.id = takes.id', 'student_sql': 'INNER JOIN takes ON student.id = takes.id', 'clause': 'JOIN_TYPE', 'diff_type': 'join_type_changed', 'column': None, 'table': 'takes'}], 'generation_tactics': [{'tactic': 'outer_join_dangling_tuple_probe', 'clause': 'JOIN_TYPE', 'diff_type': 'join_type_changed'}]}
+  1. `PASS` - takes.ID values=[1, 2, 3, 4, 5, 6, 7, None], evidence={'sandbox_executed': True, 'judge_status': 'WRONG', 'student_exec_ok': True, 'student_exec_error': None, 'is_equivalent_on_generated_data': False, 'ordered_compare': False, 'row_count_match': False, 'standard_row_count': 8, 'student_row_count': 7, 'columns_match': True, 'column_names_match': True, 'standard_columns': ['name', 'course_id'], 'student_columns': ['name', 'course_id'], 'standard_duplicate_row_count': 0, 'student_duplicate_row_count': 0, 'suspected_cartesian_product': False, 'only_in_standard_sample': [('Dave', None)], 'only_in_student_sample': [], 'standard_sample_rows': [('Alice', 1), ('Bob', 2), ('Carol', 3), ('Dave', 4), ('Alice', 5)], 'student_sample_rows': [('Alice', 1), ('Bob', 2), ('Carol', 3), ('Dave', 4), ('Alice', 5)], 'ast_diffs': [{'standard_side': 'LEFT', 'student_side': 'INNER', 'right_table': 'takes', 'standard_sql': 'LEFT JOIN takes ON student.id = takes.id', 'student_sql': 'INNER JOIN takes ON student.id = takes.id', 'clause': 'JOIN_TYPE', 'diff_type': 'join_type_changed', 'column': None, 'table': 'takes'}, {'standard_sources': (('TABLE:student', (('takes', 'LEFT'),)),), 'student_sources': (('TABLE:student', (('takes', 'INNER'),)),), 'standard_sql': 'FROM student', 'student_sql': 'FROM student', 'clause': 'FROM', 'diff_type': 'from_source_changed', 'column': None, 'table': None}], 'generation_tactics': [{'tactic': 'outer_join_dangling_tuple_probe', 'clause': 'JOIN_TYPE', 'diff_type': 'join_type_changed'}], 'execution_backend': 'sqlite', 'sql_dialect': 'mysql', 'dialect_resolution': {'status': 'RESOLVED', 'requested_dialect': None, 'resolved_dialect': 'mysql', 'execution_engine': 'mysql', 'source': 'default', 'candidates': [], 'detected_features': [], 'generic_parse_ok': [True, True], 'error': None}}
   2. `PASS` - expected KP=join-left, actual=['join-left']
 * **动态生成的数据集**:
 ```json
@@ -563,8 +563,8 @@ SELECT SUM(salary) FROM instructor GROUP BY building;
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['group-by']`
-* **AST 差异子树**: `[{'standard_sql': 'GROUP BY dept_name', 'student_sql': 'GROUP BY building', 'clause': 'GROUP BY', 'diff_type': 'group_by_changed', 'column': None, 'table': None}]`
-* **差异驱动造数策略**: `[{'tactic': 'group_cardinality_probe', 'clause': 'GROUP BY', 'diff_type': 'group_by_changed'}]`
+* **AST 差异子树**: `[{'standard_sql': 'dept_name', 'student_sql': 'building', 'clause': 'GROUP BY', 'diff_type': 'group_by_changed', 'column': None, 'table': None}, {'standard_keys': ['dept_name'], 'student_keys': ['building'], 'added_keys': ['building'], 'removed_keys': ['dept_name'], 'standard_sql': 'dept_name', 'student_sql': 'building', 'clause': 'GROUP BY', 'diff_type': 'group_by_expression_changed', 'column': 'building', 'table': None}]`
+* **差异驱动造数策略**: `[{'tactic': 'group_cardinality_probe', 'clause': 'GROUP BY', 'diff_type': 'group_by_changed'}, {'tactic': 'group_cross_product_probe', 'clause': 'GROUP BY', 'diff_type': 'group_by_expression_changed'}]`
 * **策略检查结果**:
   1. `PASS` - expected KP=group-by, actual=['group-by']
 * **动态生成的数据集**:
@@ -574,64 +574,64 @@ SELECT SUM(salary) FROM instructor GROUP BY building;
     {
       "ID": 1,
       "name": "Alice",
-      "dept_name": 1,
+      "dept_name": "__group_0_0__",
       "salary": 1,
-      "building": "building_1"
+      "building": "__group_1_0__"
     },
     {
       "ID": 2,
       "name": "Bob",
-      "dept_name": 1,
+      "dept_name": "__group_0_0__",
       "salary": 2,
-      "building": "building_2"
+      "building": "__group_1_1__"
     },
     {
       "ID": 3,
       "name": "Carol",
-      "dept_name": 2,
+      "dept_name": "__group_0_1__",
       "salary": 3,
-      "building": "building_3"
+      "building": "__group_1_0__"
     },
     {
       "ID": 4,
       "name": "Dave",
-      "dept_name": 2,
+      "dept_name": "__group_0_1__",
       "salary": 4,
-      "building": "building_4"
+      "building": "__group_1_1__"
     },
     {
       "ID": 5,
       "name": "Alice",
-      "dept_name": 3,
+      "dept_name": "__group_0_2__",
       "salary": 5,
-      "building": "building_5"
+      "building": "__group_1_0__"
     },
     {
       "ID": 6,
       "name": "Bob",
-      "dept_name": 3,
+      "dept_name": "__group_0_2__",
       "salary": 6,
-      "building": "building_6"
+      "building": "__group_1_1__"
     },
     {
       "ID": 7,
       "name": "Carol",
-      "dept_name": 4,
+      "dept_name": "__group_0_3__",
       "salary": 7,
-      "building": "building_7"
+      "building": "__group_1_0__"
     },
     {
       "ID": 8,
       "name": "Dave",
-      "dept_name": 4,
+      "dept_name": "__group_0_3__",
       "salary": 8,
-      "building": "building_8"
+      "building": "__group_1_1__"
     }
   ]
 }
 ```
 * **标准输出样本**: `[(3,), (7,), (11,), (15,)]`
-* **学生输出样本**: `[(1,), (2,), (3,), (4,), (5,)]`
+* **学生输出样本**: `[(16,), (20,)]`
 
 ### HAVING SUM 聚合边界三态
 * **策略说明**：由于 HAVING 过滤发生在分组聚合之后，不能直接改写基表单行数据。系统将记录按分组归类，并分别对各组数据做三态控制，使各分组的聚合 `SUM` 目标值精确达到 $c + 1$（阳性通过）、$c$（临界差异）和 $c - 1$（阴性过滤）。再除以组内行数 $k$ 填充回单行记录中，激活 HAVING 谓词边界过滤。
@@ -1026,10 +1026,10 @@ SELECT title FROM course ORDER BY credits ASC;
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['order-by']`
-* **AST 差异子树**: `[{'standard_sql': 'ORDER BY credits DESC', 'student_sql': 'ORDER BY credits ASC', 'clause': 'ORDER BY', 'diff_type': 'order_by_changed', 'column': None, 'table': None}]`
-* **差异驱动造数策略**: `[{'tactic': 'ordered_compare_probe', 'clause': 'ORDER BY', 'diff_type': 'order_by_changed'}]`
+* **AST 差异子树**: `[{'standard_sql': 'ORDER BY credits DESC', 'student_sql': 'ORDER BY credits ASC', 'clause': 'ORDER BY', 'diff_type': 'order_by_changed', 'column': None, 'table': None}, {'standard_keys': [('credits', True)], 'student_keys': [('credits', False)], 'clause': 'ORDER BY', 'diff_type': 'order_direction_changed', 'column': None, 'table': None, 'standard_sql': 'ORDER BY credits DESC', 'student_sql': 'ORDER BY credits ASC'}]`
+* **差异驱动造数策略**: `[{'tactic': 'ordered_compare_probe', 'clause': 'ORDER BY', 'diff_type': 'order_by_changed'}, {'tactic': 'ordered_compare_probe', 'clause': 'ORDER BY', 'diff_type': 'order_direction_changed'}]`
 * **策略检查结果**:
-  1. `PASS` - evidence={'sandbox_executed': True, 'student_exec_ok': True, 'student_exec_error': None, 'is_equivalent_on_generated_data': False, 'ordered_compare': True, 'row_count_match': True, 'standard_row_count': 8, 'student_row_count': 8, 'columns_match': True, 'column_names_match': True, 'standard_columns': ['title'], 'student_columns': ['title'], 'standard_duplicate_row_count': 0, 'student_duplicate_row_count': 0, 'suspected_cartesian_product': False, 'only_in_standard_sample': [], 'only_in_student_sample': [], 'standard_sample_rows': [('Engineer__row_006__row_006',), ('Sales Manager__row_004__row_004',), ('Marketing Lead__row_005__row_005',), ('Engineer__row_002__row_002',), ('Analyst__row_003__row_003',)], 'student_sample_rows': [('Analyst__row_007__row_007',), ('Sales Manager__row_000__row_000',), ('Marketing Lead__row_001__row_001',), ('Engineer__row_002__row_002',), ('Analyst__row_003__row_003',)], 'ast_diffs': [{'standard_sql': 'ORDER BY credits DESC', 'student_sql': 'ORDER BY credits ASC', 'clause': 'ORDER BY', 'diff_type': 'order_by_changed', 'column': None, 'table': None}], 'generation_tactics': [{'tactic': 'ordered_compare_probe', 'clause': 'ORDER BY', 'diff_type': 'order_by_changed'}]}
+  1. `PASS` - evidence={'sandbox_executed': True, 'judge_status': 'WRONG', 'student_exec_ok': True, 'student_exec_error': None, 'is_equivalent_on_generated_data': False, 'ordered_compare': True, 'row_count_match': True, 'standard_row_count': 8, 'student_row_count': 8, 'columns_match': True, 'column_names_match': True, 'standard_columns': ['title'], 'student_columns': ['title'], 'standard_duplicate_row_count': 0, 'student_duplicate_row_count': 0, 'suspected_cartesian_product': False, 'only_in_standard_sample': [], 'only_in_student_sample': [], 'standard_sample_rows': [('Engineer__row_006__row_006',), ('Sales Manager__row_004__row_004',), ('Marketing Lead__row_005__row_005',), ('Engineer__row_002__row_002',), ('Analyst__row_003__row_003',)], 'student_sample_rows': [('Analyst__row_007__row_007',), ('Sales Manager__row_000__row_000',), ('Marketing Lead__row_001__row_001',), ('Engineer__row_002__row_002',), ('Analyst__row_003__row_003',)], 'ast_diffs': [{'standard_sql': 'ORDER BY credits DESC', 'student_sql': 'ORDER BY credits ASC', 'clause': 'ORDER BY', 'diff_type': 'order_by_changed', 'column': None, 'table': None}, {'standard_keys': [('credits', True)], 'student_keys': [('credits', False)], 'clause': 'ORDER BY', 'diff_type': 'order_direction_changed', 'column': None, 'table': None, 'standard_sql': 'ORDER BY credits DESC', 'student_sql': 'ORDER BY credits ASC'}], 'generation_tactics': [{'tactic': 'ordered_compare_probe', 'clause': 'ORDER BY', 'diff_type': 'order_by_changed'}, {'tactic': 'ordered_compare_probe', 'clause': 'ORDER BY', 'diff_type': 'order_direction_changed'}], 'execution_backend': 'sqlite', 'sql_dialect': 'mysql', 'dialect_resolution': {'status': 'RESOLVED', 'requested_dialect': None, 'resolved_dialect': 'mysql', 'execution_engine': 'mysql', 'source': 'default', 'candidates': [], 'detected_features': [], 'generic_parse_ok': [True, True], 'error': None}}
   2. `PASS` - expected KP=order-by, actual=['order-by']
 * **动态生成的数据集**:
 ```json
@@ -1181,19 +1181,19 @@ SELECT name FROM student WHERE ID NOT IN (SELECT ID FROM takes WHERE year = 2017
 * **AST 差异子树**: `[{'standard_sql': 'id IN (SELECT id FROM takes WHERE year = 2017)', 'student_sql': 'NOT id IN (SELECT id FROM takes WHERE year = 2017)', 'clause': 'WHERE', 'diff_type': 'where_changed', 'column': None, 'table': None}]`
 * **差异驱动造数策略**: `[{'tactic': 'predicate_counterexample', 'clause': 'WHERE', 'diff_type': 'where_changed'}]`
 * **策略检查结果**:
-  1. `PASS` - student.ID=[1, 2, 3, 4, 5, 6, 7, 8], takes.ID=[1, 2014, 2016, 2019, 2022, 2023, 2024, None]
+  1. `PASS` - student.ID=[1000, 3, 4, 5, 6, 7, 8], takes.ID=[2014, 2016, 2019, 2022, 2023, 2024, 3, None]
   2. `PASS` - expected KP=where, actual=['where', 'subquery-scalar']
 * **动态生成的数据集**:
 ```json
 {
   "student": [
     {
-      "ID": 1,
+      "ID": 1000,
       "name": "Alice__predicate_row_000",
       "dept_name": "Comp. Sci."
     },
     {
-      "ID": 2,
+      "ID": 1000,
       "name": "Bob__predicate_row_001",
       "dept_name": "Math"
     },
@@ -1232,42 +1232,42 @@ SELECT name FROM student WHERE ID NOT IN (SELECT ID FROM takes WHERE year = 2017
     {
       "ID": null,
       "course_id": 1,
-      "year": 1
+      "year": "2024-01-01"
     },
     {
-      "ID": 1,
+      "ID": 3,
       "course_id": 1,
-      "year": 2
+      "year": "2024-01-02"
     },
     {
       "ID": 2019,
       "course_id": 2,
-      "year": 3
+      "year": "2024-01-03"
     },
     {
       "ID": 2016,
       "course_id": 2,
-      "year": 4
+      "year": "2024-01-04"
     },
     {
       "ID": 2022,
       "course_id": 3,
-      "year": 5
+      "year": "2024-01-05"
     },
     {
       "ID": 2024,
       "course_id": 3,
-      "year": 6
+      "year": "2024-01-06"
     },
     {
       "ID": 2014,
       "course_id": 4,
-      "year": 7
+      "year": "2024-01-07"
     },
     {
       "ID": 2023,
       "course_id": 4,
-      "year": 8
+      "year": "2024-01-08"
     }
   ]
 }
@@ -1288,11 +1288,11 @@ SELECT name FROM student s WHERE EXISTS (SELECT 1 FROM takes t WHERE t.ID = s.ID
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['where', 'subquery-correlated']`
-* **AST 差异子树**: `[{'standard_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2017)', 'student_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2018)', 'clause': 'WHERE', 'diff_type': 'where_changed', 'column': None, 'table': None}, {'standard_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2017)', 'student_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2018)', 'clause': 'CORRELATED SUBQUERY', 'diff_type': 'correlated_predicate_changed', 'column': None, 'table': None}, {'subquery_depth': 1, 'standard_sql': 'SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2017', 'student_sql': 'SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2018', 'clause': 'CORRELATED SUBQUERY', 'diff_type': 'correlated_predicate_changed', 'column': None, 'table': None}, {'standard_sql': 't.year = 2017', 'student_sql': 't.year = 2018', 'subquery_depth': 1, 'clause': 'WHERE', 'diff_type': 'where_changed', 'column': None, 'table': None}, {'column': 'year', 'standard_op': 'EQ', 'student_op': 'EQ', 'value': 2017, 'student_value': 2018, 'values': None, 'student_values': None, 'standard_sql': 't.year = 2017', 'student_sql': 't.year = 2018', 'subquery_depth': 1, 'clause': 'PREDICATE', 'diff_type': 'literal_changed', 'table': None}]`
-* **差异驱动造数策略**: `[{'tactic': 'predicate_counterexample', 'clause': 'WHERE', 'diff_type': 'where_changed'}, {'tactic': 'predicate_counterexample', 'clause': 'WHERE', 'diff_type': 'where_changed'}, {'tactic': 'literal_boundary_tristate', 'clause': 'PREDICATE', 'diff_type': 'literal_changed'}]`
+* **AST 差异子树**: `[{'standard_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2017)', 'student_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2018)', 'clause': 'WHERE', 'diff_type': 'where_changed', 'column': None, 'table': None}, {'function': 'EXISTS', 'standard_args': ['SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2017'], 'student_args': ['SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2018'], 'standard_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2017)', 'student_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2018)', 'clause': 'FUNCTION', 'diff_type': 'function_argument_changed', 'column': 'ID', 'table': None}, {'standard_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2017)', 'student_sql': 'EXISTS(SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2018)', 'clause': 'CORRELATED SUBQUERY', 'diff_type': 'correlated_predicate_changed', 'column': None, 'table': None}, {'subquery_depth': 1, 'standard_sql': 'SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2017', 'student_sql': 'SELECT 1 FROM takes AS t WHERE t.id = s.id AND t.year = 2018', 'clause': 'CORRELATED SUBQUERY', 'diff_type': 'correlated_predicate_changed', 'column': None, 'table': None}, {'standard_sql': 't.year = 2017', 'student_sql': 't.year = 2018', 'subquery_depth': 1, 'clause': 'WHERE', 'diff_type': 'where_changed', 'column': None, 'table': None}, {'function': 'AND', 'standard_args': ['t.id = s.id', 't.year = 2017'], 'student_args': ['t.id = s.id', 't.year = 2018'], 'standard_sql': 't.id = s.id AND t.year = 2017', 'student_sql': 't.id = s.id AND t.year = 2018', 'subquery_depth': 1, 'clause': 'FUNCTION', 'diff_type': 'function_argument_changed', 'column': 'ID', 'table': None}, {'column': 'year', 'standard_op': 'EQ', 'student_op': 'EQ', 'value': 2017, 'student_value': 2018, 'values': None, 'student_values': None, 'standard_sql': 't.year = 2017', 'student_sql': 't.year = 2018', 'subquery_depth': 1, 'clause': 'PREDICATE', 'diff_type': 'literal_changed', 'table': None}]`
+* **差异驱动造数策略**: `[{'tactic': 'predicate_counterexample', 'clause': 'WHERE', 'diff_type': 'where_changed'}, {'tactic': 'function_argument_boundary_probe', 'clause': 'FUNCTION', 'diff_type': 'function_argument_changed'}, {'tactic': 'correlated_subquery_path_probe', 'clause': 'CORRELATED SUBQUERY', 'diff_type': 'correlated_predicate_changed'}, {'tactic': 'correlated_subquery_path_probe', 'clause': 'CORRELATED SUBQUERY', 'diff_type': 'correlated_predicate_changed'}, {'tactic': 'predicate_counterexample', 'clause': 'WHERE', 'diff_type': 'where_changed'}, {'tactic': 'function_argument_boundary_probe', 'clause': 'FUNCTION', 'diff_type': 'function_argument_changed'}, {'tactic': 'literal_boundary_tristate', 'clause': 'PREDICATE', 'diff_type': 'literal_changed'}]`
 * **策略检查结果**:
   1. `PASS` - student.ID=[1, 2, 3, 4, 5, 6, 7, 8], takes.ID=[1, 2, 3, 4, 5, 6, 7, 8]
-  2. `PASS` - takes.year values=[2017, 2018, 2016, 2018, 5, 6, 7, 2018], required=[2016, 2017, 2018]
+  2. `PASS` - takes.year values=[2017, 2018, 2016, 2018, '2024-01-05', '2024-01-06', '2024-01-07', 2018], required=[2016, 2017, 2018]
   3. `PASS` - expected KP=subquery-correlated, actual=['where', 'subquery-correlated']
 * **动态生成的数据集**:
 ```json
@@ -1363,17 +1363,17 @@ SELECT name FROM student s WHERE EXISTS (SELECT 1 FROM takes t WHERE t.ID = s.ID
     {
       "ID": 5,
       "course_id": 5,
-      "year": 5
+      "year": "2024-01-05"
     },
     {
       "ID": 6,
       "course_id": 6,
-      "year": 6
+      "year": "2024-01-06"
     },
     {
       "ID": 7,
       "course_id": 7,
-      "year": 7
+      "year": "2024-01-07"
     },
     {
       "ID": 8,
@@ -1399,8 +1399,8 @@ SELECT title FROM course WHERE dept_name = 'Math' UNION ALL SELECT title FROM co
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['union']`
-* **AST 差异子树**: `[{'standard_op': 'UNION', 'student_op': 'UNION', 'standard_modifier': 'DISTINCT', 'student_modifier': 'ALL', 'standard_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course WHERE dept_name = 'Physics'", 'student_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION ALL SELECT title FROM course WHERE dept_name = 'Physics'", 'clause': 'UNION', 'diff_type': 'set_operator_changed', 'column': None, 'table': None}]`
-* **差异驱动造数策略**: `[{'tactic': 'set_operator_overlap_probe', 'clause': 'UNION', 'diff_type': 'set_operator_changed'}]`
+* **AST 差异子树**: `[{'standard_op': 'UNION', 'student_op': 'UNION', 'standard_modifier': 'DISTINCT', 'student_modifier': 'ALL', 'standard_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course WHERE dept_name = 'Physics'", 'student_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION ALL SELECT title FROM course WHERE dept_name = 'Physics'", 'clause': 'UNION', 'diff_type': 'set_operator_changed', 'column': None, 'table': None}, {'operator': 'UNION', 'standard_modifier': 'DISTINCT', 'student_modifier': 'ALL', 'standard_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course WHERE dept_name = 'Physics'", 'student_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION ALL SELECT title FROM course WHERE dept_name = 'Physics'", 'clause': 'UNION', 'diff_type': 'set_modifier_changed', 'column': None, 'table': None}, {'standard_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course WHERE dept_name = 'Physics'", 'student_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION ALL SELECT title FROM course WHERE dept_name = 'Physics'", 'standard_modifier': 'DISTINCT', 'student_modifier': 'ALL', 'clause': 'UNION', 'diff_type': 'set_all_modifier_changed', 'column': None, 'table': None}]`
+* **差异驱动造数策略**: `[{'tactic': 'set_operator_overlap_probe', 'clause': 'UNION', 'diff_type': 'set_operator_changed'}, {'tactic': 'set_operator_overlap_probe', 'clause': 'UNION', 'diff_type': 'set_modifier_changed'}]`
 * **策略检查结果**:
   1. `PASS` - expected KP=union, actual=['union']
 * **动态生成的数据集**:
@@ -1409,14 +1409,14 @@ SELECT title FROM course WHERE dept_name = 'Math' UNION ALL SELECT title FROM co
   "course": [
     {
       "course_id": 1,
-      "title": "Sales Manager",
+      "title": "__set_overlap_0__",
       "dept_name": "Math",
       "credits": 1
     },
     {
       "course_id": 2,
-      "title": "Sales Manager",
-      "dept_name": "Math",
+      "title": "__set_overlap_0__",
+      "dept_name": "Physics",
       "credits": 2
     },
     {
@@ -1451,15 +1451,15 @@ SELECT title FROM course WHERE dept_name = 'Math' UNION ALL SELECT title FROM co
     },
     {
       "course_id": 8,
-      "title": null,
+      "title": "Analyst",
       "dept_name": "not_Math",
       "credits": 8
     }
   ]
 }
 ```
-* **标准输出样本**: `[('Analyst',), ('Engineer',), ('Marketing Lead',), ('Sales Manager',)]`
-* **学生输出样本**: `[('Sales Manager',), ('Sales Manager',), ('Engineer',), ('Marketing Lead',), ('Analyst',)]`
+* **标准输出样本**: `[('Analyst',), ('Engineer',), ('Marketing Lead',), ('__set_overlap_0__',)]`
+* **学生输出样本**: `[('__set_overlap_0__',), ('Engineer',), ('Marketing Lead',), ('__set_overlap_0__',), ('Analyst',)]`
 
 ### 集合操作 INTERSECT 交集差异
 * **策略说明**：在数据生成阶段，分别生成“仅满足左侧条件”、“仅满足右侧条件”以及“同时满足两侧条件”的记录。当学生错写集合操作符（如用 `UNION` 替代了 `INTERSECT`）时，沙盒执行结果将从交集空集或子集膨胀为并集，暴露逻辑错。
@@ -1474,8 +1474,8 @@ SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['intersect']`
-* **AST 差异子树**: `[{'standard_op': 'INTERSECT', 'student_op': 'UNION', 'standard_modifier': 'DISTINCT', 'student_modifier': 'DISTINCT', 'standard_sql': "SELECT title FROM course WHERE dept_name = 'Math' INTERSECT SELECT title FROM course WHERE credits > 3", 'student_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course WHERE credits > 3", 'clause': 'INTERSECT', 'diff_type': 'set_operator_changed', 'column': None, 'table': None}]`
-* **差异驱动造数策略**: `[{'tactic': 'set_operator_overlap_probe', 'clause': 'INTERSECT', 'diff_type': 'set_operator_changed'}]`
+* **AST 差异子树**: `[{'standard_op': 'INTERSECT', 'student_op': 'UNION', 'standard_modifier': 'DISTINCT', 'student_modifier': 'DISTINCT', 'standard_sql': "SELECT title FROM course WHERE dept_name = 'Math' INTERSECT SELECT title FROM course WHERE credits > 3", 'student_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course WHERE credits > 3", 'clause': 'INTERSECT', 'diff_type': 'set_operator_changed', 'column': None, 'table': None}, {'standard_sql': "SELECT title FROM course WHERE dept_name = 'Math' INTERSECT SELECT title FROM course WHERE credits > 3", 'student_sql': "SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course WHERE credits > 3", 'clause': 'UNION', 'diff_type': 'set_operator_changed', 'column': None, 'table': None}]`
+* **差异驱动造数策略**: `[{'tactic': 'set_operator_overlap_probe', 'clause': 'INTERSECT', 'diff_type': 'set_operator_changed'}, {'tactic': 'set_operator_overlap_probe', 'clause': 'UNION', 'diff_type': 'set_operator_changed'}]`
 * **策略检查结果**:
   1. `PASS` - expected KP=intersect, actual=['intersect']
 * **动态生成的数据集**:
@@ -1484,13 +1484,13 @@ SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course
   "course": [
     {
       "course_id": 1,
-      "title": "Sales Manager",
+      "title": "__set_left_0__",
       "dept_name": "Math",
       "credits": 3
     },
     {
       "course_id": 2,
-      "title": "Sales Manager",
+      "title": "__set_right_0__",
       "dept_name": "Math",
       "credits": 4
     },
@@ -1526,15 +1526,15 @@ SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course
     },
     {
       "course_id": 8,
-      "title": null,
+      "title": "Analyst",
       "dept_name": "Math",
       "credits": 3
     }
   ]
 }
 ```
-* **标准输出样本**: `[('Marketing Lead',), ('Sales Manager',)]`
-* **学生输出样本**: `[(None,), ('Engineer',), ('Marketing Lead',), ('Sales Manager',)]`
+* **标准输出样本**: `[('Marketing Lead',), ('__set_right_0__',)]`
+* **学生输出样本**: `[('Analyst',), ('Engineer',), ('Marketing Lead',), ('Sales Manager',), ('__set_left_0__',)]`
 
 ### 集合操作 EXCEPT 排他差异
 * **策略说明**：提取 EXCEPT 右侧的过滤条件并在数据中生成排他数据行。这能保证当学生漏写了 `EXCEPT` 差集排除逻辑时，学生 SQL 的输出中会多出本应该被剔除的行，打破等价性。
@@ -1552,7 +1552,7 @@ SELECT title FROM course;
 * **AST 差异子树**: `[{'standard_sql': "dept_name = 'Physics'", 'student_sql': '', 'clause': 'WHERE', 'diff_type': 'where_changed', 'column': None, 'table': None}, {'column': 'dept_name', 'op': 'EQ', 'value': 'Physics', 'value_is_null': False, 'sql': "dept_name = 'Physics'", 'node': EQ(
   this=Column(
     this=Identifier(this=dept_name, quoted=False)),
-  expression=Literal(this='Physics', is_string=True)), 'standard_sql': "dept_name = 'Physics'", 'student_sql': '', 'clause': 'PREDICATE', 'diff_type': 'predicate_missing', 'table': None}, {'standard_op': 'EXCEPT', 'student_op': None, 'standard_modifier': 'DISTINCT', 'student_modifier': None, 'standard_sql': "SELECT title FROM course EXCEPT SELECT title FROM course WHERE dept_name = 'Physics'", 'student_sql': 'SELECT title FROM course', 'clause': 'EXCEPT', 'diff_type': 'set_operator_changed', 'column': None, 'table': None}]`
+  expression=Literal(this='Physics', is_string=True)), 'standard_sql': "dept_name = 'Physics'", 'student_sql': '', 'clause': 'PREDICATE', 'diff_type': 'predicate_missing', 'table': None}, {'standard_op': 'EXCEPT', 'student_op': None, 'standard_modifier': 'DISTINCT', 'student_modifier': None, 'standard_sql': "SELECT title FROM course EXCEPT SELECT title FROM course WHERE dept_name = 'Physics'", 'student_sql': 'SELECT title FROM course', 'clause': 'EXCEPT', 'diff_type': 'set_operator_changed', 'column': None, 'table': None}, {'standard_sources': (('TABLE:course', ()), ('TABLE:course', ())), 'student_sources': (('TABLE:course', ()),), 'standard_sql': 'FROM course', 'student_sql': 'FROM course', 'clause': 'FROM', 'diff_type': 'from_source_changed', 'column': None, 'table': None}]`
 * **差异驱动造数策略**: `[{'tactic': 'predicate_counterexample', 'clause': 'WHERE', 'diff_type': 'where_changed'}, {'tactic': 'predicate_positive_negative_probe', 'clause': 'PREDICATE', 'diff_type': 'predicate_missing'}, {'tactic': 'set_operator_overlap_probe', 'clause': 'EXCEPT', 'diff_type': 'set_operator_changed'}]`
 * **策略检查结果**:
   1. `PASS` - expected KP=except, actual=['except', 'where']
@@ -1562,13 +1562,13 @@ SELECT title FROM course;
   "course": [
     {
       "course_id": 1,
-      "title": "Sales Manager__predicate_row_000",
+      "title": "__set_overlap_0____predicate_row_000",
       "dept_name": "Physics",
       "credits": 1
     },
     {
       "course_id": 2,
-      "title": "Sales Manager__predicate_row_001",
+      "title": "Marketing Lead__predicate_row_001",
       "dept_name": "Physics",
       "credits": 2
     },
@@ -1604,15 +1604,15 @@ SELECT title FROM course;
     },
     {
       "course_id": 8,
-      "title": null,
+      "title": "Analyst__predicate_row_007",
       "dept_name": "not_Physics",
       "credits": 8
     }
   ]
 }
 ```
-* **标准输出样本**: `[(None,), ('Analyst__predicate_row_003',), ('Marketing Lead__predicate_row_005',), ('Sales Manager__predicate_row_004',)]`
-* **学生输出样本**: `[('Sales Manager__predicate_row_000',), ('Sales Manager__predicate_row_001',), ('Engineer__predicate_row_002',), ('Analyst__predicate_row_003',), ('Sales Manager__predicate_row_004',)]`
+* **标准输出样本**: `[('Analyst__predicate_row_003',), ('Analyst__predicate_row_007',), ('Marketing Lead__predicate_row_005',), ('Sales Manager__predicate_row_004',)]`
+* **学生输出样本**: `[('__set_overlap_0____predicate_row_000',), ('Marketing Lead__predicate_row_001',), ('Engineer__predicate_row_002',), ('Analyst__predicate_row_003',), ('Sales Manager__predicate_row_004',)]`
 
 ### CASE WHEN 分支边界三态
 * **策略说明**：针对 CASE WHEN 块中的各个分支条件（如 `amount > 100`），分别产生满足三态边界（$c$、$c+1$、$c-1$）的测试数据，从而在沙盒执行时强制遍历所有计算和转换分支，校验条件边界的准确性。
@@ -1627,8 +1627,8 @@ SELECT category, SUM(CASE WHEN amount >= 100 THEN amount ELSE 0 END) AS big_sale
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['select-basic', 'case']`
-* **AST 差异子树**: `[{'standard_sql': 'category, SUM(CASE WHEN amount > 100 THEN amount ELSE 0 END) AS big_sales', 'student_sql': 'category, SUM(CASE WHEN amount >= 100 THEN amount ELSE 0 END) AS big_sales', 'clause': 'SELECT', 'diff_type': 'projection_changed', 'column': None, 'table': None}, {'standard_sql': 'SUM(CASE WHEN amount > 100 THEN amount ELSE 0 END) AS big_sales', 'student_sql': '', 'position': 1, 'clause': 'SELECT', 'diff_type': 'column_dropped', 'column': 'amount', 'table': None}, {'standard_sql': '', 'student_sql': 'SUM(CASE WHEN amount >= 100 THEN amount ELSE 0 END) AS big_sales', 'position': 1, 'clause': 'SELECT', 'diff_type': 'column_added', 'column': 'amount', 'table': None}, {'column': 'amount', 'standard_op': 'GT', 'student_op': 'GTE', 'value': 100, 'student_value': 100, 'values': None, 'student_values': None, 'standard_sql': 'amount > 100', 'student_sql': 'amount >= 100', 'clause': 'PREDICATE', 'diff_type': 'comparison_operator_changed', 'table': None}, {'standard_sql': 'CASE WHEN amount > 100 THEN amount ELSE 0 END', 'student_sql': 'CASE WHEN amount >= 100 THEN amount ELSE 0 END', 'clause': 'CASE', 'diff_type': 'case_changed', 'column': None, 'table': None}]`
-* **差异驱动造数策略**: `[{'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'projection_changed'}, {'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'column_dropped'}, {'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'column_added'}, {'tactic': 'comparison_boundary_tristate', 'clause': 'PREDICATE', 'diff_type': 'comparison_operator_changed'}, {'tactic': 'case_branch_probe', 'clause': 'CASE', 'diff_type': 'case_changed'}]`
+* **AST 差异子树**: `[{'standard_sql': 'category, SUM(CASE WHEN amount > 100 THEN amount ELSE 0 END)', 'student_sql': 'category, SUM(CASE WHEN amount >= 100 THEN amount ELSE 0 END)', 'clause': 'SELECT', 'diff_type': 'projection_changed', 'column': None, 'table': None}, {'standard_sql': 'SUM(CASE WHEN amount > 100 THEN amount ELSE 0 END)', 'student_sql': '', 'position': 1, 'clause': 'SELECT', 'diff_type': 'column_dropped', 'column': 'amount', 'table': None}, {'standard_sql': '', 'student_sql': 'SUM(CASE WHEN amount >= 100 THEN amount ELSE 0 END)', 'position': 1, 'clause': 'SELECT', 'diff_type': 'column_added', 'column': 'amount', 'table': None}, {'function': 'CASE', 'standard_args': ['IIF(amount > 100, amount)', '0'], 'student_args': ['IIF(amount >= 100, amount)', '0'], 'standard_sql': 'CASE WHEN amount > 100 THEN amount ELSE 0 END', 'student_sql': 'CASE WHEN amount >= 100 THEN amount ELSE 0 END', 'clause': 'FUNCTION', 'diff_type': 'function_argument_changed', 'column': 'amount', 'table': None}, {'function': 'IF', 'standard_args': ['amount > 100', 'amount'], 'student_args': ['amount >= 100', 'amount'], 'standard_sql': 'IIF(amount > 100, amount)', 'student_sql': 'IIF(amount >= 100, amount)', 'clause': 'FUNCTION', 'diff_type': 'function_argument_changed', 'column': 'amount', 'table': None}, {'column': 'amount', 'standard_op': 'GT', 'student_op': 'GTE', 'value': 100, 'student_value': 100, 'values': None, 'student_values': None, 'standard_sql': 'amount > 100', 'student_sql': 'amount >= 100', 'clause': 'PREDICATE', 'diff_type': 'comparison_operator_changed', 'table': None}, {'standard_sql': 'CASE WHEN amount > 100 THEN amount ELSE 0 END', 'student_sql': 'CASE WHEN amount >= 100 THEN amount ELSE 0 END', 'clause': 'CASE', 'diff_type': 'case_changed', 'column': None, 'table': None}]`
+* **差异驱动造数策略**: `[{'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'projection_changed'}, {'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'column_dropped'}, {'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'column_added'}, {'tactic': 'function_argument_boundary_probe', 'clause': 'FUNCTION', 'diff_type': 'function_argument_changed'}, {'tactic': 'function_argument_boundary_probe', 'clause': 'FUNCTION', 'diff_type': 'function_argument_changed'}, {'tactic': 'comparison_boundary_tristate', 'clause': 'PREDICATE', 'diff_type': 'comparison_operator_changed'}, {'tactic': 'case_branch_probe', 'clause': 'CASE', 'diff_type': 'case_changed'}]`
 * **策略检查结果**:
   1. `PASS` - sales.amount values=[100, 101, 99, 100, 5, 6, 7, 100], required=[99, 100, 101]
   2. `PASS` - expected KP=case, actual=['select-basic', 'case']
@@ -1695,7 +1695,7 @@ SELECT name, ROW_NUMBER() OVER (ORDER BY salary DESC) AS rank FROM instructor;
 ```
 * **沙盒判定等价性**: `False`
 * **归因 KP**: `['window-row-number', 'select-basic']`
-* **AST 差异子树**: `[{'standard_sql': 'name, ROW_NUMBER() OVER (PARTITION BY dept_name ORDER BY salary DESC) AS rank', 'student_sql': 'name, ROW_NUMBER() OVER (ORDER BY salary DESC) AS rank', 'clause': 'SELECT', 'diff_type': 'projection_changed', 'column': None, 'table': None}, {'standard_sql': 'ROW_NUMBER() OVER (PARTITION BY dept_name ORDER BY salary DESC) AS rank', 'student_sql': '', 'position': 1, 'clause': 'SELECT', 'diff_type': 'column_dropped', 'column': 'dept_name', 'table': None}, {'standard_sql': '', 'student_sql': 'ROW_NUMBER() OVER (ORDER BY salary DESC) AS rank', 'position': 1, 'clause': 'SELECT', 'diff_type': 'column_added', 'column': 'salary', 'table': None}, {'standard_sql': 'ROW_NUMBER() OVER (PARTITION BY dept_name ORDER BY salary DESC)', 'student_sql': 'ROW_NUMBER() OVER (ORDER BY salary DESC)', 'clause': 'WINDOW', 'diff_type': 'window_over_changed', 'column': None, 'table': None}]`
+* **AST 差异子树**: `[{'standard_sql': 'name, ROW_NUMBER() OVER (PARTITION BY dept_name ORDER BY salary DESC)', 'student_sql': 'name, ROW_NUMBER() OVER (ORDER BY salary DESC)', 'clause': 'SELECT', 'diff_type': 'projection_changed', 'column': None, 'table': None}, {'standard_sql': 'ROW_NUMBER() OVER (PARTITION BY dept_name ORDER BY salary DESC)', 'student_sql': '', 'position': 1, 'clause': 'SELECT', 'diff_type': 'column_dropped', 'column': 'dept_name', 'table': None}, {'standard_sql': '', 'student_sql': 'ROW_NUMBER() OVER (ORDER BY salary DESC)', 'position': 1, 'clause': 'SELECT', 'diff_type': 'column_added', 'column': 'salary', 'table': None}, {'standard_over': {'partition_by': ['dept_name'], 'order': 'ORDER BY salary DESC', 'frame': ''}, 'student_over': {'partition_by': [], 'order': 'ORDER BY salary DESC', 'frame': ''}, 'standard_sql': 'ROW_NUMBER() OVER (PARTITION BY dept_name ORDER BY salary DESC)', 'student_sql': 'ROW_NUMBER() OVER (ORDER BY salary DESC)', 'clause': 'WINDOW', 'diff_type': 'window_over_changed', 'column': None, 'table': None}]`
 * **差异驱动造数策略**: `[{'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'projection_changed'}, {'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'column_dropped'}, {'tactic': 'projection_shape_check', 'clause': 'SELECT', 'diff_type': 'column_added'}, {'tactic': 'window_partition_order_probe', 'clause': 'WINDOW', 'diff_type': 'window_over_changed'}]`
 * **策略检查结果**:
   1. `PASS` - dept group_counts={'dept_name_group_1': 3, 'dept_name_group_2': 3, 'dept_name_group_3': 2}, salaries=[1, 1, 3, 3, 5, 5, 7, 7]
@@ -1774,7 +1774,7 @@ WITH big_co AS (SELECT company_name FROM company WHERE city = 'Beijing') SELECT 
 * **AST 差异子树**: `[{'standard_sql': 'salary > 10000', 'student_sql': 'salary < 10000', 'clause': 'WHERE', 'diff_type': 'where_changed', 'column': None, 'table': None}, {'column': 'salary', 'standard_op': 'GT', 'student_op': 'LT', 'value': 10000, 'student_value': 10000, 'values': None, 'student_values': None, 'standard_sql': 'salary > 10000', 'student_sql': 'salary < 10000', 'clause': 'PREDICATE', 'diff_type': 'comparison_operator_changed', 'table': None}]`
 * **差异驱动造数策略**: `[{'tactic': 'predicate_counterexample', 'clause': 'WHERE', 'diff_type': 'where_changed'}, {'tactic': 'comparison_boundary_tristate', 'clause': 'PREDICATE', 'diff_type': 'comparison_operator_changed'}]`
 * **策略检查结果**:
-  1. `PASS` - works.salary values=[10000, 10001, 9999, 10000, 5, 6, 7, 10000], required=[9999, 10000, 10001]
+  1. `PASS` - works.salary values=[-1, 10001, 9999, 10000, 5, 6, 7, 10000], required=[9999, 10000, 10001]
   2. `PASS` - expected KP=where, actual=['where']
 * **动态生成的数据集**:
 ```json
@@ -1783,7 +1783,7 @@ WITH big_co AS (SELECT company_name FROM company WHERE city = 'Beijing') SELECT 
     {
       "company_name": "Alice",
       "person_name": "Alice__predicate_row_000__cte_row_000",
-      "salary": 10000
+      "salary": -1
     },
     {
       "company_name": "Bob",
@@ -1858,7 +1858,7 @@ WITH big_co AS (SELECT company_name FROM company WHERE city = 'Beijing') SELECT 
 }
 ```
 * **标准输出样本**: `[('Bob__predicate_row_001__cte_row_001', 10001)]`
-* **学生输出样本**: `[('Alice__predicate_row_004__cte_row_004', 5), ('Bob__predicate_row_005__cte_row_005', 6)]`
+* **学生输出样本**: `[('Alice__predicate_row_000__cte_row_000', -1), ('Alice__predicate_row_004__cte_row_004', 5), ('Bob__predicate_row_005__cte_row_005', 6)]`
 
 ### 递归 CTE 终止边界与沙盒熔断
 * **策略说明**：静态检测 `WITH RECURSIVE` 结构。除了在自引用序列上产生离散数据校验终止边界外，还在 SQLite 沙盒执行时启用虚拟机周期计数器（Progress Handler），将指令周期锁定在 10 万个以内。一旦死循环立即熔断，防止系统被学生错误 SQL 挂死。

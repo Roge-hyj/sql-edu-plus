@@ -148,6 +148,12 @@ class TestPhase1Batch1000:
     def _load_cases(self, request):
         cls = request.cls
         cls._cases = build_cases()
+        if not cls._cases:
+            pytest.skip(
+                "SQLRepair batch corpus is not available; expected "
+                "/tmp/sqlrepair_216_f20.csv, /tmp/sqlrepair_216_su19.csv, "
+                "or /tmp/sqlrepair_326_f20.csv"
+            )
         print(f"\n共加载 {len(cls._cases)} 条去重测试用例")
 
     def test_pipeline_does_not_crash(self):

@@ -285,6 +285,7 @@ def generate_report():
     report_lines.append("   通过分析标准 SQL 和学生 SQL 提取的谓词集合，动态构造并满足这三个区（$T_{both}, T_{diff}, T_{neither}$）的数据行，能够在不依赖繁重外部 SMT 约束求解器的情况下，将数据生成与沙盒执行限制在 **2 毫秒** 级别，完全满足高并发教学诊断的需求。")
 
     out_file = PROJECT_ROOT / "task" / "task2.md"
+    out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text("\n".join(report_lines), encoding="utf-8")
     print(f"Report successfully generated and written to {out_file}")
 

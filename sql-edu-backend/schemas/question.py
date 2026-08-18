@@ -1,5 +1,7 @@
 from pydantic import BaseModel, field_validator
 
+from core.sql_dialect_resolver import normalize_sql_dialect
+
 
 class QuestionBase(BaseModel):
     title: str
@@ -15,7 +17,7 @@ class QuestionCreate(BaseModel):
     title_zh_tw: str | None = None
     content_zh_tw: str | None = None
     correct_sql: str
-    sql_dialect: str = "mysql"
+    sql_dialect: str | None = None
     engine_version: str | None = None
     difficulty: int | None = None  # 留空则由 AI 根据题目内容与 SQL 自动判断；1～10
     time_limit_seconds: int | None = None
@@ -31,25 +33,14 @@ class QuestionCreate(BaseModel):
 
     @field_validator("sql_dialect")
     @classmethod
-    def sql_dialect_supported(cls, v: str) -> str:
-        normalized = (v or "mysql").strip().lower()
-        aliases = {
-            "postgresql": "postgres",
-            "pg": "postgres",
-            "sqlserver": "tsql",
-            "mssql": "tsql",
-            "sql_server": "tsql",
-        }
-        normalized = aliases.get(normalized, normalized)
-        if normalized not in {"mysql", "postgres", "tsql", "sqlite"}:
-            raise ValueError("SQL 方言必须是 mysql/postgres/tsql/sqlite")
-        return normalized
+    def sql_dialect_supported(cls, v: str | None) -> str | None:
+        return normalize_sql_dialect(v)
 
 
 class QuestionOut(QuestionBase):
     id: int
     correct_sql: str
-    sql_dialect: str = "mysql"
+    sql_dialect: str | None = None
     engine_version: str | None = None
     time_limit_seconds: int | None = None
     schema_preview: str | None = None  # JSON：tables[{name,columns,rows}]，供学生查看
@@ -71,7 +62,6 @@ class DifficultyFeedbackIn(BaseModel):
 
 
 __all__ = ["QuestionBase", "QuestionCreate", "QuestionOut", "DifficultyFeedbackIn"]
-
 
 
 

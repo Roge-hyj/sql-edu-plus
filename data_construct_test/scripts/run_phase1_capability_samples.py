@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 from collections import Counter, defaultdict
@@ -16,6 +17,7 @@ sys.path.append(str(BACKEND_ROOT))
 from core.error_attribution import evidence_weights_from_observation
 from core.parseval_data_generator import extract_ast_diffs, generate_and_compare
 from core.ast_schema import SQLStructureIR
+from core.sql_dialect_resolver import resolve_sql_dialect_or_raise
 
 
 REQUIRED_CFG_LABELS = {
@@ -52,6 +54,8 @@ REQUIRED_CFG_LABELS = {
     "cte-recursive",
 }
 
+EXPECTED_SEMANTIC_BOUNDARY_IDS = frozenset({"limit_large_vs_unbounded"})
+
 
 def _case(
     case_id: str,
@@ -66,6 +70,9 @@ def _case(
     attack_kind: str = "semantic_mutation",
     max_rows_per_table: int = 8,
     note: str = "",
+    sql_dialect: str | None = None,
+    execution_backend: str = "sqlite",
+    schema_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": case_id,
@@ -79,6 +86,10 @@ def _case(
         "attack_kind": attack_kind,
         "max_rows_per_table": max_rows_per_table,
         "note": note,
+        "declared_sql_dialect": sql_dialect,
+        "execution_backend": execution_backend,
+        "schema_catalog": schema_catalog,
+        "validation_mode": "sqlite_compatibility" if execution_backend == "sqlite" else "native",
     }
 
 
@@ -343,7 +354,7 @@ def build_cases() -> list[dict[str, Any]]:
             "student(id, name); takes(id, course_id, year);",
             "SELECT name FROM student WHERE id IN (SELECT id FROM takes WHERE year = 2017)",
             "SELECT name FROM student WHERE id NOT IN (SELECT id FROM takes WHERE year = 2017)",
-            ["where", "subquery-scalar"],
+            ["where", "subquery-in"],
             cfg_labels=["subquery-in"],
         ),
         _case(
@@ -679,9 +690,9 @@ def build_cases() -> list[dict[str, Any]]:
     ]
 
 
-def _strict_parse_ok(sql: str) -> bool:
+def _strict_parse_ok(sql: str, dialect: str | None = "mysql") -> bool:
     try:
-        statements = sqlglot.parse(sql, dialect="mysql", error_level=ErrorLevel.RAISE)
+        statements = sqlglot.parse(sql, dialect=dialect, error_level=ErrorLevel.RAISE)
         parsed = [
             statement for statement in statements
             if statement is not None and not isinstance(statement, exp.Semicolon)
@@ -691,9 +702,9 @@ def _strict_parse_ok(sql: str) -> bool:
         return False
 
 
-def _build_ir(sql: str) -> SQLStructureIR | None:
+def _build_ir(sql: str, dialect: str | None = "mysql") -> SQLStructureIR | None:
     try:
-        statements = sqlglot.parse(sql, dialect="mysql", error_level=ErrorLevel.RAISE)
+        statements = sqlglot.parse(sql, dialect=dialect, error_level=ErrorLevel.RAISE)
         parsed = [
             statement for statement in statements
             if statement is not None and not isinstance(statement, exp.Semicolon)
@@ -731,15 +742,39 @@ def _hit_expected_kp(kp_ids: list[str], expected: list[str]) -> bool:
 
 
 def run_case(case: dict[str, Any]) -> dict[str, Any]:
-    std_parse_ok = _strict_parse_ok(case["standard"])
-    stu_parse_ok = _strict_parse_ok(case["student"])
-    standard_ir = _build_ir(case["standard"])
-    student_ir = _build_ir(case["student"])
+    try:
+        resolution = resolve_sql_dialect_or_raise(
+            declared_dialect=case.get("declared_sql_dialect"),
+            standard_sql=case["standard"],
+            student_sql=case["student"],
+            default_dialect="mysql",
+        )
+        parse_dialect = resolution.parse_dialect
+    except Exception:
+        try:
+            standard_resolution = resolve_sql_dialect_or_raise(
+                declared_dialect=case.get("declared_sql_dialect"),
+                standard_sql=case["standard"],
+                student_sql=case["standard"],
+                default_dialect="mysql",
+            )
+            parse_dialect = standard_resolution.parse_dialect
+        except Exception:
+            parse_dialect = "mysql"
+
+    std_parse_ok = _strict_parse_ok(case["standard"], parse_dialect)
+    stu_parse_ok = _strict_parse_ok(case["student"], parse_dialect)
+    standard_ir = _build_ir(case["standard"], parse_dialect)
+    student_ir = _build_ir(case["student"], parse_dialect)
     std_ir_ok = standard_ir is not None
     stu_ir_ok = student_ir is not None
 
     try:
-        raw_diffs = extract_ast_diffs(case["standard"], case["student"])
+        raw_diffs = extract_ast_diffs(
+            case["standard"],
+            case["student"],
+            dialect=parse_dialect,
+        )
         diff_exception = None
     except Exception as exc:
         raw_diffs = []
@@ -751,6 +786,9 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
             case["standard"],
             case["student"],
             max_rows_per_table=case["max_rows_per_table"],
+            sql_dialect=case.get("declared_sql_dialect"),
+            execution_backend=case.get("execution_backend", "sqlite"),
+            schema_catalog=case.get("schema_catalog"),
         )
         attr = evidence_weights_from_observation(
             student_sql=case["student"],
@@ -782,18 +820,26 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         structure_stage_met = True
         data_stage_met = bool(run and run.executed and run.is_equivalent is True)
         attribution_stage_met = bool(attr is not None and not high_risk_attributions)
+        mutation_stage_met = True
         expectation_met = data_stage_met and attribution_stage_met
     elif case["expectation"] == "not_equivalent":
         parse_stage_met = std_parse_ok and stu_parse_ok and std_ir_ok and stu_ir_ok
         structure_stage_met = bool(raw_diffs)
         data_stage_met = bool(run and run.executed and run.is_equivalent is False)
         attribution_stage_met = kp_hit
-        expectation_met = data_stage_met and attribution_stage_met
+        mutation_stage_met = bool(
+            run
+            and (run.mutation_evidence or {}).get("summary", {}).get(
+                "fixed_by_replacement", 0
+            )
+        )
+        expectation_met = data_stage_met and attribution_stage_met and mutation_stage_met
     elif case["expectation"] == "syntax_rejected":
         parse_stage_met = std_parse_ok and not stu_parse_ok
         structure_stage_met = parse_stage_met
         data_stage_met = bool(run and run.executed is False)
         attribution_stage_met = True
+        mutation_stage_met = True
         expectation_met = parse_stage_met and data_stage_met
     else:
         raise ValueError(f"Unknown expectation: {case['expectation']}")
@@ -805,9 +851,16 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         if item.get("fixed_by_replacement")
     ]
 
+    capability_bucket = "supported" if expectation_met else {
+        "SUPPORTED_WITH_LIMITS": "supported_with_limits",
+        "SEMANTIC_BOUNDARY": "semantic_boundary",
+        "ENGINE_GAP": "engine_gap",
+        "KNOWN_GAP": "known_gap",
+    }.get(run.status if run else "", "known_gap")
+
     return {
         **case,
-        "capability_bucket": "supported" if expectation_met else "known_gap",
+        "capability_bucket": capability_bucket,
         "expectation_met": expectation_met,
         "strict_standard_parse_ok": std_parse_ok,
         "strict_student_parse_ok": stu_parse_ok,
@@ -819,6 +872,15 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         "structure_stage_met": structure_stage_met,
         "data_stage_met": data_stage_met,
         "attribution_stage_met": attribution_stage_met,
+        "mutation_stage_met": mutation_stage_met,
+        "resolved_sql_dialect": (
+            run.data_evidence.get("sql_dialect") if run else None
+        ),
+        "actual_execution_backend": (
+            run.data_evidence.get("execution_backend") if run else None
+        ),
+        "executable_standard_sql": run.standard_sqlite if run else None,
+        "executable_student_sql": run.student_sqlite if run else None,
         "diff_exception": diff_exception,
         "extract_ast_diff_count": len(raw_diffs),
         "extract_ast_diff_types": [
@@ -832,6 +894,11 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         "ast_diff_graph": _json_safe([diff.to_dict() for diff in raw_diffs]),
         "executed": run.executed if run else False,
         "is_equivalent": run.is_equivalent if run else None,
+        "verdict_status": run.status if run else "ENGINE_GAP",
+        "equivalence_conclusion": (
+            run.equivalence_conclusion if run else "UNDECIDED"
+        ),
+        "boundary_evidence": _json_safe(run.boundary_evidence if run else {}),
         "error": run.error if run else exception,
         "standard_row_count": len(run.standard_rows) if run else 0,
         "student_row_count": len(run.student_rows) if run else 0,
@@ -863,15 +930,26 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(results)
     supported = sum(1 for item in results if item["capability_bucket"] == "supported")
-    by_area = defaultdict(lambda: {"total": 0, "supported": 0, "known_gap": 0})
+    bucket_names = (
+        "supported",
+        "supported_with_limits",
+        "semantic_boundary",
+        "known_gap",
+        "engine_gap",
+    )
+    by_area = defaultdict(
+        lambda: {"total": 0, **{name: 0 for name in bucket_names}}
+    )
     by_expectation = Counter(item["expectation"] for item in results)
     stage_pass = Counter()
-    by_cfg_label = defaultdict(lambda: {"total": 0, "supported": 0, "known_gap": 0})
+    by_cfg_label = defaultdict(
+        lambda: {"total": 0, **{name: 0 for name in bucket_names}}
+    )
     for item in results:
         area = by_area[item["area"]]
         area["total"] += 1
         area[item["capability_bucket"]] += 1
-        for stage in ("parse", "structure", "data", "attribution"):
+        for stage in ("parse", "structure", "data", "mutation", "attribution"):
             if item[f"{stage}_stage_met"]:
                 stage_pass[stage] += 1
         for label in item["cfg_labels"]:
@@ -884,8 +962,31 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "total_cases": total,
         "supported_cases": supported,
-        "known_gap_cases": total - supported,
+        "supported_with_limits_cases": sum(
+            item["capability_bucket"] == "supported_with_limits" for item in results
+        ),
+        "semantic_boundary_cases": sum(
+            item["capability_bucket"] == "semantic_boundary" for item in results
+        ),
+        "known_gap_cases": sum(
+            item["capability_bucket"] == "known_gap" for item in results
+        ),
+        "engine_gap_cases": sum(
+            item["capability_bucket"] == "engine_gap" for item in results
+        ),
+        "unresolved_cases": total - supported,
         "support_rate": round(supported / total, 4) if total else 0.0,
+        "validation_mode": "sqlite_compatibility",
+        "native_semantics_verified": False,
+        "declared_dialect_counts": dict(
+            Counter(str(item.get("declared_sql_dialect") or "auto") for item in results)
+        ),
+        "resolved_dialect_counts": dict(
+            Counter(str(item.get("resolved_sql_dialect") or "unresolved") for item in results)
+        ),
+        "execution_backend_counts": dict(
+            Counter(str(item.get("actual_execution_backend") or "unknown") for item in results)
+        ),
         "by_expectation": dict(by_expectation),
         "stage_pass": {
             stage: {
@@ -893,7 +994,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "total": total,
                 "rate": round(stage_pass[stage] / total, 4) if total else 0.0,
             }
-            for stage in ("parse", "structure", "data", "attribution")
+            for stage in ("parse", "structure", "data", "mutation", "attribution")
         },
         "by_area": dict(sorted(by_area.items())),
         "cfg_coverage": {
@@ -903,9 +1004,17 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
             "by_label": dict(sorted(by_cfg_label.items())),
         },
         "known_gap_ids": [item["id"] for item in results if item["capability_bucket"] == "known_gap"],
+        "semantic_boundary_ids": [
+            item["id"] for item in results
+            if item["capability_bucket"] == "semantic_boundary"
+        ],
+        "engine_gap_ids": [
+            item["id"] for item in results
+            if item["capability_bucket"] == "engine_gap"
+        ],
         "stage_gap_ids": {
             stage: [item["id"] for item in results if not item[f"{stage}_stage_met"]]
-            for stage in ("parse", "structure", "data", "attribution")
+            for stage in ("parse", "structure", "data", "mutation", "attribution")
         },
         "spurious_attribution_ids": [
             item["id"]
@@ -929,7 +1038,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- Total cases: `{summary['total_cases']}`",
         f"- Supported: `{summary['supported_cases']}`",
+        f"- Supported with limits: `{summary['supported_with_limits_cases']}`",
+        f"- Semantic boundaries: `{summary['semantic_boundary_cases']}`",
         f"- Known gaps: `{summary['known_gap_cases']}`",
+        f"- Engine gaps: `{summary['engine_gap_cases']}`",
         f"- Support rate: `{summary['support_rate']:.1%}`",
         f"- CFG labels covered: `{summary['cfg_coverage']['covered']}/{summary['cfg_coverage']['required']}`",
         f"- Missing CFG labels: `{', '.join(summary['cfg_coverage']['missing']) or '-'}`",
@@ -950,30 +1062,33 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "",
         "## CFG Capability",
         "",
-        "| CFG label | cases | supported | gaps |",
-        "| --- | ---: | ---: | ---: |",
+        "| CFG label | cases | supported | semantic boundary | known gap | engine gap |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
     ])
     for label, label_summary in summary["cfg_coverage"]["by_label"].items():
         lines.append(
             f"| {label} | {label_summary['total']} | {label_summary['supported']} | "
-            f"{label_summary['known_gap']} |"
+            f"{label_summary['semantic_boundary']} | {label_summary['known_gap']} | "
+            f"{label_summary['engine_gap']} |"
         )
 
     lines.extend([
         "",
         "## Case Matrix",
         "",
-        "| id | CFG | kind | expected | result | IR | AST | data | attribution |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| id | CFG | kind | expected | result | verdict | conclusion | IR | AST | data | attribution |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ])
     for item in payload["results"]:
         lines.append(
-            "| {id} | {cfg} | {kind} | {expectation} | {bucket} | {ir_ok} | {ast_ok} | {data_ok} | {attr_ok} |".format(
+            "| {id} | {cfg} | {kind} | {expectation} | {bucket} | {verdict} | {conclusion} | {ir_ok} | {ast_ok} | {data_ok} | {attr_ok} |".format(
                 id=item["id"],
                 cfg=", ".join(item["cfg_labels"]) or "-",
                 kind=item["attack_kind"],
                 expectation=item["expectation"],
                 bucket=item["capability_bucket"],
+                verdict=item["verdict_status"],
+                conclusion=item["equivalence_conclusion"],
                 ir_ok=item["standard_ir_build_ok"] and item["student_ir_build_ok"],
                 ast_ok=item["structure_stage_met"],
                 data_ok=item["data_stage_met"],
@@ -981,10 +1096,13 @@ def render_markdown(payload: dict[str, Any]) -> str:
             )
         )
 
-    gaps = [item for item in payload["results"] if item["capability_bucket"] == "known_gap"]
-    lines.extend(["", "## Known Gaps", ""])
+    gaps = [
+        item for item in payload["results"]
+        if item["capability_bucket"] != "supported"
+    ]
+    lines.extend(["", "## Boundaries And Gaps", ""])
     if not gaps:
-        lines.append("No known gaps in this sample set.")
+        lines.append("No boundaries or known gaps in this sample set.")
     for item in gaps:
         lines.extend(
             [
@@ -994,9 +1112,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 f"- CFG labels: `{', '.join(item['cfg_labels']) or '-'}`",
                 f"- Attack kind: `{item['attack_kind']}`",
                 f"- Expectation: `{item['expectation']}`",
+                f"- Verdict status: `{item['verdict_status']}`",
+                f"- Equivalence conclusion: `{item['equivalence_conclusion']}`",
+                f"- Boundary evidence: `{item['boundary_evidence']}`",
                 f"- Strict student parse ok: `{item['strict_student_parse_ok']}`",
                 f"- Pipeline executed/equivalent: `{item['executed']}` / `{item['is_equivalent']}`",
-                f"- Stage parse/AST/data/attribution: `{item['parse_stage_met']}` / `{item['structure_stage_met']}` / `{item['data_stage_met']}` / `{item['attribution_stage_met']}`",
+                f"- Stage parse/AST/data/mutation/attribution: `{item['parse_stage_met']}` / `{item['structure_stage_met']}` / `{item['data_stage_met']}` / `{item['mutation_stage_met']}` / `{item['attribution_stage_met']}`",
                 f"- Note: {item['note'] or '-'}",
                 "",
                 "Standard SQL:",
@@ -1019,6 +1140,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run the curated Phase 1 full-flow capability samples."
+    )
+    parser.add_argument("--fail-on-non-pass", action="store_true")
+    args = parser.parse_args()
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     results = [run_case(case) for case in build_cases()]
     summary = summarize(results)
@@ -1039,6 +1166,23 @@ def main() -> None:
     print(f"JSON report: {json_path}")
     print(f"Markdown report: {md_path}")
     print(json.dumps(payload["summary"], ensure_ascii=False, indent=2))
+    unexpected_non_pass = [
+        item["id"]
+        for item in results
+        if item["capability_bucket"] != "supported"
+        and not (
+            item["capability_bucket"] == "semantic_boundary"
+            and item["id"] in EXPECTED_SEMANTIC_BOUNDARY_IDS
+        )
+    ]
+    observed_boundaries = set(summary["semantic_boundary_ids"])
+    missing_boundaries = EXPECTED_SEMANTIC_BOUNDARY_IDS - observed_boundaries
+    if args.fail_on_non_pass and (unexpected_non_pass or missing_boundaries):
+        raise SystemExit(
+            "Capability samples have unexpected outcomes: "
+            f"non_pass={unexpected_non_pass}, "
+            f"missing_semantic_boundaries={sorted(missing_boundaries)}"
+        )
 
 
 if __name__ == "__main__":

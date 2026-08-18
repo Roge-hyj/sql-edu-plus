@@ -198,7 +198,7 @@ COMPLEXITY_KPS = {
 }
 
 
-def _parse(sql: str) -> exp.Expression | None:
+def _parse(sql: str, dialect: str | None = None) -> exp.Expression | None:
     """Parses SQL string into an AST, checking multiple dialects for fallback tolerance.
 
     Includes a roundtrip validation heuristic: sqlglot is very lenient and may
@@ -217,10 +217,11 @@ def _parse(sql: str) -> exp.Expression | None:
         'FALSE', 'CAST', 'INTERSECT', 'EXCEPT', 'IF', 'THEN', 'TOP',
         'NULLS', 'FIRST', 'LAST', 'QUALIFY', 'WINDOW', 'ROWS', 'RANGE',
     }
-    dialects = ("mysql", "sqlite", "tsql") if "`" in sql else ("sqlite", "mysql", "tsql")
-    for dialect in dialects:
+    dialects = (dialect,) if dialect else (("mysql", "sqlite", "postgres", "tsql", "oracle") if "`" in sql else ("sqlite", "mysql", "postgres", "tsql", "oracle"))
+    for candidate in dialects:
         try:
-            statements = sqlglot.parse(sql, dialect=dialect, error_level=ErrorLevel.RAISE)
+            read_dialect = None if candidate == "__generic__" else candidate
+            statements = sqlglot.parse(sql, dialect=read_dialect, error_level=ErrorLevel.RAISE)
             parsed_statements = [
                 statement for statement in statements
                 if statement is not None and not isinstance(statement, exp.Semicolon)
@@ -232,7 +233,7 @@ def _parse(sql: str) -> exp.Expression | None:
                 raw_tokens = set(_re.findall(r'\b[A-Za-z_]\w*\b', token_sql))
                 meaningful = {t for t in raw_tokens if t.upper() not in _KW}
                 if meaningful:
-                    roundtrip = parsed.sql(dialect=dialect)
+                    roundtrip = parsed.sql(dialect=read_dialect)
                     rt_tokens = set(_re.findall(r'\b[A-Za-z_]\w*\b', roundtrip))
                     lost = meaningful - rt_tokens
                     if lost:
@@ -851,7 +852,12 @@ def _add_misalignment_evidence(
     intended_cmp = intended.get("comparison_locations") or {}
     observed_cmp = observed.get("comparison_locations") or {}
     for src, dst, kp_id in [("HAVING", "WHERE", "having"), ("WHERE", "HAVING", "where")]:
-        if intended_cmp.get(src) and observed_cmp.get(dst):
+        if (
+            intended_cmp.get(src)
+            and not intended_cmp.get(dst)
+            and observed_cmp.get(dst)
+            and not observed_cmp.get(src)
+        ):
             add(
                 category="Confusion",
                 kp_id=kp_id,
@@ -876,8 +882,13 @@ def _add_misalignment_evidence(
         )
 
     # 4. Check for JOIN constructs missing ON join predicates
-    if observed.get("features", {}).get("join_count", 0) > 0 and not observed.get("features", {}).get("has_join_on"):
-        equivalent_join_rewrite = bool(is_correct and intended.get("features", {}).get("has_join_on"))
+    intended_has_join_on = bool(intended.get("features", {}).get("has_join_on"))
+    if (
+        intended_has_join_on
+        and observed.get("features", {}).get("join_count", 0) > 0
+        and not observed.get("features", {}).get("has_join_on")
+    ):
+        equivalent_join_rewrite = bool(is_correct)
         add(
             category="Complication" if equivalent_join_rewrite else "Confusion",
             kp_id="join-on",
@@ -1387,6 +1398,8 @@ def evidence_weights_from_observation(
     question_context: dict[str, Any] | None = None,
     mutation_detail: dict[str, Any] | None = None,
     ast_diffs: list[dict[str, Any]] | None = None,
+    sql_dialect: str | None = None,
+    dialect_resolution: dict[str, Any] | None = None,
 ) -> AttributionResult:
     """
     Fuses multiple diagnostic evidence elements into ranked Knowledge Point attributions.
@@ -1404,8 +1417,13 @@ def evidence_weights_from_observation(
     Returns:
         AttributionResult: Packed diagnostic result structure.
     """
-    standard_ast = _parse(answer_sql)
-    student_ast = _parse(student_sql)
+    standard_ast = _parse(answer_sql, dialect=sql_dialect)
+    student_ast = _parse(student_sql, dialect=sql_dialect)
+    normalized_ast_equal = bool(
+        standard_ast is not None
+        and student_ast is not None
+        and _node_sql(standard_ast) == _node_sql(student_ast)
+    )
     std_features = _features(standard_ast)
     stu_features = _features(student_ast)
     judge_features = _judge_features(judge_detail, error_message)
@@ -1424,6 +1442,7 @@ def evidence_weights_from_observation(
             "intended_kp": intended_kp,
             "observed_kp": observed_kp,
             "ast_diffs": ast_diffs or [],
+            "normalized_ast_equal": normalized_ast_equal,
         },
         "E_data": judge_features,
         "E_MUT": {
@@ -1441,7 +1460,14 @@ def evidence_weights_from_observation(
     if student_ast is None:
         builder.add("select-basic", "syntax_fatal", "E_AST", "parse_error", "学生 SQL 无法解析为合法查询语法，先归因到 SELECT 基础结构", 1.0)
     else:
-        misalignments = _add_misalignment_evidence(builder, intended_kp, observed_kp, judge_features, is_correct)
+        if not (is_correct and normalized_ast_equal):
+            misalignments = _add_misalignment_evidence(
+                builder,
+                intended_kp,
+                observed_kp,
+                judge_features,
+                is_correct,
+            )
         if not is_correct:
             _add_ast_evidence(builder, std_features, stu_features)
             if ast_diffs:
@@ -1473,6 +1499,8 @@ def evidence_weights_from_observation(
             "decision_categories": ["Lacking", "Confusion", "Logical", "Generality", "Complication"],
         },
     }
+    if dialect_resolution:
+        observation["dialect_resolution"] = dialect_resolution
     return AttributionResult(observation=observation, attributions=attributions, llm_arbitration_input=llm_input)
 
 

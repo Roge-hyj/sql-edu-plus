@@ -29,6 +29,18 @@
 * **`run_phase1_capability_samples.py`**
   - **作用**：运行覆盖全部 31 个 Phase 1 CFG 标签的攻击性能力基准。逐例记录严格解析、`SQLStructureIR`、AST Diff、动态造数、沙盒判等、变异证据和最终归因，并输出当前可通过与不能通过的 JSON/Markdown 样例。
   - **输出**：`outputs/phase1_capability_samples.json`（完整 SQL、造数数据库和证据）及 `outputs/phase1_capability_samples.md`（能力矩阵和已知盲区）。
+* **`run_phase1_full_flow_gate.py`**
+  - **作用**：第一阶段单命令严格门禁。依次重建 IR、独立 AST Diff 和 IR→AST 报告，再验证精选全流程、195 条造数边界、固定种子 430 条 fuzzer 以及后端核心回归；任一命令或报告不变量失败即返回非零。对非等价案例，仅有 `fixed_by_replacement` 汇总值不够；必须从完整变异明细中找到同时命中预期 KP 与允许 clause 的单子句修复，复合结构恢复不计为单点定位。
+  - **运行**：在已激活项目 Python 环境的仓库根目录执行 `python data_construct_test/scripts/run_phase1_full_flow_gate.py`。该门禁不启动 Docker 或外部数据库服务。
+* **`run_native_engine_live_gate.py`**
+  - **作用**：严格运行 MySQL 8.4、PostgreSQL 16、SQL Server 2022 和 Oracle 23ai 的 Phase 1 真实原生判题回归；四引擎分别验证方言路由、正误判定、结构差异、行值反例、预期 clause 变异修复，以及重复运行和临时命名空间清理。任一引擎缺失或不可达时非零退出。2026-08-14 实际执行结果为 `28/28 PASS`。
+  - **运行**：先确保 `.env` 中 `PARSEVAL_MYSQL_URL`、`PARSEVAL_POSTGRES_URL`、`PARSEVAL_TSQL_URL`、`PARSEVAL_ORACLE_URL` 均可达，然后从仓库根目录执行 `/home/roge/miniconda3/envs/my_new_env/bin/python data_construct_test/scripts/run_native_engine_live_gate.py`。
+  - **SQL Server 客户端依赖**：Ubuntu 需要 `unixodbc` 与 Microsoft `msodbcsql18`；可用 `python -c "import pyodbc; print(pyodbc.drivers())"` 确认存在 `ODBC Driver 18 for SQL Server`。
+  - **边界**：脚本不调用 Docker Compose，不会启动、停止或重建数据库容器。
+* **`run_phase1_teaching_dialect_matrix.py`**
+  - **作用**：显式覆盖标准 SQL、MySQL、PostgreSQL、SQL Server 和 Oracle 的结构、AST Diff、原生执行、动态造数、变异修复与完整链路；不能由有界数据证明的 PostgreSQL `ONLY` 继承语义和 Oracle 概率采样会保留为 `SEMANTIC_BOUNDARY`。
+  - **离线运行**：`python data_construct_test/scripts/run_phase1_teaching_dialect_matrix.py --fail-on-gap`，厂商用例保持 `PENDING_NATIVE`。
+  - **原生运行**：`python data_construct_test/scripts/run_phase1_teaching_dialect_matrix.py --native --fail-on-gap`。脚本只在原生模式自动读取后端 `.env`，且不会覆盖调用者已显式导出的环境变量；原生与离线模式分别写入 `outputs/phase1_teaching_dialect_matrix_native.json/.md` 和 `outputs/phase1_teaching_dialect_matrix.json/.md`。2026-08-14 原生结果为 `14 PASS + 2 SEMANTIC_BOUNDARY`。
 * **`run_phase1_cfg_fragment_benchmark.py`**
   - **作用**：按 SQL CFG 产生式及其备选项运行细粒度攻击，不以知识点标签代替语法分支。当前基准包含 150 个解析、等价改写和语义变异样例，逐例记录 Schema、标准/学生 SQL、严格解析、IR、Diff Graph、造数、两侧结果、变异证据、归因和失败阶段。
   - **输出**：`outputs/phase1_cfg_fragment_capability.json`（完整证据）、`outputs/phase1_cfg_fragment_capability.md`（产生式矩阵）、`outputs/phase1_cfg_supported_samples.jsonl`（通过样例）和 `outputs/phase1_cfg_known_gaps.jsonl`（不支持样例）。

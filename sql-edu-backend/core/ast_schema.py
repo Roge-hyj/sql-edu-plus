@@ -111,14 +111,16 @@ def _expression_summary(node: Any, context: str) -> dict[str, Any]:
 def _context_for_node(node: exp.Expression) -> str:
     parent = node.parent
     while parent is not None:
-        if isinstance(parent, exp.Window):
-            return "WINDOW"
         if isinstance(parent, exp.Having):
             return "HAVING"
+        if isinstance(parent, exp.Qualify):
+            return "QUALIFY"
         if isinstance(parent, exp.Where):
             return "WHERE"
         if isinstance(parent, exp.Join):
             return "JOIN ON"
+        if isinstance(parent, exp.Window):
+            return "WINDOW"
         if isinstance(parent, exp.Order):
             return "ORDER BY"
         if isinstance(parent, exp.Group):
@@ -139,12 +141,159 @@ def _aggregate_summary(node: exp.AggFunc) -> dict[str, Any]:
     elif main_arg is not None:
         arg_nodes.append(main_arg)
     arg_nodes.extend(node.expressions or [])
-    return {
+    summary = {
         "context": _context_for_node(node),
         "function": _function_name(node),
         "distinct": distinct,
         "args": [_node_sql(arg) for arg in arg_nodes],
         "sql": _node_sql(node),
+    }
+    parent = node.parent
+    while parent is not None and not isinstance(parent, exp.Select):
+        if isinstance(parent, exp.Filter):
+            filter_clause = parent.expression
+            filter_predicate = (
+                filter_clause.this
+                if isinstance(filter_clause, exp.Where)
+                else filter_clause
+            )
+            summary["filter_predicate"] = _node_sql(filter_predicate)
+            break
+        parent = parent.parent
+    return summary
+
+
+def _top_select(ast: exp.Expression) -> exp.Select | None:
+    """Return the SELECT closest to the statement root."""
+    if isinstance(ast, exp.Select):
+        return ast
+    if isinstance(ast, (exp.Union, exp.Intersect, exp.Except)):
+        left = ast.this
+        return _top_select(left) if isinstance(left, exp.Expression) else None
+
+    candidates = list(ast.find_all(exp.Select))
+    if not candidates:
+        return None
+
+    def depth(node: exp.Expression) -> int:
+        value = 0
+        parent = node.parent
+        while parent is not None:
+            value += 1
+            parent = parent.parent
+        return value
+
+    return min(candidates, key=depth)
+
+
+def _top_query_clause(
+    ast: exp.Expression,
+    select: exp.Select | None,
+    key: str,
+) -> exp.Expression | None:
+    """Read a statement-level clause without descending into nested queries."""
+    if isinstance(ast, (exp.Union, exp.Intersect, exp.Except)):
+        clause = ast.args.get(key)
+        return clause if isinstance(clause, exp.Expression) else None
+    if select is not None:
+        clause = select.args.get(key)
+        if isinstance(clause, exp.Expression):
+            return clause
+    return None
+
+
+def _grouping_element_summary(node: exp.Expression) -> dict[str, Any]:
+    """Preserve grouping hierarchy, including the significant empty set ()."""
+    if isinstance(node, exp.Paren):
+        return {
+            "kind": "parenthesized",
+            "items": [_grouping_element_summary(node.this)],
+            "sql": _node_sql(node),
+        }
+    if isinstance(node, exp.Tuple):
+        expressions = list(node.expressions or [])
+        return {
+            "kind": "grouping_set",
+            "items": [_grouping_element_summary(item) for item in expressions],
+            "empty": not expressions,
+            "sql": _node_sql(node),
+        }
+    if isinstance(node, (exp.GroupingSets, exp.Rollup, exp.Cube)):
+        kind = {
+            exp.GroupingSets: "grouping_sets",
+            exp.Rollup: "rollup",
+            exp.Cube: "cube",
+        }[type(node)]
+        return {
+            "kind": kind,
+            "items": [
+                _grouping_element_summary(item)
+                for item in node.expressions or []
+            ],
+            "sql": _node_sql(node),
+        }
+    return {
+        "kind": "expression",
+        "sql": _node_sql(node),
+    }
+
+
+def _recursive_decoration_summary(node: exp.RecursiveWithSearch) -> dict[str, Any]:
+    using = node.args.get("using")
+    return {
+        "kind": str(node.args.get("kind") or "").upper(),
+        "by": _node_sql(node.this),
+        "set": _node_sql(node.expression),
+        "using": _node_sql(using) if isinstance(using, exp.Expression) else None,
+        "sql": _node_sql(node),
+    }
+
+
+def _pivot_summary(node: exp.Pivot) -> dict[str, Any]:
+    fields: list[dict[str, Any]] = []
+    for field_node in node.args.get("fields") or []:
+        if isinstance(field_node, exp.In):
+            fields.append({
+                "expression": _node_sql(field_node.this),
+                "values": [
+                    _node_sql(value) for value in field_node.expressions or []
+                ],
+            })
+        else:
+            fields.append({
+                "expression": _node_sql(field_node),
+                "values": [],
+            })
+    return {
+        "kind": "UNPIVOT" if node.args.get("unpivot") else "PIVOT",
+        "expressions": [
+            _node_sql(expression) for expression in node.expressions or []
+        ],
+        "fields": fields,
+        "columns": [
+            _node_sql(column) for column in node.args.get("columns") or []
+        ],
+        "alias": str(node.alias_or_name or ""),
+        "include_nulls": node.args.get("include_nulls"),
+        "default_on_null": bool(node.args.get("default_on_null")),
+        "group": _node_sql(node.args.get("group")),
+    }
+
+
+def _table_sample_summary(
+    table: exp.Table,
+    sample: exp.TableSample,
+) -> dict[str, Any]:
+    return {
+        "table": str(table.name or ""),
+        "alias": str(table.alias_or_name or table.name or ""),
+        "method": _node_sql(sample.args.get("method")),
+        "percent": _node_sql(sample.args.get("percent")),
+        "size": _node_sql(sample.args.get("size")),
+        "seed": _node_sql(sample.args.get("seed")),
+        "bucket_numerator": _node_sql(sample.args.get("bucket_numerator")),
+        "bucket_denominator": _node_sql(sample.args.get("bucket_denominator")),
+        "bucket_field": _node_sql(sample.args.get("bucket_field")),
     }
 
 
@@ -332,6 +481,18 @@ class SQLStructureIR:
     table_references: List[Dict[str, Any]] = field(default_factory=list) # Physical/CTE table references
     from_sources: List[Dict[str, Any]] = field(default_factory=list) # Top-level FROM source summaries
     named_windows: List[Dict[str, Any]] = field(default_factory=list) # WINDOW clause definitions
+    distinct_on: List[str] = field(default_factory=list)            # PostgreSQL DISTINCT ON keys
+    qualify_predicates: List[str] = field(default_factory=list)     # Top-level QUALIFY predicates
+    grouping_sets: List[Dict[str, Any]] = field(default_factory=list) # Typed GROUPING SETS trees
+    rollup: List[Dict[str, Any]] = field(default_factory=list)      # Typed ROLLUP trees
+    cube: List[Dict[str, Any]] = field(default_factory=list)        # Typed CUBE trees
+    recursive_decorations: List[Dict[str, Any]] = field(default_factory=list) # SEARCH/CYCLE clauses
+    lateral_sources: List[Dict[str, Any]] = field(default_factory=list) # LATERAL source summaries
+    limit_options: Dict[str, bool] = field(default_factory=dict)     # PERCENT/WITH TIES flags
+    hierarchical_queries: List[Dict[str, Any]] = field(default_factory=list) # Oracle START/CONNECT BY
+    pivot_details: List[Dict[str, Any]] = field(default_factory=list) # PIVOT/UNPIVOT structure
+    table_samples: List[Dict[str, Any]] = field(default_factory=list) # TABLESAMPLE/SAMPLE options
+    table_only: List[Dict[str, Any]] = field(default_factory=list)   # PostgreSQL FROM ONLY tables
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a JSON-safe snapshot without leaking sqlglot node objects."""
@@ -358,6 +519,18 @@ class SQLStructureIR:
             "table_references": _serialize_ir_value(self.table_references),
             "from_sources": _serialize_ir_value(self.from_sources),
             "named_windows": _serialize_ir_value(self.named_windows),
+            "distinct_on": _serialize_ir_value(self.distinct_on),
+            "qualify_predicates": _serialize_ir_value(self.qualify_predicates),
+            "grouping_sets": _serialize_ir_value(self.grouping_sets),
+            "rollup": _serialize_ir_value(self.rollup),
+            "cube": _serialize_ir_value(self.cube),
+            "recursive_decorations": _serialize_ir_value(self.recursive_decorations),
+            "lateral_sources": _serialize_ir_value(self.lateral_sources),
+            "limit_options": _serialize_ir_value(self.limit_options),
+            "hierarchical_queries": _serialize_ir_value(self.hierarchical_queries),
+            "pivot_details": _serialize_ir_value(self.pivot_details),
+            "table_samples": _serialize_ir_value(self.table_samples),
+            "table_only": _serialize_ir_value(self.table_only),
         }
 
     @classmethod
@@ -367,27 +540,62 @@ class SQLStructureIR:
             return ir
         
         # 1. SELECT projection & distinct
-        select = ast.find(exp.Select)
+        select = _top_select(ast)
         if select:
             ir.projection = [_node_sql(expr) for expr in select.expressions or []]
             # ``exp.Distinct`` is also the argument node for
             # COUNT(DISTINCT ...)/SUM(DISTINCT ...).  The IR field represents
             # SELECT DISTINCT only, so read the top SELECT flag directly.
             ir.distinct = bool(select.args.get("distinct"))
+            distinct_node = select.args.get("distinct")
+            distinct_on = (
+                distinct_node.args.get("on")
+                if isinstance(distinct_node, exp.Distinct)
+                else None
+            )
+            if isinstance(distinct_on, exp.Tuple):
+                ir.distinct_on = [
+                    _node_sql(expr) for expr in distinct_on.expressions or []
+                ]
             ir.expression_ir.extend(
                 _expression_summary(expr, "SELECT")
                 for expr in select.expressions or []
             )
             
         # 2. WHERE predicates
-        ir.where_predicates = [w.sql(dialect="sqlite") for w in ast.find_all(exp.Where)]
+        top_where = select.args.get("where") if select is not None else None
+        if isinstance(top_where, exp.Where):
+            ir.where_predicates = [top_where.sql(dialect="sqlite")]
         
         # 3. JOINS
         for j in ast.find_all(exp.Join):
             side = str(j.args.get("side") or j.args.get("kind") or "INNER").upper()
             table = j.this.name if isinstance(j.this, exp.Table) else ""
-            cond = _node_sql(j.args.get("on"))
-            ir.joins.append({"type": side, "table": table, "condition": cond, "node": j})
+            on_node = j.args.get("on")
+            using_nodes = [item for item in (j.args.get("using") or []) if item is not None]
+            using_columns = [
+                str(getattr(item, "name", None) or _node_sql(item))
+                for item in using_nodes
+            ]
+            # Keep a single, stable condition field for downstream consumers.
+            # ``USING`` is represented separately as well because it has no
+            # ``on`` expression in sqlglot's AST and otherwise disappears from
+            # the structural IR.
+            if on_node is not None:
+                cond = _node_sql(on_node)
+            elif using_columns:
+                cond = f"USING ({', '.join(using_columns)})"
+            else:
+                cond = ""
+            join_summary = {
+                "type": side,
+                "table": table,
+                "condition": cond,
+                "node": j,
+            }
+            if using_columns:
+                join_summary["using"] = using_columns
+            ir.joins.append(join_summary)
 
         # 3b. Table and FROM source summaries.  This covers implicit joins
         # like FROM a, b, which do not always appear as exp.Join nodes.
@@ -397,6 +605,14 @@ class SQLStructureIR:
                 "alias": str(table.alias_or_name or table.name or ""),
                 "sql": _node_sql(table),
             })
+            if table.args.get("only"):
+                ir.table_only.append({
+                    "table": str(table.name or ""),
+                    "alias": str(table.alias_or_name or table.name or ""),
+                })
+            sample = table.args.get("sample")
+            if isinstance(sample, exp.TableSample):
+                ir.table_samples.append(_table_sample_summary(table, sample))
         for from_node in ast.find_all(exp.From):
             source = from_node.this
             if source is not None:
@@ -413,19 +629,33 @@ class SQLStructureIR:
                 })
             
         # 4. GROUP BY
-        group = ast.find(exp.Group)
+        group = select.args.get("group") if select is not None else None
         if group:
             ir.group_by = [_node_sql(expr) for expr in group.expressions or []]
             ir.expression_ir.extend(
                 _expression_summary(expr, "GROUP BY")
                 for expr in group.expressions or []
             )
+            for grouping_sets in group.args.get("grouping_sets") or []:
+                ir.grouping_sets.append(_grouping_element_summary(grouping_sets))
+            for rollup in group.args.get("rollup") or []:
+                ir.rollup.append(_grouping_element_summary(rollup))
+            for cube in group.args.get("cube") or []:
+                ir.cube.append(_grouping_element_summary(cube))
             
         # 5. HAVING
-        ir.having_predicates = [h.sql(dialect="sqlite") for h in ast.find_all(exp.Having)]
+        top_having = select.args.get("having") if select is not None else None
+        if isinstance(top_having, exp.Having):
+            ir.having_predicates = [top_having.sql(dialect="sqlite")]
+
+        # 5b. QUALIFY is top-level like WHERE/HAVING, but remains a dialect
+        # execution boundary even though its predicate is typed here.
+        top_qualify = select.args.get("qualify") if select is not None else None
+        if isinstance(top_qualify, exp.Qualify):
+            ir.qualify_predicates = [top_qualify.sql(dialect="sqlite")]
         
         # 6. ORDER BY
-        order = ast.find(exp.Order)
+        order = _top_query_clause(ast, select, "order")
         if order:
             for expr in order.expressions:
                 if isinstance(expr, exp.Ordered):
@@ -445,11 +675,27 @@ class SQLStructureIR:
                     ir.expression_ir.append(_expression_summary(ordered_expr, "ORDER BY"))
                     
         # 7. LIMIT & OFFSET
-        limit_node = ast.find(exp.Limit) or ast.find(exp.Fetch)
-        offset_node = ast.find(exp.Offset)
+        limit_node = (
+            _top_query_clause(ast, select, "limit")
+            or _top_query_clause(ast, select, "fetch")
+        )
+        offset_node = _top_query_clause(ast, select, "offset")
         if limit_node:
             limit_expr = getattr(limit_node, "expression", None) or limit_node.args.get("count")
             ir.limit_offset["limit"] = _node_sql(limit_expr)
+            options = limit_node.args.get("limit_options")
+            ir.limit_options = {
+                "percent": bool(
+                    options.args.get("percent")
+                    if isinstance(options, exp.LimitOptions)
+                    else False
+                ),
+                "with_ties": bool(
+                    options.args.get("with_ties")
+                    if isinstance(options, exp.LimitOptions)
+                    else False
+                ),
+            }
         if offset_node:
             ir.limit_offset["offset"] = _node_sql(offset_node.expression)
             
@@ -536,6 +782,12 @@ class SQLStructureIR:
                 "node": cte,
                 "sql": _node_sql(cte),
             })
+        for with_node in ast.find_all(exp.With):
+            decoration = with_node.args.get("search")
+            if isinstance(decoration, exp.RecursiveWithSearch):
+                ir.recursive_decorations.append(
+                    _recursive_decoration_summary(decoration)
+                )
             
         # 11. CASE BRANCHES
         for case in ast.find_all(exp.Case):
@@ -583,14 +835,51 @@ class SQLStructureIR:
                 **detail,
             })
 
+        # 12b. LATERAL is represented structurally while execution support is
+        # still decided by the dialect runner.
+        for lateral in ast.find_all(exp.Lateral):
+            ir.lateral_sources.append({
+                "alias": str(lateral.alias_or_name or ""),
+                "outer": bool(lateral.args.get("outer")),
+                "source_sql": _node_sql(lateral.this),
+                "sql": _node_sql(lateral),
+            })
+
+        # 12c. Vendor query structures that SQLite rendering cannot preserve.
+        for connect in ast.find_all(exp.Connect):
+            ir.hierarchical_queries.append({
+                "start_with": _node_sql(connect.args.get("start")),
+                "connect_by": _node_sql(connect.args.get("connect")),
+                "nocycle": bool(connect.args.get("nocycle")),
+            })
+        ir.pivot_details = [
+            _pivot_summary(pivot) for pivot in ast.find_all(exp.Pivot)
+        ]
+
         # 13. Typed predicate IR by context.
-        for where in ast.find_all(exp.Where):
-            tree = _predicate_tree(where.this, "WHERE")
+        if isinstance(top_where, exp.Where):
+            tree = _predicate_tree(top_where.this, "WHERE")
             if tree is not None:
                 ir.logic_trees.append(tree)
                 ir.predicate_ir.extend(_flatten_predicates(tree))
-        for having in ast.find_all(exp.Having):
-            tree = _predicate_tree(having.this, "HAVING")
+        if isinstance(top_having, exp.Having):
+            tree = _predicate_tree(top_having.this, "HAVING")
+            if tree is not None:
+                ir.logic_trees.append(tree)
+                ir.predicate_ir.extend(_flatten_predicates(tree))
+        if isinstance(top_qualify, exp.Qualify):
+            tree = _predicate_tree(top_qualify.this, "QUALIFY")
+            if tree is not None:
+                ir.logic_trees.append(tree)
+                ir.predicate_ir.extend(_flatten_predicates(tree))
+        for filter_node in ast.find_all(exp.Filter):
+            filter_clause = filter_node.expression
+            filter_predicate = (
+                filter_clause.this
+                if isinstance(filter_clause, exp.Where)
+                else filter_clause
+            )
+            tree = _predicate_tree(filter_predicate, "AGGREGATE FILTER")
             if tree is not None:
                 ir.logic_trees.append(tree)
                 ir.predicate_ir.extend(_flatten_predicates(tree))
@@ -621,12 +910,26 @@ class SQLStructureIR:
             kps.append("order-by")
         if self.limit_offset:
             kps.append("limit")
+        if self.limit_options.get("percent"):
+            kps.append("limit-percent")
+        if self.limit_options.get("with_ties"):
+            kps.append("limit-with-ties")
         if self.distinct:
             kps.append("distinct")
-        if self.group_by:
+        if self.distinct_on:
+            kps.append("distinct-on")
+        if self.group_by or self.grouping_sets or self.rollup or self.cube:
             kps.append("group-by")
+        if self.grouping_sets:
+            kps.append("grouping-sets")
+        if self.rollup:
+            kps.append("rollup")
+        if self.cube:
+            kps.append("cube")
         if self.having_predicates:
             kps.append("having")
+        if self.qualify_predicates:
+            kps.append("qualify")
         if self.joins:
             kps.append("join-inner")
             for join in self.joins:
@@ -655,6 +958,32 @@ class SQLStructureIR:
             kps.append("aggregate")
             if any(item.get("function") == "COUNT" for item in self.aggregate_functions):
                 kps.append("agg-count")
+            if any(item.get("filter_predicate") for item in self.aggregate_functions):
+                kps.append("aggregate-filter")
+        for decoration in self.recursive_decorations:
+            kind = str(decoration.get("kind") or "").upper()
+            if kind == "CYCLE":
+                kps.append("recursive-cycle")
+            elif kind in {"DEPTH", "BREADTH"}:
+                kps.append("recursive-search")
+        if self.lateral_sources:
+            kps.append("lateral")
+        for hierarchy in self.hierarchical_queries:
+            kps.append("hierarchical-query")
+            if hierarchy.get("start_with"):
+                kps.append("start-with")
+            if hierarchy.get("connect_by"):
+                kps.append("connect-by")
+            if hierarchy.get("nocycle"):
+                kps.append("connect-by-nocycle")
+        for pivot in self.pivot_details:
+            kps.append(
+                "unpivot" if pivot.get("kind") == "UNPIVOT" else "pivot"
+            )
+        if self.table_samples:
+            kps.append("table-sample")
+        if self.table_only:
+            kps.append("table-only")
         seen: set[str] = set()
         ordered: list[str] = []
         for kp in kps:
@@ -724,6 +1053,8 @@ class ASTDiffNode:
                 safe_extra[key] = _node_sql(val)
             else:
                 safe_extra[key] = val
+        standard_sql = safe_extra.get("standard_sql") or _node_sql(self.standard_node)
+        student_sql = safe_extra.get("student_sql") or _node_sql(self.student_node)
         return {
             "clause": self.clause_category,
             "diff_type": self.diff_type,
@@ -731,7 +1062,7 @@ class ASTDiffNode:
             "column": self.target_column,
             "knowledge_point_id": self.knowledge_point_id,
             "severity": self.severity,
-            "standard_sql": _node_sql(self.standard_node),
-            "student_sql": _node_sql(self.student_node),
+            "standard_sql": standard_sql,
+            "student_sql": student_sql,
             "extra": safe_extra,
         }

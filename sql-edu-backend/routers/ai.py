@@ -8,13 +8,21 @@ AI 相关路由（/ai）
 - `/ai/chat/*`: 多轮对话历史与本地 Socratic 辅导
 """
 
+import asyncio
+import logging
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from core.sql_judge import SQLJudgeService
+from core.native_query_safety import (
+    NATIVE_SQL_PARSE_ERROR,
+    NativeQuerySafetyError,
+    validate_native_query_safety,
+)
 from repository import QuestionRepository, SubmissionRepository, ChatRepository, UserRepository
 from core.experience_service import compute_xp_gain, get_level_from_total
 from schemas.submission import SubmissionCreate, SubmissionOut
@@ -24,10 +32,156 @@ from core.auth import AuthHandler
 
 # 数学闭环第一阶段（Observe/感知）核心引擎库
 from core.error_attribution import evidence_weights_from_observation, KPAttribution
+from core.sql_dialect_resolver import (
+    DialectResolutionError,
+    GENERIC_SQLGLOT_DIALECT,
+    resolve_sql_dialect_or_raise,
+)
 from schemas.agent import SQLCheckResultSchema
+from settings.config import settings
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 auth_handler = AuthHandler()
+logger = logging.getLogger(__name__)
+
+_NATIVE_EXECUTOR_URL_SETTINGS = {
+    "mysql": "PARSEVAL_MYSQL_URL",
+    "postgres": "PARSEVAL_POSTGRES_URL",
+    "tsql": "PARSEVAL_TSQL_URL",
+    "oracle": "PARSEVAL_ORACLE_URL",
+}
+_NATIVE_EXECUTOR_VERSION_SETTINGS = {
+    "mysql": "PARSEVAL_MYSQL_VERSION",
+    "postgres": "PARSEVAL_POSTGRES_VERSION",
+    "tsql": "PARSEVAL_TSQL_VERSION",
+    "oracle": "PARSEVAL_ORACLE_VERSION",
+}
+
+
+def _native_executor_url_for_dialect(dialect: str | None) -> str | None:
+    setting_name = _NATIVE_EXECUTOR_URL_SETTINGS.get(dialect or "")
+    if setting_name is None:
+        return None
+    return getattr(settings, setting_name, "").strip() or None
+
+
+def _validate_native_engine_version(
+    dialect: str | None,
+    required_version: str | None,
+) -> None:
+    required = str(required_version or "").strip().lower()
+    if not required:
+        return
+    setting_name = _NATIVE_EXECUTOR_VERSION_SETTINGS.get(dialect or "")
+    configured = str(getattr(settings, setting_name, "") if setting_name else "").strip().lower()
+    if configured:
+        if (
+            required == configured
+            or required.startswith(configured + ".")
+            or configured.startswith(required + ".")
+        ):
+            return
+        # Vendor patch/minor labels vary (for example MySQL 8.0 vs 8.4),
+        # while the execution contract is pinned at the major engine family.
+        required_major = re.match(r"^(\d+)", required)
+        configured_major = re.match(r"^(\d+)", configured)
+        if (
+            required_major is not None
+            and configured_major is not None
+            and required_major.group(1) == configured_major.group(1)
+        ):
+            return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "code": "ENGINE_VERSION_UNAVAILABLE",
+            "judge_status": "UNSUPPORTED",
+            "message": (
+                f"Question requires {dialect or 'unknown'} {required_version}, "
+                f"but the configured runner version is {configured or 'not declared'}."
+            ),
+            "dialect_resolution": None,
+        },
+    )
+
+
+def _raise_platform_judge_error(
+    *,
+    judge_status: str,
+    error_message: str | None,
+    error_code: str | None = None,
+    dialect_resolution: dict[str, Any] | None = None,
+) -> None:
+    raw_code = error_code or judge_status or "ENGINE_ERROR"
+    client_error_codes = {
+        "DIALECT_CONFLICT",
+        "SECURITY_REJECTED",
+        "UNSUPPORTED",
+        "UNSUPPORTED_DIALECT",
+        "UNSUPPORTED_DIALECT_FEATURE",
+    }
+    http_status = (
+        status.HTTP_422_UNPROCESSABLE_ENTITY
+        if raw_code in client_error_codes
+        or judge_status in {"UNSUPPORTED", "SECURITY_REJECTED"}
+        else status.HTTP_503_SERVICE_UNAVAILABLE
+    )
+
+    # Runner/database errors can contain credentials, network addresses, or the
+    # submitted SQL.  Keep those details in server logs, never in the API
+    # response.  Security rejections likewise use a stable policy message so a
+    # parser or runner cannot echo user-controlled text back to clients.
+    logger.error(
+        "SQL judge platform failure: status=%s code=%s error=%s",
+        judge_status,
+        raw_code,
+        error_message,
+    )
+    if http_status == status.HTTP_503_SERVICE_UNAVAILABLE:
+        code = judge_status if judge_status in {"ENGINE_ERROR", "TIMEOUT"} else "ENGINE_ERROR"
+        public_message = (
+            "SQL judge execution timed out. Please try again later."
+            if judge_status == "TIMEOUT"
+            else "SQL judge service is temporarily unavailable. Please try again later."
+        )
+    elif judge_status == "SECURITY_REJECTED" or raw_code == "SECURITY_REJECTED":
+        code = (
+            raw_code
+            if raw_code in client_error_codes or raw_code.startswith("NATIVE_SQL_")
+            else "SECURITY_REJECTED"
+        )
+        public_message = "SQL rejected by the sandbox safety policy."
+    else:
+        code = raw_code
+        public_message = error_message or "SQL judge platform failed before producing a verdict."
+    public_dialect_resolution = dialect_resolution
+    if http_status == status.HTTP_503_SERVICE_UNAVAILABLE and dialect_resolution:
+        # Resolver diagnostics can include parser text; preserve routing fields
+        # while dropping the free-form error from an infrastructure response.
+        public_dialect_resolution = dict(dialect_resolution)
+        public_dialect_resolution["error"] = None
+    raise HTTPException(
+        status_code=http_status,
+        detail={
+            "code": code,
+            "judge_status": judge_status,
+            "message": public_message,
+            "dialect_resolution": public_dialect_resolution,
+        },
+    )
+
+
+def _student_sql_safety_error(
+    sql: str,
+    declared_dialect: str | None,
+) -> NativeQuerySafetyError | None:
+    """Return an AST-level safety violation, leaving syntax errors to resolver."""
+    try:
+        validate_native_query_safety(sql, declared_dialect)
+    except NativeQuerySafetyError as exc:
+        return None if exc.code == NATIVE_SQL_PARSE_ERROR else exc
+    return None
+
 
 class SQLRequest(BaseModel):
     sql: str
@@ -112,43 +266,6 @@ def _generate_local_feedback(
     return "\n".join(lines)
 
 
-def _generate_platform_judge_feedback(
-    judge_status: str,
-    error_message: str | None,
-    language: str = "zh-CN",
-) -> str:
-    if judge_status == "UNSUPPORTED":
-        if language == "en":
-            return (
-                "This submission was not judged because the current execution engine does not "
-                f"support the SQL dialect feature used in this question.\n\nDetails: {error_message or 'Unsupported SQL feature.'}"
-            )
-        if language == "zh-TW":
-            return (
-                "本次提交未完成判定：目前執行引擎暫不支援該題使用的 SQL 方言特性。\n\n"
-                f"詳情：{error_message or '不支援的 SQL 特性。'}"
-            )
-        return (
-            "本次提交未完成判定：当前执行引擎暂不支持该题使用的 SQL 方言特性。\n\n"
-            f"详情：{error_message or '不支持的 SQL 特性。'}"
-        )
-
-    if language == "en":
-        return (
-            "This submission was not judged because the sandbox execution engine failed before "
-            f"it could compare results.\n\nDetails: {error_message or 'Execution engine error.'}"
-        )
-    if language == "zh-TW":
-        return (
-            "本次提交未完成判定：沙盒執行引擎在比較結果前失敗。\n\n"
-            f"詳情：{error_message or '執行引擎錯誤。'}"
-        )
-    return (
-        "本次提交未完成判定：沙盒执行引擎在比较结果前失败。\n\n"
-        f"详情：{error_message or '执行引擎错误。'}"
-    )
-
-
 def _parseval_schema_columns(columns: list[Any]) -> list[str]:
     result: list[str] = []
     for column in columns:
@@ -207,20 +324,50 @@ async def check_sql(
         )
 
     # 1.1 安全性与语法检查 (T_SAFE & T_SYNTAX)
-    judge_service = SQLJudgeService(session)
-    safe, keyword = judge_service._check_sql_safety(payload.student_sql)
-    is_safety_blocked = not safe
+    safety_error = _student_sql_safety_error(
+        payload.student_sql,
+        getattr(question, "sql_dialect", None),
+    )
+    keyword = None
+    is_safety_blocked = safety_error is not None
 
     is_syntax_error = False
     syntax_error_msg = ""
+    dialect_resolution = None
     if not is_safety_blocked:
-        import sqlglot
-        from sqlglot import ErrorLevel
         try:
-            sqlglot.parse_one(payload.student_sql, dialect="mysql", error_level=ErrorLevel.RAISE)
-        except Exception as e:
-            is_syntax_error = True
-            syntax_error_msg = str(e)
+            dialect_resolution = resolve_sql_dialect_or_raise(
+                declared_dialect=getattr(question, "sql_dialect", None),
+                standard_sql=question.correct_sql,
+                student_sql=payload.student_sql,
+                default_dialect=settings.PARSEVAL_DEFAULT_DIALECT,
+            )
+            _validate_native_engine_version(
+                dialect_resolution.resolved_dialect,
+                getattr(question, "engine_version", None),
+            )
+        except DialectResolutionError as exc:
+            if exc.code == "STUDENT_SQL_PARSE_ERROR":
+                is_syntax_error = True
+                syntax_error_msg = str(exc)
+            else:
+                _raise_platform_judge_error(
+                    judge_status=(
+                        "UNSUPPORTED"
+                        if exc.code
+                        in {
+                            "DIALECT_CONFLICT",
+                            "UNSUPPORTED_DIALECT",
+                            "UNSUPPORTED_DIALECT_FEATURE",
+                        }
+                        else "ENGINE_ERROR"
+                    ),
+                    error_message=str(exc),
+                    error_code=exc.code,
+                    dialect_resolution=(
+                        exc.resolution.to_dict() if exc.resolution is not None else None
+                    ),
+                )
 
     submission_repo = SubmissionRepository(session)
     failure_count = await submission_repo.get_failure_count(user_id, payload.question_id)
@@ -297,11 +444,7 @@ async def check_sql(
     error_attributions: list[dict] = []
 
     if is_safety_blocked:
-        error_message = (
-            f"SQL 包含危险操作（检测到关键字：{keyword.upper()}）。练习环境仅允许 SELECT 查询，禁止 DROP/DELETE/INSERT/UPDATE 等改库删库操作。"
-            if keyword
-            else "SQL 必须以 SELECT 开头。练习环境仅允许 SELECT 查询语句。"
-        )
+        error_message = f"SQL 安全拦截：{safety_error}"
 
     # ------------------------------------------------------------
     # Phase 1: ParSEval 造数验证 + 证据采集与归因 (Observe/感知)
@@ -328,18 +471,23 @@ async def check_sql(
         mutation_detail = None
         ast_diffs_detail: list[dict] = []
         is_equivalent: bool | None = None
+        sandbox_run = None
         if parseval_schema:
             try:
                 from core.parseval_data_generator import generate_and_compare
-                from settings.config import settings
-                question_dialect = getattr(question, "sql_dialect", None) or "mysql"
-                sandbox_run = generate_and_compare(
+                assert dialect_resolution is not None
+                sandbox_run = await asyncio.to_thread(
+                    generate_and_compare,
                     schema_text=parseval_schema,
                     standard_sql=question.correct_sql,
                     student_sql=payload.student_sql,
-                    sql_dialect=question_dialect,
+                    sql_dialect=getattr(question, "sql_dialect", None),
+                    default_sql_dialect=settings.PARSEVAL_DEFAULT_DIALECT,
+                    dialect_resolution=dialect_resolution,
                     execution_backend=settings.PARSEVAL_EXECUTION_BACKEND,
-                    native_executor_url=settings.PARSEVAL_MYSQL_URL or None,
+                    native_executor_url=_native_executor_url_for_dialect(
+                        dialect_resolution.resolved_dialect
+                    ),
                 )
                 if sandbox_run and sandbox_run.executed:
                     is_equivalent = sandbox_run.is_equivalent
@@ -359,6 +507,7 @@ async def check_sql(
                         "is_correct": is_equivalent,
                         "judge_status": judge_status,
                         "error_message": error_message,
+                        "dialect_resolution": dialect_resolution.to_dict(),
                         "student_result_meta": {
                             "row_count": stu_count,
                             "columns": sandbox_run.student_columns,
@@ -385,15 +534,35 @@ async def check_sql(
                         or (sandbox_run.data_evidence or {}).get("judge_status")
                         or "ENGINE_ERROR"
                     )
-                    platform_judge_failure = judge_status in {"UNSUPPORTED", "ENGINE_ERROR", "TIMEOUT"}
+                    platform_judge_failure = judge_status in {
+                        "UNSUPPORTED",
+                        "SECURITY_REJECTED",
+                        "ENGINE_ERROR",
+                        "TIMEOUT",
+                    }
                     judge_detail = {
                         "is_correct": None if platform_judge_failure else False,
                         "judge_status": judge_status,
                         "error_message": error_message,
+                        "dialect_resolution": dialect_resolution.to_dict(),
                         "comparison": {
                             "sandbox_executed": False,
                             "sandbox_error": error_message,
                             "unsupported_features": (sandbox_run.data_evidence or {}).get("unsupported_features", []),
+                        },
+                    }
+                else:
+                    error_message = "ParSEval verification returned no judge result"
+                    judge_status = "ENGINE_ERROR"
+                    platform_judge_failure = True
+                    judge_detail = {
+                        "is_correct": None,
+                        "judge_status": judge_status,
+                        "error_message": error_message,
+                        "dialect_resolution": dialect_resolution.to_dict(),
+                        "comparison": {
+                            "sandbox_executed": False,
+                            "sandbox_error": error_message,
                         },
                     }
             except Exception as e:
@@ -420,13 +589,22 @@ async def check_sql(
             }
 
         if platform_judge_failure:
-            is_correct = False
-            observation = {
-                "judge_status": judge_status,
-                "E_data": judge_detail,
-            }
-            error_attributions = []
-            attributions_list = []
+            _raise_platform_judge_error(
+                judge_status=judge_status,
+                error_message=error_message,
+                error_code=(
+                    getattr(sandbox_run, "error_code", None)
+                    if sandbox_run is not None
+                    else None
+                ) or (
+                    (sandbox_run.data_evidence or {}).get("error_code")
+                    if sandbox_run is not None
+                    else None
+                ),
+                dialect_resolution=(
+                    dialect_resolution.to_dict() if dialect_resolution is not None else None
+                ),
+            )
         else:
             # 归因阶段判定 is_correct：基于 is_equivalent + 三传感器综合证据
             # is_equivalent=True 且无高危归因 → correct
@@ -439,6 +617,16 @@ async def check_sql(
                 judge_detail=judge_detail,
                 mutation_detail=mutation_detail,
                 ast_diffs=ast_diffs_detail,
+                sql_dialect=(
+                    dialect_resolution.parse_dialect or GENERIC_SQLGLOT_DIALECT
+                    if dialect_resolution is not None
+                    else None
+                ),
+                dialect_resolution=(
+                    dialect_resolution.to_dict()
+                    if dialect_resolution is not None
+                    else None
+                ),
             )
             # 归因阶段最终判定：如果等价且有显著错误归因，仍判为不正确
             if is_equivalent:
@@ -459,20 +647,13 @@ async def check_sql(
         judge_status = "WRONG"
 
     # 3. 本地生成诊断提示文本 (Socratic Local Feedback)
-    if platform_judge_failure:
-        ai_hint_text = _generate_platform_judge_feedback(
-            judge_status=judge_status,
-            error_message=error_message,
-            language=payload.language,
-        )
-    else:
-        ai_hint_text = _generate_local_feedback(
-            is_correct=is_correct,
-            is_safety_blocked=is_safety_blocked,
-            error_message=error_message,
-            attributions=attributions_list,
-            language=payload.language
-        )
+    ai_hint_text = _generate_local_feedback(
+        is_correct=is_correct,
+        is_safety_blocked=is_safety_blocked,
+        error_message=error_message,
+        attributions=attributions_list,
+        language=payload.language
+    )
 
     # 经验值发放结算
     chat_repo = ChatRepository(session)
@@ -513,8 +694,6 @@ async def check_sql(
 
     if is_safety_blocked:
         system_result = "【新一轮提交】代码包含危险操作，系统已拒绝执行。"
-    elif platform_judge_failure:
-        system_result = f"【新一轮提交】结果：未完成判定（{judge_status}）"
     else:
         system_result = f"【新一轮提交】结果：{'正确' if is_correct else '不正确'}"
 

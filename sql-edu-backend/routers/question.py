@@ -106,6 +106,8 @@ async def _enrich_question_out(
         content_zh_tw=getattr(question, "content_zh_tw", None),
         difficulty=question.difficulty,
         correct_sql=question.correct_sql,
+        sql_dialect=getattr(question, "sql_dialect", None),
+        engine_version=getattr(question, "engine_version", None),
         time_limit_seconds=question.time_limit_seconds,
         schema_preview=getattr(question, "schema_preview", None),
         required_output_columns=required_cols,
@@ -164,6 +166,8 @@ async def get_questions(
                 content_zh_tw=getattr(q, "content_zh_tw", None),
                 difficulty=q.difficulty,
                 correct_sql=q.correct_sql,
+                sql_dialect=getattr(q, "sql_dialect", None),
+                engine_version=getattr(q, "engine_version", None),
                 time_limit_seconds=q.time_limit_seconds,
                 schema_preview=getattr(q, "schema_preview", None),
                 required_output_columns=required_cols,
@@ -240,7 +244,7 @@ async def generate_questions_by_ai(
             content_zh_tw=item.get("content_zh_tw"),
             difficulty=max(1, min(10, item["difficulty"])),
             correct_sql=correct_sql,
-            sql_dialect=item.get("sql_dialect") or "mysql",
+            sql_dialect=item.get("sql_dialect"),
             engine_version=item.get("engine_version"),
             time_limit_seconds=None,
             schema_preview=item.get("schema_preview"),
@@ -442,10 +446,11 @@ async def update_question(
             "content": question_data.content,
             "difficulty": difficulty,
             "correct_sql": question_data.correct_sql,
-            "sql_dialect": question_data.sql_dialect,
             "required_output_columns": required_cols,
         }
         fields_set = getattr(question_data, "model_fields_set", set())
+        if "sql_dialect" in fields_set:
+            values["sql_dialect"] = question_data.sql_dialect
         if "time_limit_seconds" in fields_set:
             values["time_limit_seconds"] = question_data.time_limit_seconds
         if "schema_preview" in fields_set:

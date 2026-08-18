@@ -29,6 +29,7 @@ def fragment_case(
     attack_kind: str = "semantic_mutation",
     max_rows_per_table: int = 10,
     note: str = "",
+    sql_dialect: str | None = None,
 ) -> dict[str, Any]:
     case = _case(
         case_id,
@@ -42,6 +43,7 @@ def fragment_case(
         attack_kind=attack_kind,
         max_rows_per_table=max_rows_per_table,
         note=note,
+        sql_dialect=sql_dialect,
     )
     case["production"] = production
     case["alternative"] = alternative
@@ -529,11 +531,13 @@ def build_cases() -> list[dict[str, Any]]:
             "expr_cast_integer", "Expr", "CAST AS INTEGER", "not_equivalent",
             "sales(id, amount);", "SELECT CAST(amount AS INTEGER) FROM sales", "SELECT amount FROM sales",
             ["select-basic"], cfg_labels=["arithmetic"], attack_kind="type_coercion",
+            sql_dialect="sqlite",
         ),
         fragment_case(
             "expr_string_concat", "Expr", "ConcatOp:||", "not_equivalent",
             "student(id, name);", "SELECT name || '_x' FROM student", "SELECT name FROM student",
             ["select-basic"], cfg_labels=["arithmetic"], attack_kind="expression_value",
+            sql_dialect="sqlite",
         ),
         fragment_case(
             "literal_decimal_scientific", "Literal", "Decimal/Scientific", "equivalent",
@@ -552,6 +556,7 @@ def build_cases() -> list[dict[str, Any]]:
             "identifier_quoted_columns", "ColumnRef", "Quoted Ident", "equivalent",
             '"order"("select", "group");', 'SELECT "select" FROM "order"', 'SELECT `select` FROM `order`',
             cfg_labels=["select-basic"], attack_kind="identifier_quoting",
+            sql_dialect="sqlite",
         ),
         fragment_case(
             "function_abs", "FuncCall", "ABS", "not_equivalent",
@@ -795,7 +800,16 @@ def build_cases() -> list[dict[str, Any]]:
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
-    by_production = defaultdict(lambda: {"total": 0, "supported": 0, "known_gap": 0})
+    bucket_names = (
+        "supported",
+        "supported_with_limits",
+        "semantic_boundary",
+        "known_gap",
+        "engine_gap",
+    )
+    by_production = defaultdict(
+        lambda: {"total": 0, **{name: 0 for name in bucket_names}}
+    )
     by_expectation = Counter()
     for result in results:
         bucket = result["capability_bucket"]
@@ -807,24 +821,45 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     failure_classes = Counter(
         item.get("failure_class") or "unclassified"
         for item in results
-        if item["capability_bucket"] == "known_gap"
+        if item["capability_bucket"] != "supported"
     )
     return {
         "total_cases": len(results),
         "supported_cases": supported,
-        "known_gap_cases": len(results) - supported,
+        "semantic_boundary_cases": sum(
+            item["capability_bucket"] == "semantic_boundary" for item in results
+        ),
+        "known_gap_cases": sum(
+            item["capability_bucket"] == "known_gap" for item in results
+        ),
+        "engine_gap_cases": sum(
+            item["capability_bucket"] == "engine_gap" for item in results
+        ),
+        "unresolved_cases": len(results) - supported,
         "support_rate": round(supported / len(results), 4) if results else 0,
         "by_expectation": dict(by_expectation),
         "by_production": dict(sorted(by_production.items())),
         "by_failure_class": dict(sorted(failure_classes.items())),
         "supported_ids": [item["id"] for item in results if item["capability_bucket"] == "supported"],
         "known_gap_ids": [item["id"] for item in results if item["capability_bucket"] == "known_gap"],
+        "semantic_boundary_ids": [
+            item["id"] for item in results
+            if item["capability_bucket"] == "semantic_boundary"
+        ],
+        "engine_gap_ids": [
+            item["id"] for item in results
+            if item["capability_bucket"] == "engine_gap"
+        ],
     }
 
 
 def classify_failure(result: dict[str, Any]) -> str | None:
     if result["capability_bucket"] == "supported":
         return None
+    if result["capability_bucket"] == "semantic_boundary":
+        return "semantic_boundary"
+    if result["capability_bucket"] == "engine_gap":
+        return "engine_gap"
     if not result["strict_standard_parse_ok"] or not result["strict_student_parse_ok"]:
         return "parser_or_dialect"
     if not result["standard_ir_build_ok"] or not result["student_ir_build_ok"]:
@@ -854,17 +889,22 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- Total fragment attacks: `{summary['total_cases']}`",
         f"- Supported: `{summary['supported_cases']}`",
+        f"- Semantic boundaries: `{summary['semantic_boundary_cases']}`",
         f"- Known gaps: `{summary['known_gap_cases']}`",
+        f"- Engine gaps: `{summary['engine_gap_cases']}`",
         f"- Support rate: `{summary['support_rate']:.1%}`",
         f"- Failure classes: `{summary['by_failure_class']}`",
         "",
         "## Production Matrix",
         "",
-        "| production | total | supported | gaps |",
-        "| --- | ---: | ---: | ---: |",
+        "| production | total | supported | semantic boundary | known gap | engine gap |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for production, stats in summary["by_production"].items():
-        lines.append(f"| {production} | {stats['total']} | {stats['supported']} | {stats['known_gap']} |")
+        lines.append(
+            f"| {production} | {stats['total']} | {stats['supported']} | "
+            f"{stats['semantic_boundary']} | {stats['known_gap']} | {stats['engine_gap']} |"
+        )
     lines.extend([
         "",
         "## Fragment Matrix",
@@ -877,8 +917,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
             f"| {item['capability_bucket']} | {item['production']} | {item['alternative']} | "
             f"{item['id']} | {item['expectation']} | {item['executed']} | {item['is_equivalent']} |"
         )
-    gaps = [item for item in payload["results"] if item["capability_bucket"] == "known_gap"]
-    lines.extend(["", "## Unsupported / Known Gaps", ""])
+    gaps = [item for item in payload["results"] if item["capability_bucket"] != "supported"]
+    lines.extend(["", "## Boundaries And Gaps", ""])
     if not gaps:
         lines.append("No gap was found by this concrete corpus.")
     for item in gaps:
@@ -935,7 +975,7 @@ def main() -> None:
         "\n".join(
             json.dumps(_json_safe(item), ensure_ascii=False)
             for item in results
-            if item["capability_bucket"] == "known_gap"
+            if item["capability_bucket"] != "supported"
         ) + "\n",
         encoding="utf-8",
     )

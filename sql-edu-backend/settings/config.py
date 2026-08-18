@@ -18,11 +18,21 @@ class Settings(BaseSettings):
     DB_URL: str
 
     # --- 2.1 ParSEval 判题执行器 ---
-    # auto: MySQL 题目在 PARSEVAL_MYSQL_URL 存在时走原生 MySQL，否则走 SQLite 兼容层
-    # sqlite: 始终使用 SQLite 兼容层
-    # mysql: 强制使用原生 MySQL 判题执行器，未配置 PARSEVAL_MYSQL_URL 时返回 ENGINE_ERROR
+    # auto/native: 按最终解析出的方言选择原生引擎；连接缺失时返回 ENGINE_ERROR
+    # sqlite: 仅用于本地兼容测试，不用于还原题目声明的原生方言
+    # mysql/postgres/tsql/oracle: 强制指定原生判题执行器
     PARSEVAL_EXECUTION_BACKEND: str = "auto"
+    # 题目未声明方言且无唯一专属语法特征时使用的系统默认引擎。
+    PARSEVAL_DEFAULT_DIALECT: str = "mysql"
     PARSEVAL_MYSQL_URL: str = ""
+    PARSEVAL_POSTGRES_URL: str = ""
+    PARSEVAL_TSQL_URL: str = ""
+    PARSEVAL_ORACLE_URL: str = ""
+    # Runner 实际版本。题目声明 engine_version 时必须与对应值兼容。
+    PARSEVAL_MYSQL_VERSION: str = "8.4"
+    PARSEVAL_POSTGRES_VERSION: str = "16"
+    PARSEVAL_TSQL_VERSION: str = "2022"
+    PARSEVAL_ORACLE_VERSION: str = "23ai"
 
     # --- 3. 安全与认证 (JWT) ---
     # 在终端运行 `openssl rand -hex 32` 可以生成一个安全的随机字符串，需在 .env 中设置
@@ -100,8 +110,5 @@ def get_settings() -> Settings:
 
 
 __all__ = ["Settings", "get_settings"]
-
-
-
 
 

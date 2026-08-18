@@ -1,16 +1,13 @@
 {
   "summary": {
-    "generated_at": "2026-07-23T14:10:59.381003+00:00",
-    "total": 76,
+    "generated_at": "2026-08-18T16:33:50.901896+00:00",
+    "total": 77,
     "buckets": {
-      "supported": 68,
-      "known_gap": 4,
-      "known_boundary": 4
+      "supported": 77
     },
     "category_buckets": {
       "Aggregate": {
-        "supported": 2,
-        "known_gap": 1
+        "supported": 3
       },
       "CASE": {
         "supported": 3
@@ -25,15 +22,13 @@
         "supported": 2
       },
       "DISTINCT": {
-        "supported": 2,
-        "known_gap": 1
+        "supported": 3
       },
       "Dialect Boundary": {
-        "known_boundary": 4
+        "supported": 3
       },
       "GROUP BY": {
-        "supported": 3,
-        "known_gap": 1
+        "supported": 4
       },
       "HAVING": {
         "supported": 3
@@ -60,8 +55,7 @@
         "supported": 3
       },
       "Recursive CTE": {
-        "supported": 1,
-        "known_gap": 1
+        "supported": 3
       },
       "SELECT": {
         "supported": 6
@@ -76,17 +70,24 @@
         "supported": 2
       },
       "Window": {
-        "supported": 4
+        "supported": 5
       }
+    },
+    "category_execution_boundaries": {
+      "Dialect Boundary": 3,
+      "GROUP BY": 1,
+      "Set Operation": 2
     },
     "ir_to_ast_category_coverage": [
       {
         "category": "Aggregate",
-        "ir_supported_cases": 2,
-        "ir_known_gap_cases": 1,
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
-        "ast_supported_cases": 2,
-        "ast_known_gap_cases": 1,
+        "ast_supported_cases": 3,
+        "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -94,9 +95,11 @@
         "category": "CASE",
         "ir_supported_cases": 3,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 3,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -104,9 +107,11 @@
         "category": "CTE",
         "ir_supported_cases": 3,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 3,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -114,9 +119,11 @@
         "category": "Comparison",
         "ir_supported_cases": 3,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 3,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -124,39 +131,47 @@
         "category": "Correlated Subquery",
         "ir_supported_cases": 2,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 2,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
       {
         "category": "DISTINCT",
-        "ir_supported_cases": 2,
-        "ir_known_gap_cases": 1,
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
-        "ast_supported_cases": 2,
-        "ast_known_gap_cases": 1,
+        "ast_supported_cases": 3,
+        "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
       {
         "category": "Dialect Boundary",
-        "ir_supported_cases": 0,
+        "ir_supported_cases": 3,
         "ir_known_gap_cases": 0,
-        "ir_known_boundary_cases": 4,
-        "ast_supported_cases": 0,
+        "ir_execution_boundary_cases": 3,
+        "ir_known_boundary_cases": 0,
+        "ast_supported_cases": 3,
         "ast_known_gap_cases": 0,
-        "ast_known_boundary_cases": 4,
-        "status": "diff_boundary"
+        "ast_execution_boundary_cases": 3,
+        "ast_known_boundary_cases": 0,
+        "status": "diff_supported"
       },
       {
         "category": "GROUP BY",
-        "ir_supported_cases": 3,
-        "ir_known_gap_cases": 1,
+        "ir_supported_cases": 4,
+        "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 1,
         "ir_known_boundary_cases": 0,
-        "ast_supported_cases": 3,
-        "ast_known_gap_cases": 1,
+        "ast_supported_cases": 4,
+        "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 1,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -164,9 +179,11 @@
         "category": "HAVING",
         "ir_supported_cases": 3,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 3,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -174,9 +191,11 @@
         "category": "IN/BETWEEN/LIKE",
         "ir_supported_cases": 5,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 5,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -184,9 +203,11 @@
         "category": "JOIN",
         "ir_supported_cases": 5,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 5,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -194,9 +215,11 @@
         "category": "JOIN ON",
         "ir_supported_cases": 4,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 4,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -204,9 +227,11 @@
         "category": "LIMIT/OFFSET",
         "ir_supported_cases": 4,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 4,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -214,9 +239,11 @@
         "category": "Logic",
         "ir_supported_cases": 2,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 2,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -224,9 +251,11 @@
         "category": "NULL",
         "ir_supported_cases": 2,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 2,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -234,19 +263,23 @@
         "category": "ORDER BY",
         "ir_supported_cases": 3,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 3,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
       {
         "category": "Recursive CTE",
-        "ir_supported_cases": 1,
-        "ir_known_gap_cases": 1,
+        "ir_supported_cases": 3,
+        "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
-        "ast_supported_cases": 1,
-        "ast_known_gap_cases": 1,
+        "ast_supported_cases": 3,
+        "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -254,9 +287,11 @@
         "category": "SELECT",
         "ir_supported_cases": 6,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 6,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -264,9 +299,11 @@
         "category": "Set Operation",
         "ir_supported_cases": 4,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 2,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 4,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 2,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -274,9 +311,11 @@
         "category": "Subquery",
         "ir_supported_cases": 5,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 5,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
@@ -284,24 +323,39 @@
         "category": "WHERE",
         "ir_supported_cases": 2,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
         "ast_supported_cases": 2,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       },
       {
         "category": "Window",
-        "ir_supported_cases": 4,
+        "ir_supported_cases": 5,
         "ir_known_gap_cases": 0,
+        "ir_execution_boundary_cases": 0,
         "ir_known_boundary_cases": 0,
-        "ast_supported_cases": 4,
+        "ast_supported_cases": 5,
         "ast_known_gap_cases": 0,
+        "ast_execution_boundary_cases": 0,
         "ast_known_boundary_cases": 0,
         "status": "diff_supported"
       }
     ],
-    "support_rate": 0.9444444444444444,
+    "structure_support_rate": 1.0,
+    "non_boundary_support_rate": 1.0,
+    "support_rate": 1.0,
+    "execution_boundary_count": 6,
+    "execution_boundary_ids": [
+      "from_ir__grouping_sets",
+      "from_ir__boundary_lateral",
+      "from_ir__boundary_rollup",
+      "from_ir__boundary_cube",
+      "from_ir__set_operation_intersect_all",
+      "from_ir__set_operation_except_all"
+    ],
     "unexpected_failure_count": 0
   },
   "results": [
@@ -319,6 +373,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case select_projection_alias_star_expression.",
       "error": null,
       "diff_count": 2,
@@ -345,11 +401,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "name, age",
-          "student_sql": "name",
+          "standard_sql": "SELECT name, age FROM student",
+          "student_sql": "SELECT name FROM student",
           "extra": {
-            "standard_sql": "name, age",
-            "student_sql": "name"
+            "standard_sql": "SELECT name, age FROM student",
+            "student_sql": "SELECT name FROM student"
           }
         },
         {
@@ -383,6 +439,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case distinct_top_level_and_count_distinct.",
       "error": null,
       "diff_count": 1,
@@ -408,8 +466,8 @@
           "column": null,
           "knowledge_point_id": "distinct",
           "severity": 0.5,
-          "standard_sql": "DISTINCT",
-          "student_sql": "",
+          "standard_sql": "True",
+          "student_sql": "False",
           "extra": {
             "standard_sql": "True",
             "student_sql": "False"
@@ -432,6 +490,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case where_basic_and_compound_predicates.",
       "error": null,
       "diff_count": 2,
@@ -479,11 +539,14 @@
             "column": "age",
             "op": "GT",
             "value": 18,
+            "value_kind": "literal",
             "value_is_null": false,
             "sql": "age > 18",
             "node": "age > 18",
             "standard_sql": "age > 18",
-            "student_sql": ""
+            "student_sql": "",
+            "standard_query_sql": "SELECT name FROM student WHERE age > 18",
+            "student_query_sql": "SELECT name FROM student"
           }
         }
       ]
@@ -502,6 +565,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case comparison_all_common_operators.",
       "error": null,
       "diff_count": 2,
@@ -551,6 +616,12 @@
             "student_op": "GTE",
             "value": 18,
             "student_value": 18,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "age > 18",
@@ -574,6 +645,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case null_predicates.",
       "error": null,
       "diff_count": 3,
@@ -626,6 +699,12 @@
             "student_op": "EQ",
             "value": null,
             "student_value": null,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "advisor_id IS NULL",
@@ -664,6 +743,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case in_between_like_predicates.",
       "error": null,
       "diff_count": 2,
@@ -713,6 +794,12 @@
             "student_op": "BETWEEN",
             "value": 2,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "credits BETWEEN 2 AND 4",
@@ -735,6 +822,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case logic_and_or_not_parentheses.",
       "error": null,
       "diff_count": 2,
@@ -790,7 +879,10 @@
               "b = 2"
             ],
             "standard_sql": "WHERE a = 1 AND b = 2",
-            "student_sql": "WHERE a = 1 OR b = 2"
+            "student_sql": "WHERE a = 1 OR b = 2",
+            "standard_predicate_sql": "a = 1 AND b = 2",
+            "student_predicate_sql": "a = 1 OR b = 2",
+            "standard_source_table": "t"
           }
         }
       ]
@@ -809,17 +901,22 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case join_common_types.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
+        "FROM",
         "JOIN_TYPE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "join_type_changed"
       ],
       "actual_kps": [
-        "join-left"
+        "join-left",
+        "select-basic"
       ],
       "missing_clauses": [],
       "missing_diff_types": [],
@@ -841,7 +938,67 @@
             "student_side": "INNER",
             "right_table": "takes",
             "standard_sql": "LEFT JOIN takes AS t ON s.id = t.s_id",
-            "student_sql": "JOIN takes AS t ON s.id = t.s_id"
+            "student_sql": "JOIN takes AS t ON s.id = t.s_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student AS s",
+          "student_sql": "FROM student AS s",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "LEFT"
+                  ]
+                ]
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "INNER"
+                  ]
+                ]
+              ]
+            ],
+            "standard_sql": "FROM student AS s",
+            "student_sql": "FROM student AS s"
           }
         }
       ]
@@ -860,17 +1017,22 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case join_self_join_aliases.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
+        "FROM",
         "JOIN_TYPE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "join_type_changed"
       ],
       "actual_kps": [
-        "join-left"
+        "join-left",
+        "select-basic"
       ],
       "missing_clauses": [],
       "missing_diff_types": [],
@@ -892,7 +1054,67 @@
             "student_side": "INNER",
             "right_table": "takes",
             "standard_sql": "LEFT JOIN takes AS t ON s.id = t.s_id",
-            "student_sql": "JOIN takes AS t ON s.id = t.s_id"
+            "student_sql": "JOIN takes AS t ON s.id = t.s_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student AS s",
+          "student_sql": "FROM student AS s",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "LEFT"
+                  ]
+                ]
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "INNER"
+                  ]
+                ]
+              ]
+            ],
+            "standard_sql": "FROM student AS s",
+            "student_sql": "FROM student AS s"
           }
         }
       ]
@@ -911,13 +1133,16 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case join_on_single_multi_nonequi_conditions.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
         "JOIN ON"
       ],
       "actual_diff_types": [
+        "join_key_column_changed",
         "join_on_changed"
       ],
       "actual_kps": [
@@ -936,11 +1161,57 @@
           "column": null,
           "knowledge_point_id": "join-on",
           "severity": 0.5,
-          "standard_sql": "",
-          "student_sql": "",
+          "standard_sql": "s.id = a.s_id",
+          "student_sql": "s.id = a.i_id",
           "extra": {
             "standard_sql": "s.id = a.s_id",
-            "student_sql": ""
+            "student_sql": "s.id = a.i_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "advisor",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "advisor",
+                  "i_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "JOIN ON",
+          "diff_type": "join_key_column_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "join-on",
+          "severity": 0.74,
+          "standard_sql": "s.id = a.s_id",
+          "student_sql": "s.id = a.i_id",
+          "extra": {
+            "standard_sql": "s.id = a.s_id",
+            "student_sql": "s.id = a.i_id",
+            "standard_columns": [
+              "id",
+              "s_id"
+            ],
+            "student_columns": [
+              "id",
+              "i_id"
+            ]
           }
         }
       ]
@@ -959,9 +1230,11 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case group_by_single_multi_expression.",
       "error": null,
-      "diff_count": 4,
+      "diff_count": 5,
       "actual_clauses": [
         "GROUP BY",
         "SELECT"
@@ -970,6 +1243,7 @@
         "column_added",
         "column_dropped",
         "group_by_changed",
+        "group_by_expression_changed",
         "projection_changed"
       ],
       "actual_kps": [
@@ -989,11 +1263,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "dept, COUNT(*)",
-          "student_sql": "year, COUNT(*)",
+          "standard_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+          "student_sql": "SELECT year, COUNT(*) FROM student GROUP BY year",
           "extra": {
-            "standard_sql": "dept, COUNT(*)",
-            "student_sql": "year, COUNT(*)"
+            "standard_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+            "student_sql": "SELECT year, COUNT(*) FROM student GROUP BY year"
           }
         },
         {
@@ -1003,11 +1277,19 @@
           "column": null,
           "knowledge_point_id": "group-by",
           "severity": 0.5,
-          "standard_sql": "GROUP BY dept",
-          "student_sql": "GROUP BY year",
+          "standard_sql": "dept",
+          "student_sql": "year",
           "extra": {
-            "standard_sql": "GROUP BY dept",
-            "student_sql": "GROUP BY year"
+            "standard_sql": "dept",
+            "student_sql": "year",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "standard_source_table": "student",
+            "student_group_columns": [
+              "year"
+            ],
+            "student_source_table": "student"
           }
         },
         {
@@ -1039,6 +1321,40 @@
             "student_sql": "year",
             "position": 0
           }
+        },
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_expression_changed",
+          "table": null,
+          "column": "year",
+          "knowledge_point_id": "group-by",
+          "severity": 0.74,
+          "standard_sql": "dept",
+          "student_sql": "year",
+          "extra": {
+            "standard_keys": [
+              "dept"
+            ],
+            "student_keys": [
+              "year"
+            ],
+            "added_keys": [
+              "year"
+            ],
+            "removed_keys": [
+              "dept"
+            ],
+            "standard_sql": "dept",
+            "student_sql": "year",
+            "standard_query_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+            "student_query_sql": "SELECT year, COUNT(*) FROM student GROUP BY year",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "student_group_columns": [
+              "year"
+            ]
+          }
         }
       ]
     },
@@ -1056,6 +1372,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case having_aggregate_predicate.",
       "error": null,
       "diff_count": 2,
@@ -1088,7 +1406,19 @@
           "student_sql": "HAVING COUNT(*) >= 3",
           "extra": {
             "standard_sql": "HAVING COUNT(*) > 3",
-            "student_sql": "HAVING COUNT(*) >= 3"
+            "student_sql": "HAVING COUNT(*) >= 3",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "standard_source_table": "student",
+            "standard_aggregate_function": "COUNT",
+            "standard_aggregate_argument": "*",
+            "student_group_columns": [
+              "dept"
+            ],
+            "student_source_table": "student",
+            "student_aggregate_function": "COUNT",
+            "student_aggregate_argument": "*"
           }
         },
         {
@@ -1106,6 +1436,12 @@
             "student_op": "GTE",
             "value": 3,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "COUNT(*) > 3",
@@ -1128,6 +1464,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case having_without_group_by.",
       "error": null,
       "diff_count": 2,
@@ -1160,7 +1498,19 @@
           "student_sql": "HAVING COUNT(*) >= 3",
           "extra": {
             "standard_sql": "HAVING COUNT(*) > 3",
-            "student_sql": "HAVING COUNT(*) >= 3"
+            "student_sql": "HAVING COUNT(*) >= 3",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "standard_source_table": "student",
+            "standard_aggregate_function": "COUNT",
+            "standard_aggregate_argument": "*",
+            "student_group_columns": [
+              "dept"
+            ],
+            "student_source_table": "student",
+            "student_aggregate_function": "COUNT",
+            "student_aggregate_argument": "*"
           }
         },
         {
@@ -1178,6 +1528,12 @@
             "student_op": "GTE",
             "value": 3,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "COUNT(*) > 3",
@@ -1200,22 +1556,19 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case aggregate_common_functions.",
       "error": null,
-      "diff_count": 4,
+      "diff_count": 1,
       "actual_clauses": [
-        "AGGREGATE",
-        "SELECT"
+        "AGGREGATE"
       ],
       "actual_diff_types": [
-        "aggregate_function_changed",
-        "column_added",
-        "column_dropped",
-        "projection_changed"
+        "aggregate_function_changed"
       ],
       "actual_kps": [
-        "aggregate",
-        "select-basic"
+        "aggregate"
       ],
       "missing_clauses": [],
       "missing_diff_types": [],
@@ -1223,50 +1576,6 @@
       "passed": true,
       "capability_bucket": "supported",
       "ast_diffs": [
-        {
-          "clause": "SELECT",
-          "diff_type": "projection_changed",
-          "table": null,
-          "column": null,
-          "knowledge_point_id": "select-basic",
-          "severity": 0.5,
-          "standard_sql": "SUM(salary)",
-          "student_sql": "AVG(salary)",
-          "extra": {
-            "standard_sql": "SUM(salary)",
-            "student_sql": "AVG(salary)"
-          }
-        },
-        {
-          "clause": "SELECT",
-          "diff_type": "column_dropped",
-          "table": null,
-          "column": "salary",
-          "knowledge_point_id": "select-basic",
-          "severity": 0.7,
-          "standard_sql": "SUM(salary)",
-          "student_sql": "",
-          "extra": {
-            "standard_sql": "SUM(salary)",
-            "student_sql": "",
-            "position": 0
-          }
-        },
-        {
-          "clause": "SELECT",
-          "diff_type": "column_added",
-          "table": null,
-          "column": "salary",
-          "knowledge_point_id": "select-basic",
-          "severity": 0.5,
-          "standard_sql": "",
-          "student_sql": "AVG(salary)",
-          "extra": {
-            "standard_sql": "",
-            "student_sql": "AVG(salary)",
-            "position": 0
-          }
-        },
         {
           "clause": "AGGREGATE",
           "diff_type": "aggregate_function_changed",
@@ -1281,7 +1590,13 @@
             "student_func": "AVG",
             "column": "salary",
             "standard_sql": "SUM(salary)",
-            "student_sql": "AVG(salary)"
+            "student_sql": "AVG(salary)",
+            "standard_aggregate_function": "SUM",
+            "student_aggregate_function": "AVG",
+            "standard_aggregate_argument": "salary",
+            "student_aggregate_argument": "salary",
+            "standard_group_columns": [],
+            "student_group_columns": []
           }
         }
       ]
@@ -1300,14 +1615,17 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case order_by_direction_multi_expression_alias_ordinal.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
         "ORDER BY"
       ],
       "actual_diff_types": [
-        "order_by_changed"
+        "order_by_changed",
+        "order_direction_changed"
       ],
       "actual_kps": [
         "order-by"
@@ -1331,6 +1649,43 @@
             "standard_sql": "ORDER BY age DESC",
             "student_sql": "ORDER BY age ASC"
           }
+        },
+        {
+          "clause": "ORDER BY",
+          "diff_type": "order_direction_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "order-by",
+          "severity": 0.7,
+          "standard_sql": "ORDER BY age DESC",
+          "student_sql": "ORDER BY age ASC",
+          "extra": {
+            "standard_keys": [
+              [
+                "age",
+                true
+              ]
+            ],
+            "student_keys": [
+              [
+                "age",
+                false
+              ]
+            ],
+            "standard_order_keys": [
+              [
+                "age",
+                true
+              ]
+            ],
+            "student_order_keys": [
+              [
+                "age",
+                false
+              ]
+            ],
+            "standard_source_table": "student"
+          }
         }
       ]
     },
@@ -1348,6 +1703,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case limit_offset_sqlite.",
       "error": null,
       "diff_count": 1,
@@ -1396,6 +1753,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case limit_mysql_offset_count.",
       "error": null,
       "diff_count": 1,
@@ -1444,6 +1803,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case limit_tsql_top.",
       "error": null,
       "diff_count": 1,
@@ -1492,20 +1853,25 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case subquery_in_scalar_exists.",
       "error": null,
-      "diff_count": 3,
+      "diff_count": 4,
       "actual_clauses": [
+        "FROM",
         "PREDICATE",
         "SUBQUERY",
         "WHERE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "predicate_missing",
         "subquery_removed",
         "where_changed"
       ],
       "actual_kps": [
+        "select-basic",
         "subquery",
         "where"
       ],
@@ -1543,10 +1909,13 @@
             "op": "IN",
             "value": null,
             "values": [],
+            "value_kind": "literal",
             "sql": "id IN (SELECT s_id FROM advisor)",
             "node": "id IN (SELECT s_id FROM advisor)",
             "standard_sql": "id IN (SELECT s_id FROM advisor)",
-            "student_sql": ""
+            "student_sql": "",
+            "standard_query_sql": "SELECT name FROM student WHERE id IN (SELECT s_id FROM advisor)",
+            "student_query_sql": "SELECT name FROM student"
           }
         },
         {
@@ -1562,6 +1931,36 @@
             "subquery_depth": 1,
             "standard_sql": "SELECT s_id FROM advisor",
             "student_sql": ""
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student",
+          "student_sql": "FROM student",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                []
+              ],
+              [
+                "TABLE:advisor",
+                []
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                []
+              ]
+            ],
+            "standard_sql": "FROM student",
+            "student_sql": "FROM student"
           }
         }
       ]
@@ -1580,21 +1979,25 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case correlated_subquery_outer_column_reference.",
       "error": null,
       "diff_count": 4,
       "actual_clauses": [
         "CORRELATED SUBQUERY",
+        "FUNCTION",
         "PREDICATE",
         "WHERE"
       ],
       "actual_diff_types": [
+        "comparison_left_column_changed",
         "correlated_predicate_changed",
-        "predicate_added",
-        "predicate_missing",
+        "function_argument_changed",
         "where_changed"
       ],
       "actual_kps": [
+        "function",
         "subquery-correlated",
         "where"
       ],
@@ -1619,60 +2022,65 @@
           }
         },
         {
-          "clause": "CORRELATED SUBQUERY",
-          "diff_type": "correlated_predicate_changed",
-          "table": null,
-          "column": null,
-          "knowledge_point_id": "subquery-correlated",
-          "severity": 0.78,
-          "standard_sql": "SELECT 1 FROM advisor AS a WHERE a.s_id = s.id",
-          "student_sql": "SELECT 1 FROM advisor AS a WHERE a.i_id = s.id",
-          "extra": {
-            "subquery_depth": 1,
-            "standard_sql": "SELECT 1 FROM advisor AS a WHERE a.s_id = s.id",
-            "student_sql": "SELECT 1 FROM advisor AS a WHERE a.i_id = s.id"
-          }
-        },
-        {
-          "clause": "PREDICATE",
-          "diff_type": "predicate_missing",
+          "clause": "FUNCTION",
+          "diff_type": "function_argument_changed",
           "table": null,
           "column": "s_id",
-          "knowledge_point_id": "where",
-          "severity": 0.5,
-          "standard_sql": "a.s_id = s.id",
-          "student_sql": "",
+          "knowledge_point_id": "function",
+          "severity": 0.66,
+          "standard_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
+          "student_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.i_id = s.id)",
           "extra": {
-            "column": "s_id",
-            "op": "EQ",
-            "value": "s.id",
-            "right_column": "id",
-            "sql": "a.s_id = s.id",
-            "node": "a.s_id = s.id",
+            "function": "EXISTS",
+            "standard_args": [
+              "SELECT 1 FROM advisor AS a WHERE a.s_id = s.id"
+            ],
+            "student_args": [
+              "SELECT 1 FROM advisor AS a WHERE a.i_id = s.id"
+            ],
+            "standard_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
+            "student_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.i_id = s.id)"
+          }
+        },
+        {
+          "clause": "CORRELATED SUBQUERY",
+          "diff_type": "correlated_predicate_changed",
+          "table": "student",
+          "column": "id",
+          "knowledge_point_id": "subquery-correlated",
+          "severity": 0.82,
+          "standard_sql": "a.s_id = s.id",
+          "student_sql": "a.i_id = s.id",
+          "extra": {
             "standard_sql": "a.s_id = s.id",
-            "student_sql": "",
-            "subquery_depth": 1
+            "student_sql": "a.i_id = s.id",
+            "standard_query_sql": "SELECT s.name FROM student AS s WHERE EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
+            "student_query_sql": "SELECT s.name FROM student AS s WHERE EXISTS(SELECT 1 FROM advisor AS a WHERE a.i_id = s.id)",
+            "standard_source_table": "student",
+            "standard_membership_table": "advisor",
+            "standard_outer_column": "id",
+            "standard_membership_column": "s_id",
+            "student_source_table": "student",
+            "student_membership_table": "advisor",
+            "student_outer_column": "id",
+            "student_membership_column": "i_id",
+            "query_scope": "nested_correlation"
           }
         },
         {
           "clause": "PREDICATE",
-          "diff_type": "predicate_added",
+          "diff_type": "comparison_left_column_changed",
           "table": null,
-          "column": "i_id",
+          "column": null,
           "knowledge_point_id": "where",
-          "severity": 0.5,
-          "standard_sql": "",
+          "severity": 0.74,
+          "standard_sql": "a.s_id = s.id",
           "student_sql": "a.i_id = s.id",
           "extra": {
-            "column": "i_id",
-            "op": "EQ",
-            "value": "s.id",
-            "right_column": "id",
-            "sql": "a.i_id = s.id",
-            "node": "a.i_id = s.id",
-            "standard_sql": "",
+            "standard_sql": "a.s_id = s.id",
             "student_sql": "a.i_id = s.id",
-            "subquery_depth": 1
+            "standard_column": "s_id",
+            "student_column": "i_id"
           }
         }
       ]
@@ -1691,6 +2099,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case cte_multiple_and_dependent.",
       "error": null,
       "diff_count": 3,
@@ -1715,20 +2125,6 @@
       "capability_bucket": "supported",
       "ast_diffs": [
         {
-          "clause": "WHERE",
-          "diff_type": "where_changed",
-          "table": null,
-          "column": null,
-          "knowledge_point_id": "where",
-          "severity": 0.5,
-          "standard_sql": "dept = 'CS'",
-          "student_sql": "dept = 'Math'",
-          "extra": {
-            "standard_sql": "dept = 'CS'",
-            "student_sql": "dept = 'Math'"
-          }
-        },
-        {
           "clause": "PREDICATE",
           "diff_type": "literal_changed",
           "table": null,
@@ -1743,6 +2139,12 @@
             "student_op": "EQ",
             "value": "CS",
             "student_value": "Math",
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "dept = 'CS'",
@@ -1762,6 +2164,23 @@
             "standard_sql": "c AS (SELECT id FROM student WHERE dept = 'CS')",
             "student_sql": "c AS (SELECT id FROM student WHERE dept = 'Math')"
           }
+        },
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": "student",
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "dept = 'CS'",
+          "student_sql": "dept = 'Math'",
+          "extra": {
+            "standard_sql": "dept = 'CS'",
+            "student_sql": "dept = 'Math'",
+            "query_scope": "cte:c",
+            "query_block_depth": 1,
+            "cte_name": "c"
+          }
         }
       ]
     },
@@ -1779,18 +2198,18 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case cte_recursive.",
       "error": null,
-      "diff_count": 3,
+      "diff_count": 2,
       "actual_clauses": [
         "CTE_RECURSIVE",
-        "PREDICATE",
-        "WHERE"
+        "PREDICATE"
       ],
       "actual_diff_types": [
         "literal_changed",
-        "recursive_cte_changed",
-        "where_changed"
+        "recursive_cte_changed"
       ],
       "actual_kps": [
         "cte-recursive",
@@ -1802,20 +2221,6 @@
       "passed": true,
       "capability_bucket": "supported",
       "ast_diffs": [
-        {
-          "clause": "WHERE",
-          "diff_type": "where_changed",
-          "table": null,
-          "column": null,
-          "knowledge_point_id": "where",
-          "severity": 0.5,
-          "standard_sql": "n < 5",
-          "student_sql": "n < 3",
-          "extra": {
-            "standard_sql": "n < 5",
-            "student_sql": "n < 3"
-          }
-        },
         {
           "clause": "PREDICATE",
           "diff_type": "literal_changed",
@@ -1831,6 +2236,12 @@
             "student_op": "LT",
             "value": 5,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "n < 5",
@@ -1844,8 +2255,8 @@
           "column": null,
           "knowledge_point_id": "cte-recursive",
           "severity": 0.5,
-          "standard_sql": "WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 5)",
-          "student_sql": "WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 3)",
+          "standard_sql": "nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 5)",
+          "student_sql": "nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 3)",
           "extra": {
             "standard_sql": "nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 5)",
             "student_sql": "nums(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 3)",
@@ -1869,13 +2280,17 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case set_operation_union_intersect_except.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 3,
       "actual_clauses": [
         "UNION"
       ],
       "actual_diff_types": [
+        "set_all_modifier_changed",
+        "set_modifier_changed",
         "set_operator_changed"
       ],
       "actual_kps": [
@@ -1902,7 +2317,50 @@
             "standard_modifier": "DISTINCT",
             "student_modifier": "ALL",
             "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+            "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+            "standard_left_source_table": "a",
+            "standard_right_source_table": "b",
+            "standard_projection_columns": [
+              "id"
+            ],
+            "student_left_source_table": "a",
+            "student_right_source_table": "b",
+            "student_projection_columns": [
+              "id"
+            ]
+          }
+        },
+        {
+          "clause": "UNION",
+          "diff_type": "set_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "union",
+          "severity": 0.78,
+          "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+          "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+          "extra": {
+            "operator": "UNION",
+            "standard_modifier": "DISTINCT",
+            "student_modifier": "ALL",
+            "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
             "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b"
+          }
+        },
+        {
+          "clause": "UNION",
+          "diff_type": "set_all_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "union",
+          "severity": 0.74,
+          "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+          "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+          "extra": {
+            "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+            "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+            "standard_modifier": "DISTINCT",
+            "student_modifier": "ALL"
           }
         }
       ]
@@ -1921,20 +2379,28 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case case_simple_and_searched.",
       "error": null,
-      "diff_count": 4,
+      "diff_count": 7,
       "actual_clauses": [
+        "CASE",
+        "FUNCTION",
         "PREDICATE",
         "SELECT"
       ],
       "actual_diff_types": [
+        "case_changed",
         "column_added",
         "column_dropped",
+        "function_argument_changed",
         "literal_changed",
         "projection_changed"
       ],
       "actual_kps": [
+        "case",
+        "function",
         "select-basic",
         "where"
       ],
@@ -1951,11 +2417,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
-          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "standard_sql": "SELECT CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END FROM exam",
+          "student_sql": "SELECT CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END FROM exam",
           "extra": {
-            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
-            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END"
+            "standard_sql": "SELECT CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END FROM exam",
+            "student_sql": "SELECT CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END FROM exam"
           }
         },
         {
@@ -1989,6 +2455,52 @@
           }
         },
         {
+          "clause": "FUNCTION",
+          "diff_type": "function_argument_changed",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "function",
+          "severity": 0.66,
+          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "extra": {
+            "function": "CASE",
+            "standard_args": [
+              "IIF(score >= 60, 'pass')",
+              "'fail'"
+            ],
+            "student_args": [
+              "IIF(score >= 70, 'pass')",
+              "'fail'"
+            ],
+            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END"
+          }
+        },
+        {
+          "clause": "FUNCTION",
+          "diff_type": "function_argument_changed",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "function",
+          "severity": 0.66,
+          "standard_sql": "IIF(score >= 60, 'pass')",
+          "student_sql": "IIF(score >= 70, 'pass')",
+          "extra": {
+            "function": "IF",
+            "standard_args": [
+              "score >= 60",
+              "'pass'"
+            ],
+            "student_args": [
+              "score >= 70",
+              "'pass'"
+            ],
+            "standard_sql": "IIF(score >= 60, 'pass')",
+            "student_sql": "IIF(score >= 70, 'pass')"
+          }
+        },
+        {
           "clause": "PREDICATE",
           "diff_type": "literal_changed",
           "table": null,
@@ -2003,10 +2515,37 @@
             "student_op": "GTE",
             "value": 60,
             "student_value": 70,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "score >= 60",
             "student_sql": "score >= 70"
+          }
+        },
+        {
+          "clause": "CASE",
+          "diff_type": "case_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "case",
+          "severity": 0.68,
+          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "extra": {
+            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+            "standard_case_when_predicates": [
+              "score >= 60"
+            ],
+            "student_case_when_predicates": [
+              "score >= 70"
+            ],
+            "standard_source_table": "exam"
           }
         }
       ]
@@ -2025,6 +2564,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case window_rank_aggregate_frame.",
       "error": null,
       "diff_count": 4,
@@ -2055,11 +2596,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
-          "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
+          "standard_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+          "student_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor",
           "extra": {
-            "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
-            "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
+            "standard_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+            "student_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor"
           }
         },
         {
@@ -2102,6 +2643,42 @@
           "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
           "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
           "extra": {
+            "standard_over": {
+              "partition_by": [
+                "dept"
+              ],
+              "order": "ORDER BY salary DESC",
+              "frame": "",
+              "order_items": [
+                [
+                  "salary",
+                  true,
+                  false
+                ]
+              ],
+              "order_columns": [
+                "salary"
+              ]
+            },
+            "student_over": {
+              "partition_by": [
+                "name"
+              ],
+              "order": "ORDER BY salary DESC",
+              "frame": "",
+              "order_items": [
+                [
+                  "salary",
+                  true,
+                  false
+                ]
+              ],
+              "order_columns": [
+                "salary"
+              ]
+            },
+            "standard_window_source_table": "instructor",
+            "student_window_source_table": "instructor",
             "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
             "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
           }
@@ -2122,6 +2699,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case select_table_star.",
       "error": null,
       "diff_count": 2,
@@ -2148,11 +2727,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "name, age",
-          "student_sql": "name",
+          "standard_sql": "SELECT name, age FROM student",
+          "student_sql": "SELECT name FROM student",
           "extra": {
-            "standard_sql": "name, age",
-            "student_sql": "name"
+            "standard_sql": "SELECT name, age FROM student",
+            "student_sql": "SELECT name FROM student"
           }
         },
         {
@@ -2186,6 +2765,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case select_function_and_cast_projection.",
       "error": null,
       "diff_count": 2,
@@ -2212,11 +2793,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "name, age",
-          "student_sql": "name",
+          "standard_sql": "SELECT name, age FROM student",
+          "student_sql": "SELECT name FROM student",
           "extra": {
-            "standard_sql": "name, age",
-            "student_sql": "name"
+            "standard_sql": "SELECT name, age FROM student",
+            "student_sql": "SELECT name FROM student"
           }
         },
         {
@@ -2250,6 +2831,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case select_scalar_subquery_projection.",
       "error": null,
       "diff_count": 2,
@@ -2276,11 +2859,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "name, age",
-          "student_sql": "name",
+          "standard_sql": "SELECT name, age FROM student",
+          "student_sql": "SELECT name FROM student",
           "extra": {
-            "standard_sql": "name, age",
-            "student_sql": "name"
+            "standard_sql": "SELECT name, age FROM student",
+            "student_sql": "SELECT name FROM student"
           }
         },
         {
@@ -2314,6 +2897,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case distinct_multi_projection.",
       "error": null,
       "diff_count": 1,
@@ -2339,8 +2924,8 @@
           "column": null,
           "knowledge_point_id": "distinct",
           "severity": 0.5,
-          "standard_sql": "DISTINCT",
-          "student_sql": "",
+          "standard_sql": "True",
+          "student_sql": "False",
           "extra": {
             "standard_sql": "True",
             "student_sql": "False"
@@ -2362,6 +2947,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case comparison_null_safe_operators.",
       "error": null,
       "diff_count": 2,
@@ -2411,6 +2998,12 @@
             "student_op": "GTE",
             "value": 18,
             "student_value": 18,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "age > 18",
@@ -2434,6 +3027,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case null_coalesce_nullif_functions.",
       "error": null,
       "diff_count": 3,
@@ -2486,6 +3081,12 @@
             "student_op": "EQ",
             "value": null,
             "student_value": null,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "advisor_id IS NULL",
@@ -2524,6 +3125,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case predicate_not_in_list.",
       "error": null,
       "diff_count": 2,
@@ -2573,6 +3176,12 @@
             "student_op": "BETWEEN",
             "value": 2,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "credits BETWEEN 2 AND 4",
@@ -2595,6 +3204,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case predicate_in_subquery.",
       "error": null,
       "diff_count": 2,
@@ -2644,6 +3255,12 @@
             "student_op": "BETWEEN",
             "value": 2,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "credits BETWEEN 2 AND 4",
@@ -2666,6 +3283,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case predicate_not_between.",
       "error": null,
       "diff_count": 2,
@@ -2715,6 +3334,12 @@
             "student_op": "BETWEEN",
             "value": 2,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "credits BETWEEN 2 AND 4",
@@ -2737,6 +3362,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case predicate_like_escape.",
       "error": null,
       "diff_count": 2,
@@ -2786,6 +3413,12 @@
             "student_op": "BETWEEN",
             "value": 2,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "credits BETWEEN 2 AND 4",
@@ -2808,6 +3441,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case logic_demorgan_shape.",
       "error": null,
       "diff_count": 2,
@@ -2863,7 +3498,10 @@
               "b = 2"
             ],
             "standard_sql": "WHERE a = 1 AND b = 2",
-            "student_sql": "WHERE a = 1 OR b = 2"
+            "student_sql": "WHERE a = 1 OR b = 2",
+            "standard_predicate_sql": "a = 1 AND b = 2",
+            "student_predicate_sql": "a = 1 OR b = 2",
+            "standard_source_table": "t"
           }
         }
       ]
@@ -2882,17 +3520,22 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case from_implicit_comma_join.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
+        "FROM",
         "JOIN_TYPE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "join_type_changed"
       ],
       "actual_kps": [
-        "join-left"
+        "join-left",
+        "select-basic"
       ],
       "missing_clauses": [],
       "missing_diff_types": [],
@@ -2914,7 +3557,67 @@
             "student_side": "INNER",
             "right_table": "takes",
             "standard_sql": "LEFT JOIN takes AS t ON s.id = t.s_id",
-            "student_sql": "JOIN takes AS t ON s.id = t.s_id"
+            "student_sql": "JOIN takes AS t ON s.id = t.s_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student AS s",
+          "student_sql": "FROM student AS s",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "LEFT"
+                  ]
+                ]
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "INNER"
+                  ]
+                ]
+              ]
+            ],
+            "standard_sql": "FROM student AS s",
+            "student_sql": "FROM student AS s"
           }
         }
       ]
@@ -2933,17 +3636,22 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case join_natural.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
+        "FROM",
         "JOIN_TYPE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "join_type_changed"
       ],
       "actual_kps": [
-        "join-left"
+        "join-left",
+        "select-basic"
       ],
       "missing_clauses": [],
       "missing_diff_types": [],
@@ -2965,7 +3673,67 @@
             "student_side": "INNER",
             "right_table": "takes",
             "standard_sql": "LEFT JOIN takes AS t ON s.id = t.s_id",
-            "student_sql": "JOIN takes AS t ON s.id = t.s_id"
+            "student_sql": "JOIN takes AS t ON s.id = t.s_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student AS s",
+          "student_sql": "FROM student AS s",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "LEFT"
+                  ]
+                ]
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "INNER"
+                  ]
+                ]
+              ]
+            ],
+            "standard_sql": "FROM student AS s",
+            "student_sql": "FROM student AS s"
           }
         }
       ]
@@ -2984,13 +3752,16 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case join_using_single_column.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
         "JOIN ON"
       ],
       "actual_diff_types": [
+        "join_key_column_changed",
         "join_on_changed"
       ],
       "actual_kps": [
@@ -3009,11 +3780,57 @@
           "column": null,
           "knowledge_point_id": "join-on",
           "severity": 0.5,
-          "standard_sql": "",
-          "student_sql": "",
+          "standard_sql": "s.id = a.s_id",
+          "student_sql": "s.id = a.i_id",
           "extra": {
             "standard_sql": "s.id = a.s_id",
-            "student_sql": ""
+            "student_sql": "s.id = a.i_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "advisor",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "advisor",
+                  "i_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "JOIN ON",
+          "diff_type": "join_key_column_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "join-on",
+          "severity": 0.74,
+          "standard_sql": "s.id = a.s_id",
+          "student_sql": "s.id = a.i_id",
+          "extra": {
+            "standard_sql": "s.id = a.s_id",
+            "student_sql": "s.id = a.i_id",
+            "standard_columns": [
+              "id",
+              "s_id"
+            ],
+            "student_columns": [
+              "id",
+              "i_id"
+            ]
           }
         }
       ]
@@ -3032,13 +3849,16 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case join_using_multiple_columns.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
         "JOIN ON"
       ],
       "actual_diff_types": [
+        "join_key_column_changed",
         "join_on_changed"
       ],
       "actual_kps": [
@@ -3057,11 +3877,57 @@
           "column": null,
           "knowledge_point_id": "join-on",
           "severity": 0.5,
-          "standard_sql": "",
-          "student_sql": "",
+          "standard_sql": "s.id = a.s_id",
+          "student_sql": "s.id = a.i_id",
           "extra": {
             "standard_sql": "s.id = a.s_id",
-            "student_sql": ""
+            "student_sql": "s.id = a.i_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "advisor",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "advisor",
+                  "i_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "JOIN ON",
+          "diff_type": "join_key_column_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "join-on",
+          "severity": 0.74,
+          "standard_sql": "s.id = a.s_id",
+          "student_sql": "s.id = a.i_id",
+          "extra": {
+            "standard_sql": "s.id = a.s_id",
+            "student_sql": "s.id = a.i_id",
+            "standard_columns": [
+              "id",
+              "s_id"
+            ],
+            "student_columns": [
+              "id",
+              "i_id"
+            ]
           }
         }
       ]
@@ -3080,17 +3946,22 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case join_three_table_chain.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
+        "FROM",
         "JOIN_TYPE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "join_type_changed"
       ],
       "actual_kps": [
-        "join-left"
+        "join-left",
+        "select-basic"
       ],
       "missing_clauses": [],
       "missing_diff_types": [],
@@ -3112,7 +3983,67 @@
             "student_side": "INNER",
             "right_table": "takes",
             "standard_sql": "LEFT JOIN takes AS t ON s.id = t.s_id",
-            "student_sql": "JOIN takes AS t ON s.id = t.s_id"
+            "student_sql": "JOIN takes AS t ON s.id = t.s_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "takes",
+                  "s_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student AS s",
+          "student_sql": "FROM student AS s",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "LEFT"
+                  ]
+                ]
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "takes",
+                    "INNER"
+                  ]
+                ]
+              ]
+            ],
+            "standard_sql": "FROM student AS s",
+            "student_sql": "FROM student AS s"
           }
         }
       ]
@@ -3131,9 +4062,11 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case group_by_alias_and_ordinal.",
       "error": null,
-      "diff_count": 4,
+      "diff_count": 5,
       "actual_clauses": [
         "GROUP BY",
         "SELECT"
@@ -3142,6 +4075,7 @@
         "column_added",
         "column_dropped",
         "group_by_changed",
+        "group_by_expression_changed",
         "projection_changed"
       ],
       "actual_kps": [
@@ -3161,11 +4095,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "dept, COUNT(*)",
-          "student_sql": "year, COUNT(*)",
+          "standard_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+          "student_sql": "SELECT year, COUNT(*) FROM student GROUP BY year",
           "extra": {
-            "standard_sql": "dept, COUNT(*)",
-            "student_sql": "year, COUNT(*)"
+            "standard_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+            "student_sql": "SELECT year, COUNT(*) FROM student GROUP BY year"
           }
         },
         {
@@ -3175,11 +4109,19 @@
           "column": null,
           "knowledge_point_id": "group-by",
           "severity": 0.5,
-          "standard_sql": "GROUP BY dept",
-          "student_sql": "GROUP BY year",
+          "standard_sql": "dept",
+          "student_sql": "year",
           "extra": {
-            "standard_sql": "GROUP BY dept",
-            "student_sql": "GROUP BY year"
+            "standard_sql": "dept",
+            "student_sql": "year",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "standard_source_table": "student",
+            "student_group_columns": [
+              "year"
+            ],
+            "student_source_table": "student"
           }
         },
         {
@@ -3211,6 +4153,40 @@
             "student_sql": "year",
             "position": 0
           }
+        },
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_expression_changed",
+          "table": null,
+          "column": "year",
+          "knowledge_point_id": "group-by",
+          "severity": 0.74,
+          "standard_sql": "dept",
+          "student_sql": "year",
+          "extra": {
+            "standard_keys": [
+              "dept"
+            ],
+            "student_keys": [
+              "year"
+            ],
+            "added_keys": [
+              "year"
+            ],
+            "removed_keys": [
+              "dept"
+            ],
+            "standard_sql": "dept",
+            "student_sql": "year",
+            "standard_query_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+            "student_query_sql": "SELECT year, COUNT(*) FROM student GROUP BY year",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "student_group_columns": [
+              "year"
+            ]
+          }
         }
       ]
     },
@@ -3228,6 +4204,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case having_sum_avg_min_max_predicates.",
       "error": null,
       "diff_count": 2,
@@ -3260,7 +4238,19 @@
           "student_sql": "HAVING COUNT(*) >= 3",
           "extra": {
             "standard_sql": "HAVING COUNT(*) > 3",
-            "student_sql": "HAVING COUNT(*) >= 3"
+            "student_sql": "HAVING COUNT(*) >= 3",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "standard_source_table": "student",
+            "standard_aggregate_function": "COUNT",
+            "standard_aggregate_argument": "*",
+            "student_group_columns": [
+              "dept"
+            ],
+            "student_source_table": "student",
+            "student_aggregate_function": "COUNT",
+            "student_aggregate_argument": "*"
           }
         },
         {
@@ -3278,6 +4268,12 @@
             "student_op": "GTE",
             "value": 3,
             "student_value": 3,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "COUNT(*) > 3",
@@ -3300,22 +4296,19 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case aggregate_distinct_sum_avg.",
       "error": null,
-      "diff_count": 4,
+      "diff_count": 1,
       "actual_clauses": [
-        "AGGREGATE",
-        "SELECT"
+        "AGGREGATE"
       ],
       "actual_diff_types": [
-        "aggregate_function_changed",
-        "column_added",
-        "column_dropped",
-        "projection_changed"
+        "aggregate_function_changed"
       ],
       "actual_kps": [
-        "aggregate",
-        "select-basic"
+        "aggregate"
       ],
       "missing_clauses": [],
       "missing_diff_types": [],
@@ -3323,50 +4316,6 @@
       "passed": true,
       "capability_bucket": "supported",
       "ast_diffs": [
-        {
-          "clause": "SELECT",
-          "diff_type": "projection_changed",
-          "table": null,
-          "column": null,
-          "knowledge_point_id": "select-basic",
-          "severity": 0.5,
-          "standard_sql": "SUM(salary)",
-          "student_sql": "AVG(salary)",
-          "extra": {
-            "standard_sql": "SUM(salary)",
-            "student_sql": "AVG(salary)"
-          }
-        },
-        {
-          "clause": "SELECT",
-          "diff_type": "column_dropped",
-          "table": null,
-          "column": "salary",
-          "knowledge_point_id": "select-basic",
-          "severity": 0.7,
-          "standard_sql": "SUM(salary)",
-          "student_sql": "",
-          "extra": {
-            "standard_sql": "SUM(salary)",
-            "student_sql": "",
-            "position": 0
-          }
-        },
-        {
-          "clause": "SELECT",
-          "diff_type": "column_added",
-          "table": null,
-          "column": "salary",
-          "knowledge_point_id": "select-basic",
-          "severity": 0.5,
-          "standard_sql": "",
-          "student_sql": "AVG(salary)",
-          "extra": {
-            "standard_sql": "",
-            "student_sql": "AVG(salary)",
-            "position": 0
-          }
-        },
         {
           "clause": "AGGREGATE",
           "diff_type": "aggregate_function_changed",
@@ -3381,7 +4330,13 @@
             "student_func": "AVG",
             "column": "salary",
             "standard_sql": "SUM(salary)",
-            "student_sql": "AVG(salary)"
+            "student_sql": "AVG(salary)",
+            "standard_aggregate_function": "SUM",
+            "student_aggregate_function": "AVG",
+            "standard_aggregate_argument": "salary",
+            "student_aggregate_argument": "salary",
+            "standard_group_columns": [],
+            "student_group_columns": []
           }
         }
       ]
@@ -3400,14 +4355,17 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case order_by_nulls_first_last.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
         "ORDER BY"
       ],
       "actual_diff_types": [
-        "order_by_changed"
+        "order_by_changed",
+        "order_direction_changed"
       ],
       "actual_kps": [
         "order-by"
@@ -3431,6 +4389,43 @@
             "standard_sql": "ORDER BY age DESC",
             "student_sql": "ORDER BY age ASC"
           }
+        },
+        {
+          "clause": "ORDER BY",
+          "diff_type": "order_direction_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "order-by",
+          "severity": 0.7,
+          "standard_sql": "ORDER BY age DESC",
+          "student_sql": "ORDER BY age ASC",
+          "extra": {
+            "standard_keys": [
+              [
+                "age",
+                true
+              ]
+            ],
+            "student_keys": [
+              [
+                "age",
+                false
+              ]
+            ],
+            "standard_order_keys": [
+              [
+                "age",
+                true
+              ]
+            ],
+            "student_order_keys": [
+              [
+                "age",
+                false
+              ]
+            ],
+            "standard_source_table": "student"
+          }
         }
       ]
     },
@@ -3448,6 +4443,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case limit_fetch_first.",
       "error": null,
       "diff_count": 1,
@@ -3496,20 +4493,25 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case subquery_derived_table.",
       "error": null,
-      "diff_count": 3,
+      "diff_count": 4,
       "actual_clauses": [
+        "FROM",
         "PREDICATE",
         "SUBQUERY",
         "WHERE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "predicate_missing",
         "subquery_removed",
         "where_changed"
       ],
       "actual_kps": [
+        "select-basic",
         "subquery",
         "where"
       ],
@@ -3547,10 +4549,13 @@
             "op": "IN",
             "value": null,
             "values": [],
+            "value_kind": "literal",
             "sql": "id IN (SELECT s_id FROM advisor)",
             "node": "id IN (SELECT s_id FROM advisor)",
             "standard_sql": "id IN (SELECT s_id FROM advisor)",
-            "student_sql": ""
+            "student_sql": "",
+            "standard_query_sql": "SELECT name FROM student WHERE id IN (SELECT s_id FROM advisor)",
+            "student_query_sql": "SELECT name FROM student"
           }
         },
         {
@@ -3566,6 +4571,36 @@
             "subquery_depth": 1,
             "standard_sql": "SELECT s_id FROM advisor",
             "student_sql": ""
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student",
+          "student_sql": "FROM student",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                []
+              ],
+              [
+                "TABLE:advisor",
+                []
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                []
+              ]
+            ],
+            "standard_sql": "FROM student",
+            "student_sql": "FROM student"
           }
         }
       ]
@@ -3584,20 +4619,25 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case subquery_not_exists.",
       "error": null,
-      "diff_count": 3,
+      "diff_count": 4,
       "actual_clauses": [
+        "FROM",
         "PREDICATE",
         "SUBQUERY",
         "WHERE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "predicate_missing",
         "subquery_removed",
         "where_changed"
       ],
       "actual_kps": [
+        "select-basic",
         "subquery",
         "where"
       ],
@@ -3635,10 +4675,13 @@
             "op": "IN",
             "value": null,
             "values": [],
+            "value_kind": "literal",
             "sql": "id IN (SELECT s_id FROM advisor)",
             "node": "id IN (SELECT s_id FROM advisor)",
             "standard_sql": "id IN (SELECT s_id FROM advisor)",
-            "student_sql": ""
+            "student_sql": "",
+            "standard_query_sql": "SELECT name FROM student WHERE id IN (SELECT s_id FROM advisor)",
+            "student_query_sql": "SELECT name FROM student"
           }
         },
         {
@@ -3654,6 +4697,36 @@
             "subquery_depth": 1,
             "standard_sql": "SELECT s_id FROM advisor",
             "student_sql": ""
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student",
+          "student_sql": "FROM student",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                []
+              ],
+              [
+                "TABLE:advisor",
+                []
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                []
+              ]
+            ],
+            "standard_sql": "FROM student",
+            "student_sql": "FROM student"
           }
         }
       ]
@@ -3672,20 +4745,25 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case subquery_any_all.",
       "error": null,
-      "diff_count": 3,
+      "diff_count": 4,
       "actual_clauses": [
+        "FROM",
         "PREDICATE",
         "SUBQUERY",
         "WHERE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "predicate_missing",
         "subquery_removed",
         "where_changed"
       ],
       "actual_kps": [
+        "select-basic",
         "subquery",
         "where"
       ],
@@ -3723,10 +4801,13 @@
             "op": "IN",
             "value": null,
             "values": [],
+            "value_kind": "literal",
             "sql": "id IN (SELECT s_id FROM advisor)",
             "node": "id IN (SELECT s_id FROM advisor)",
             "standard_sql": "id IN (SELECT s_id FROM advisor)",
-            "student_sql": ""
+            "student_sql": "",
+            "standard_query_sql": "SELECT name FROM student WHERE id IN (SELECT s_id FROM advisor)",
+            "student_query_sql": "SELECT name FROM student"
           }
         },
         {
@@ -3742,6 +4823,36 @@
             "subquery_depth": 1,
             "standard_sql": "SELECT s_id FROM advisor",
             "student_sql": ""
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student",
+          "student_sql": "FROM student",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                []
+              ],
+              [
+                "TABLE:advisor",
+                []
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                []
+              ]
+            ],
+            "standard_sql": "FROM student",
+            "student_sql": "FROM student"
           }
         }
       ]
@@ -3760,6 +4871,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case cte_column_list.",
       "error": null,
       "diff_count": 3,
@@ -3784,20 +4897,6 @@
       "capability_bucket": "supported",
       "ast_diffs": [
         {
-          "clause": "WHERE",
-          "diff_type": "where_changed",
-          "table": null,
-          "column": null,
-          "knowledge_point_id": "where",
-          "severity": 0.5,
-          "standard_sql": "dept = 'CS'",
-          "student_sql": "dept = 'Math'",
-          "extra": {
-            "standard_sql": "dept = 'CS'",
-            "student_sql": "dept = 'Math'"
-          }
-        },
-        {
           "clause": "PREDICATE",
           "diff_type": "literal_changed",
           "table": null,
@@ -3812,6 +4911,12 @@
             "student_op": "EQ",
             "value": "CS",
             "student_value": "Math",
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "dept = 'CS'",
@@ -3831,6 +4936,23 @@
             "standard_sql": "c AS (SELECT id FROM student WHERE dept = 'CS')",
             "student_sql": "c AS (SELECT id FROM student WHERE dept = 'Math')"
           }
+        },
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": "student",
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "dept = 'CS'",
+          "student_sql": "dept = 'Math'",
+          "extra": {
+            "standard_sql": "dept = 'CS'",
+            "student_sql": "dept = 'Math'",
+            "query_scope": "cte:c",
+            "query_block_depth": 1,
+            "cte_name": "c"
+          }
         }
       ]
     },
@@ -3848,6 +4970,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case cte_three_dependency_chain.",
       "error": null,
       "diff_count": 3,
@@ -3872,20 +4996,6 @@
       "capability_bucket": "supported",
       "ast_diffs": [
         {
-          "clause": "WHERE",
-          "diff_type": "where_changed",
-          "table": null,
-          "column": null,
-          "knowledge_point_id": "where",
-          "severity": 0.5,
-          "standard_sql": "dept = 'CS'",
-          "student_sql": "dept = 'Math'",
-          "extra": {
-            "standard_sql": "dept = 'CS'",
-            "student_sql": "dept = 'Math'"
-          }
-        },
-        {
           "clause": "PREDICATE",
           "diff_type": "literal_changed",
           "table": null,
@@ -3900,6 +5010,12 @@
             "student_op": "EQ",
             "value": "CS",
             "student_value": "Math",
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "dept = 'CS'",
@@ -3919,6 +5035,23 @@
             "standard_sql": "c AS (SELECT id FROM student WHERE dept = 'CS')",
             "student_sql": "c AS (SELECT id FROM student WHERE dept = 'Math')"
           }
+        },
+        {
+          "clause": "WHERE",
+          "diff_type": "where_changed",
+          "table": "student",
+          "column": null,
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "dept = 'CS'",
+          "student_sql": "dept = 'Math'",
+          "extra": {
+            "standard_sql": "dept = 'CS'",
+            "student_sql": "dept = 'Math'",
+            "query_scope": "cte:c",
+            "query_block_depth": 1,
+            "cte_name": "c"
+          }
         }
       ]
     },
@@ -3936,20 +5069,28 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case case_nested.",
       "error": null,
-      "diff_count": 4,
+      "diff_count": 7,
       "actual_clauses": [
+        "CASE",
+        "FUNCTION",
         "PREDICATE",
         "SELECT"
       ],
       "actual_diff_types": [
+        "case_changed",
         "column_added",
         "column_dropped",
+        "function_argument_changed",
         "literal_changed",
         "projection_changed"
       ],
       "actual_kps": [
+        "case",
+        "function",
         "select-basic",
         "where"
       ],
@@ -3966,11 +5107,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
-          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "standard_sql": "SELECT CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END FROM exam",
+          "student_sql": "SELECT CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END FROM exam",
           "extra": {
-            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
-            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END"
+            "standard_sql": "SELECT CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END FROM exam",
+            "student_sql": "SELECT CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END FROM exam"
           }
         },
         {
@@ -4004,6 +5145,52 @@
           }
         },
         {
+          "clause": "FUNCTION",
+          "diff_type": "function_argument_changed",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "function",
+          "severity": 0.66,
+          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "extra": {
+            "function": "CASE",
+            "standard_args": [
+              "IIF(score >= 60, 'pass')",
+              "'fail'"
+            ],
+            "student_args": [
+              "IIF(score >= 70, 'pass')",
+              "'fail'"
+            ],
+            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END"
+          }
+        },
+        {
+          "clause": "FUNCTION",
+          "diff_type": "function_argument_changed",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "function",
+          "severity": 0.66,
+          "standard_sql": "IIF(score >= 60, 'pass')",
+          "student_sql": "IIF(score >= 70, 'pass')",
+          "extra": {
+            "function": "IF",
+            "standard_args": [
+              "score >= 60",
+              "'pass'"
+            ],
+            "student_args": [
+              "score >= 70",
+              "'pass'"
+            ],
+            "standard_sql": "IIF(score >= 60, 'pass')",
+            "student_sql": "IIF(score >= 70, 'pass')"
+          }
+        },
+        {
           "clause": "PREDICATE",
           "diff_type": "literal_changed",
           "table": null,
@@ -4018,10 +5205,37 @@
             "student_op": "GTE",
             "value": 60,
             "student_value": 70,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "score >= 60",
             "student_sql": "score >= 70"
+          }
+        },
+        {
+          "clause": "CASE",
+          "diff_type": "case_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "case",
+          "severity": 0.68,
+          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "extra": {
+            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+            "standard_case_when_predicates": [
+              "score >= 60"
+            ],
+            "student_case_when_predicates": [
+              "score >= 70"
+            ],
+            "standard_source_table": "exam"
           }
         }
       ]
@@ -4040,6 +5254,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case window_lag_lead_ntile_values.",
       "error": null,
       "diff_count": 4,
@@ -4070,11 +5286,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
-          "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
+          "standard_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+          "student_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor",
           "extra": {
-            "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
-            "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
+            "standard_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+            "student_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor"
           }
         },
         {
@@ -4117,6 +5333,42 @@
           "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
           "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
           "extra": {
+            "standard_over": {
+              "partition_by": [
+                "dept"
+              ],
+              "order": "ORDER BY salary DESC",
+              "frame": "",
+              "order_items": [
+                [
+                  "salary",
+                  true,
+                  false
+                ]
+              ],
+              "order_columns": [
+                "salary"
+              ]
+            },
+            "student_over": {
+              "partition_by": [
+                "name"
+              ],
+              "order": "ORDER BY salary DESC",
+              "frame": "",
+              "order_items": [
+                [
+                  "salary",
+                  true,
+                  false
+                ]
+              ],
+              "order_columns": [
+                "salary"
+              ]
+            },
+            "standard_window_source_table": "instructor",
+            "student_window_source_table": "instructor",
             "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
             "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
           }
@@ -4137,6 +5389,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case window_named_reference.",
       "error": null,
       "diff_count": 4,
@@ -4167,11 +5421,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
-          "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
+          "standard_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+          "student_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor",
           "extra": {
-            "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
-            "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
+            "standard_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+            "student_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor"
           }
         },
         {
@@ -4214,6 +5468,42 @@
           "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
           "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
           "extra": {
+            "standard_over": {
+              "partition_by": [
+                "dept"
+              ],
+              "order": "ORDER BY salary DESC",
+              "frame": "",
+              "order_items": [
+                [
+                  "salary",
+                  true,
+                  false
+                ]
+              ],
+              "order_columns": [
+                "salary"
+              ]
+            },
+            "student_over": {
+              "partition_by": [
+                "name"
+              ],
+              "order": "ORDER BY salary DESC",
+              "frame": "",
+              "order_items": [
+                [
+                  "salary",
+                  true,
+                  false
+                ]
+              ],
+              "order_columns": [
+                "salary"
+              ]
+            },
+            "standard_window_source_table": "instructor",
+            "student_window_source_table": "instructor",
             "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
             "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
           }
@@ -4234,6 +5524,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case select_quoted_identifier.",
       "error": null,
       "diff_count": 2,
@@ -4260,11 +5552,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "name, age",
-          "student_sql": "name",
+          "standard_sql": "SELECT name, age FROM student",
+          "student_sql": "SELECT name FROM student",
           "extra": {
-            "standard_sql": "name, age",
-            "student_sql": "name"
+            "standard_sql": "SELECT name, age FROM student",
+            "student_sql": "SELECT name FROM student"
           }
         },
         {
@@ -4298,6 +5590,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case select_unary_parenthesized_modulo.",
       "error": null,
       "diff_count": 2,
@@ -4324,11 +5618,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "name, age",
-          "student_sql": "name",
+          "standard_sql": "SELECT name, age FROM student",
+          "student_sql": "SELECT name FROM student",
           "extra": {
-            "standard_sql": "name, age",
-            "student_sql": "name"
+            "standard_sql": "SELECT name, age FROM student",
+            "student_sql": "SELECT name FROM student"
           }
         },
         {
@@ -4363,6 +5657,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case where_boolean_literal.",
       "error": null,
       "diff_count": 2,
@@ -4410,11 +5706,14 @@
             "column": "age",
             "op": "GT",
             "value": 18,
+            "value_kind": "literal",
             "value_is_null": false,
             "sql": "age > 18",
             "node": "age > 18",
             "standard_sql": "age > 18",
-            "student_sql": ""
+            "student_sql": "",
+            "standard_query_sql": "SELECT name FROM student WHERE age > 18",
+            "student_query_sql": "SELECT name FROM student"
           }
         }
       ]
@@ -4433,6 +5732,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case comparison_column_to_column.",
       "error": null,
       "diff_count": 2,
@@ -4482,6 +5783,12 @@
             "student_op": "GTE",
             "value": 18,
             "student_value": 18,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "age > 18",
@@ -4504,13 +5811,16 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case join_non_equi_between_tables.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
         "JOIN ON"
       ],
       "actual_diff_types": [
+        "join_key_column_changed",
         "join_on_changed"
       ],
       "actual_kps": [
@@ -4529,11 +5839,57 @@
           "column": null,
           "knowledge_point_id": "join-on",
           "severity": 0.5,
-          "standard_sql": "",
-          "student_sql": "",
+          "standard_sql": "s.id = a.s_id",
+          "student_sql": "s.id = a.i_id",
           "extra": {
             "standard_sql": "s.id = a.s_id",
-            "student_sql": ""
+            "student_sql": "s.id = a.i_id",
+            "standard_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "advisor",
+                  "s_id"
+                ]
+              ]
+            ],
+            "student_join_pairs": [
+              [
+                [
+                  "student",
+                  "id"
+                ],
+                [
+                  "advisor",
+                  "i_id"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "clause": "JOIN ON",
+          "diff_type": "join_key_column_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "join-on",
+          "severity": 0.74,
+          "standard_sql": "s.id = a.s_id",
+          "student_sql": "s.id = a.i_id",
+          "extra": {
+            "standard_sql": "s.id = a.s_id",
+            "student_sql": "s.id = a.i_id",
+            "standard_columns": [
+              "id",
+              "s_id"
+            ],
+            "student_columns": [
+              "id",
+              "i_id"
+            ]
           }
         }
       ]
@@ -4552,9 +5908,11 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case group_by_function_expression.",
       "error": null,
-      "diff_count": 4,
+      "diff_count": 5,
       "actual_clauses": [
         "GROUP BY",
         "SELECT"
@@ -4563,6 +5921,7 @@
         "column_added",
         "column_dropped",
         "group_by_changed",
+        "group_by_expression_changed",
         "projection_changed"
       ],
       "actual_kps": [
@@ -4582,11 +5941,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "dept, COUNT(*)",
-          "student_sql": "year, COUNT(*)",
+          "standard_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+          "student_sql": "SELECT year, COUNT(*) FROM student GROUP BY year",
           "extra": {
-            "standard_sql": "dept, COUNT(*)",
-            "student_sql": "year, COUNT(*)"
+            "standard_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+            "student_sql": "SELECT year, COUNT(*) FROM student GROUP BY year"
           }
         },
         {
@@ -4596,11 +5955,19 @@
           "column": null,
           "knowledge_point_id": "group-by",
           "severity": 0.5,
-          "standard_sql": "GROUP BY dept",
-          "student_sql": "GROUP BY year",
+          "standard_sql": "dept",
+          "student_sql": "year",
           "extra": {
-            "standard_sql": "GROUP BY dept",
-            "student_sql": "GROUP BY year"
+            "standard_sql": "dept",
+            "student_sql": "year",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "standard_source_table": "student",
+            "student_group_columns": [
+              "year"
+            ],
+            "student_source_table": "student"
           }
         },
         {
@@ -4632,6 +5999,40 @@
             "student_sql": "year",
             "position": 0
           }
+        },
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_expression_changed",
+          "table": null,
+          "column": "year",
+          "knowledge_point_id": "group-by",
+          "severity": 0.74,
+          "standard_sql": "dept",
+          "student_sql": "year",
+          "extra": {
+            "standard_keys": [
+              "dept"
+            ],
+            "student_keys": [
+              "year"
+            ],
+            "added_keys": [
+              "year"
+            ],
+            "removed_keys": [
+              "dept"
+            ],
+            "standard_sql": "dept",
+            "student_sql": "year",
+            "standard_query_sql": "SELECT dept, COUNT(*) FROM student GROUP BY dept",
+            "student_query_sql": "SELECT year, COUNT(*) FROM student GROUP BY year",
+            "standard_group_columns": [
+              "dept"
+            ],
+            "student_group_columns": [
+              "year"
+            ]
+          }
         }
       ]
     },
@@ -4649,14 +6050,17 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case order_by_collate.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 2,
       "actual_clauses": [
         "ORDER BY"
       ],
       "actual_diff_types": [
-        "order_by_changed"
+        "order_by_changed",
+        "order_direction_changed"
       ],
       "actual_kps": [
         "order-by"
@@ -4680,6 +6084,43 @@
             "standard_sql": "ORDER BY age DESC",
             "student_sql": "ORDER BY age ASC"
           }
+        },
+        {
+          "clause": "ORDER BY",
+          "diff_type": "order_direction_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "order-by",
+          "severity": 0.7,
+          "standard_sql": "ORDER BY age DESC",
+          "student_sql": "ORDER BY age ASC",
+          "extra": {
+            "standard_keys": [
+              [
+                "age",
+                true
+              ]
+            ],
+            "student_keys": [
+              [
+                "age",
+                false
+              ]
+            ],
+            "standard_order_keys": [
+              [
+                "age",
+                true
+              ]
+            ],
+            "student_order_keys": [
+              [
+                "age",
+                false
+              ]
+            ],
+            "standard_source_table": "student"
+          }
         }
       ]
     },
@@ -4697,20 +6138,25 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case subquery_nested_in.",
       "error": null,
-      "diff_count": 3,
+      "diff_count": 4,
       "actual_clauses": [
+        "FROM",
         "PREDICATE",
         "SUBQUERY",
         "WHERE"
       ],
       "actual_diff_types": [
+        "from_source_changed",
         "predicate_missing",
         "subquery_removed",
         "where_changed"
       ],
       "actual_kps": [
+        "select-basic",
         "subquery",
         "where"
       ],
@@ -4748,10 +6194,13 @@
             "op": "IN",
             "value": null,
             "values": [],
+            "value_kind": "literal",
             "sql": "id IN (SELECT s_id FROM advisor)",
             "node": "id IN (SELECT s_id FROM advisor)",
             "standard_sql": "id IN (SELECT s_id FROM advisor)",
-            "student_sql": ""
+            "student_sql": "",
+            "standard_query_sql": "SELECT name FROM student WHERE id IN (SELECT s_id FROM advisor)",
+            "student_query_sql": "SELECT name FROM student"
           }
         },
         {
@@ -4767,6 +6216,36 @@
             "subquery_depth": 1,
             "standard_sql": "SELECT s_id FROM advisor",
             "student_sql": ""
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student",
+          "student_sql": "FROM student",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                []
+              ],
+              [
+                "TABLE:advisor",
+                []
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                []
+              ]
+            ],
+            "standard_sql": "FROM student",
+            "student_sql": "FROM student"
           }
         }
       ]
@@ -4785,21 +6264,25 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case correlated_scalar_subquery.",
       "error": null,
       "diff_count": 4,
       "actual_clauses": [
         "CORRELATED SUBQUERY",
+        "FUNCTION",
         "PREDICATE",
         "WHERE"
       ],
       "actual_diff_types": [
+        "comparison_left_column_changed",
         "correlated_predicate_changed",
-        "predicate_added",
-        "predicate_missing",
+        "function_argument_changed",
         "where_changed"
       ],
       "actual_kps": [
+        "function",
         "subquery-correlated",
         "where"
       ],
@@ -4824,60 +6307,65 @@
           }
         },
         {
-          "clause": "CORRELATED SUBQUERY",
-          "diff_type": "correlated_predicate_changed",
-          "table": null,
-          "column": null,
-          "knowledge_point_id": "subquery-correlated",
-          "severity": 0.78,
-          "standard_sql": "SELECT 1 FROM advisor AS a WHERE a.s_id = s.id",
-          "student_sql": "SELECT 1 FROM advisor AS a WHERE a.i_id = s.id",
-          "extra": {
-            "subquery_depth": 1,
-            "standard_sql": "SELECT 1 FROM advisor AS a WHERE a.s_id = s.id",
-            "student_sql": "SELECT 1 FROM advisor AS a WHERE a.i_id = s.id"
-          }
-        },
-        {
-          "clause": "PREDICATE",
-          "diff_type": "predicate_missing",
+          "clause": "FUNCTION",
+          "diff_type": "function_argument_changed",
           "table": null,
           "column": "s_id",
-          "knowledge_point_id": "where",
-          "severity": 0.5,
-          "standard_sql": "a.s_id = s.id",
-          "student_sql": "",
+          "knowledge_point_id": "function",
+          "severity": 0.66,
+          "standard_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
+          "student_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.i_id = s.id)",
           "extra": {
-            "column": "s_id",
-            "op": "EQ",
-            "value": "s.id",
-            "right_column": "id",
-            "sql": "a.s_id = s.id",
-            "node": "a.s_id = s.id",
+            "function": "EXISTS",
+            "standard_args": [
+              "SELECT 1 FROM advisor AS a WHERE a.s_id = s.id"
+            ],
+            "student_args": [
+              "SELECT 1 FROM advisor AS a WHERE a.i_id = s.id"
+            ],
+            "standard_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
+            "student_sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.i_id = s.id)"
+          }
+        },
+        {
+          "clause": "CORRELATED SUBQUERY",
+          "diff_type": "correlated_predicate_changed",
+          "table": "student",
+          "column": "id",
+          "knowledge_point_id": "subquery-correlated",
+          "severity": 0.82,
+          "standard_sql": "a.s_id = s.id",
+          "student_sql": "a.i_id = s.id",
+          "extra": {
             "standard_sql": "a.s_id = s.id",
-            "student_sql": "",
-            "subquery_depth": 1
+            "student_sql": "a.i_id = s.id",
+            "standard_query_sql": "SELECT s.name FROM student AS s WHERE EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
+            "student_query_sql": "SELECT s.name FROM student AS s WHERE EXISTS(SELECT 1 FROM advisor AS a WHERE a.i_id = s.id)",
+            "standard_source_table": "student",
+            "standard_membership_table": "advisor",
+            "standard_outer_column": "id",
+            "standard_membership_column": "s_id",
+            "student_source_table": "student",
+            "student_membership_table": "advisor",
+            "student_outer_column": "id",
+            "student_membership_column": "i_id",
+            "query_scope": "nested_correlation"
           }
         },
         {
           "clause": "PREDICATE",
-          "diff_type": "predicate_added",
+          "diff_type": "comparison_left_column_changed",
           "table": null,
-          "column": "i_id",
+          "column": null,
           "knowledge_point_id": "where",
-          "severity": 0.5,
-          "standard_sql": "",
+          "severity": 0.74,
+          "standard_sql": "a.s_id = s.id",
           "student_sql": "a.i_id = s.id",
           "extra": {
-            "column": "i_id",
-            "op": "EQ",
-            "value": "s.id",
-            "right_column": "id",
-            "sql": "a.i_id = s.id",
-            "node": "a.i_id = s.id",
-            "standard_sql": "",
+            "standard_sql": "a.s_id = s.id",
             "student_sql": "a.i_id = s.id",
-            "subquery_depth": 1
+            "standard_column": "s_id",
+            "student_column": "i_id"
           }
         }
       ]
@@ -4896,13 +6384,17 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case set_operation_parenthesized_branches.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 3,
       "actual_clauses": [
         "UNION"
       ],
       "actual_diff_types": [
+        "set_all_modifier_changed",
+        "set_modifier_changed",
         "set_operator_changed"
       ],
       "actual_kps": [
@@ -4929,7 +6421,50 @@
             "standard_modifier": "DISTINCT",
             "student_modifier": "ALL",
             "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+            "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+            "standard_left_source_table": "a",
+            "standard_right_source_table": "b",
+            "standard_projection_columns": [
+              "id"
+            ],
+            "student_left_source_table": "a",
+            "student_right_source_table": "b",
+            "student_projection_columns": [
+              "id"
+            ]
+          }
+        },
+        {
+          "clause": "UNION",
+          "diff_type": "set_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "union",
+          "severity": 0.78,
+          "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+          "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+          "extra": {
+            "operator": "UNION",
+            "standard_modifier": "DISTINCT",
+            "student_modifier": "ALL",
+            "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
             "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b"
+          }
+        },
+        {
+          "clause": "UNION",
+          "diff_type": "set_all_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "union",
+          "severity": 0.74,
+          "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+          "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+          "extra": {
+            "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
+            "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+            "standard_modifier": "DISTINCT",
+            "student_modifier": "ALL"
           }
         }
       ]
@@ -4948,20 +6483,28 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case case_simple_without_else.",
       "error": null,
-      "diff_count": 4,
+      "diff_count": 7,
       "actual_clauses": [
+        "CASE",
+        "FUNCTION",
         "PREDICATE",
         "SELECT"
       ],
       "actual_diff_types": [
+        "case_changed",
         "column_added",
         "column_dropped",
+        "function_argument_changed",
         "literal_changed",
         "projection_changed"
       ],
       "actual_kps": [
+        "case",
+        "function",
         "select-basic",
         "where"
       ],
@@ -4978,11 +6521,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
-          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "standard_sql": "SELECT CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END FROM exam",
+          "student_sql": "SELECT CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END FROM exam",
           "extra": {
-            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
-            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END"
+            "standard_sql": "SELECT CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END FROM exam",
+            "student_sql": "SELECT CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END FROM exam"
           }
         },
         {
@@ -5016,6 +6559,52 @@
           }
         },
         {
+          "clause": "FUNCTION",
+          "diff_type": "function_argument_changed",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "function",
+          "severity": 0.66,
+          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "extra": {
+            "function": "CASE",
+            "standard_args": [
+              "IIF(score >= 60, 'pass')",
+              "'fail'"
+            ],
+            "student_args": [
+              "IIF(score >= 70, 'pass')",
+              "'fail'"
+            ],
+            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END"
+          }
+        },
+        {
+          "clause": "FUNCTION",
+          "diff_type": "function_argument_changed",
+          "table": null,
+          "column": "score",
+          "knowledge_point_id": "function",
+          "severity": 0.66,
+          "standard_sql": "IIF(score >= 60, 'pass')",
+          "student_sql": "IIF(score >= 70, 'pass')",
+          "extra": {
+            "function": "IF",
+            "standard_args": [
+              "score >= 60",
+              "'pass'"
+            ],
+            "student_args": [
+              "score >= 70",
+              "'pass'"
+            ],
+            "standard_sql": "IIF(score >= 60, 'pass')",
+            "student_sql": "IIF(score >= 70, 'pass')"
+          }
+        },
+        {
           "clause": "PREDICATE",
           "diff_type": "literal_changed",
           "table": null,
@@ -5030,10 +6619,37 @@
             "student_op": "GTE",
             "value": 60,
             "student_value": 70,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
             "values": null,
             "student_values": null,
             "standard_sql": "score >= 60",
             "student_sql": "score >= 70"
+          }
+        },
+        {
+          "clause": "CASE",
+          "diff_type": "case_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "case",
+          "severity": 0.68,
+          "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+          "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+          "extra": {
+            "standard_sql": "CASE WHEN score >= 60 THEN 'pass' ELSE 'fail' END",
+            "student_sql": "CASE WHEN score >= 70 THEN 'pass' ELSE 'fail' END",
+            "standard_case_when_predicates": [
+              "score >= 60"
+            ],
+            "student_case_when_predicates": [
+              "score >= 70"
+            ],
+            "standard_source_table": "exam"
           }
         }
       ]
@@ -5052,6 +6668,8 @@
       ],
       "expected_kps": [],
       "representation": "supported",
+      "execution_boundary": null,
+      "dialect": null,
       "note": "Category-level AST diff pair generated from IR case window_range_frame.",
       "error": null,
       "diff_count": 4,
@@ -5082,11 +6700,11 @@
           "column": null,
           "knowledge_point_id": "select-basic",
           "severity": 0.5,
-          "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
-          "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
+          "standard_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+          "student_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor",
           "extra": {
-            "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
-            "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
+            "standard_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) FROM instructor",
+            "student_sql": "SELECT ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC) FROM instructor"
           }
         },
         {
@@ -5129,6 +6747,42 @@
           "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
           "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)",
           "extra": {
+            "standard_over": {
+              "partition_by": [
+                "dept"
+              ],
+              "order": "ORDER BY salary DESC",
+              "frame": "",
+              "order_items": [
+                [
+                  "salary",
+                  true,
+                  false
+                ]
+              ],
+              "order_columns": [
+                "salary"
+              ]
+            },
+            "student_over": {
+              "partition_by": [
+                "name"
+              ],
+              "order": "ORDER BY salary DESC",
+              "frame": "",
+              "order_items": [
+                [
+                  "salary",
+                  true,
+                  false
+                ]
+              ],
+              "order_columns": [
+                "salary"
+              ]
+            },
+            "standard_window_source_table": "instructor",
+            "student_window_source_table": "instructor",
             "standard_sql": "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)",
             "student_sql": "ROW_NUMBER() OVER (PARTITION BY name ORDER BY salary DESC)"
           }
@@ -5136,213 +6790,811 @@
       ]
     },
     {
-      "id": "from_ir__gap_distinct_on",
-      "source_ir_case_id": "gap_distinct_on",
+      "id": "from_ir__distinct_on",
+      "source_ir_case_id": "distinct_on",
       "category": "DISTINCT",
       "standard": "SELECT DISTINCT ON (dept) dept, name FROM student ORDER BY dept, name",
-      "student": "SELECT DISTINCT ON (dept) dept, name FROM student ORDER BY dept, name",
-      "expected_clauses": [],
-      "expected_diff_types": [],
+      "student": "SELECT DISTINCT dept, name FROM student ORDER BY dept, name",
+      "expected_clauses": [
+        "DISTINCT ON"
+      ],
+      "expected_diff_types": [
+        "distinct_on_changed"
+      ],
       "expected_kps": [],
-      "representation": "known_gap",
-      "note": "Inherited from IR known_gap: PostgreSQL DISTINCT ON is outside current typed DISTINCT IR.",
+      "representation": "first_class",
+      "execution_boundary": null,
+      "dialect": "postgres",
+      "note": "Case-specific AST diff pair for IR case distinct_on. ",
       "error": null,
-      "diff_count": 0,
-      "actual_clauses": [],
-      "actual_diff_types": [],
-      "actual_kps": [],
+      "diff_count": 1,
+      "actual_clauses": [
+        "DISTINCT ON"
+      ],
+      "actual_diff_types": [
+        "distinct_on_changed"
+      ],
+      "actual_kps": [
+        "distinct"
+      ],
       "missing_clauses": [],
       "missing_diff_types": [],
       "missing_kps": [],
       "passed": true,
-      "capability_bucket": "known_gap",
-      "ast_diffs": []
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "DISTINCT ON",
+          "diff_type": "distinct_on_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "distinct",
+          "severity": 0.78,
+          "standard_sql": "(dept)",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "(dept)",
+            "student_sql": ""
+          }
+        }
+      ]
     },
     {
-      "id": "from_ir__gap_grouping_sets",
-      "source_ir_case_id": "gap_grouping_sets",
+      "id": "from_ir__grouping_sets",
+      "source_ir_case_id": "grouping_sets",
       "category": "GROUP BY",
-      "standard": "SELECT region, product, SUM(amount) FROM sales GROUP BY GROUPING SETS ((region), (product))",
-      "student": "SELECT region, product, SUM(amount) FROM sales GROUP BY GROUPING SETS ((region), (product))",
-      "expected_clauses": [],
-      "expected_diff_types": [],
+      "standard": "SELECT region, product, SUM(amount) FROM sales GROUP BY GROUPING SETS ((region), (product), ())",
+      "student": "SELECT region, product, SUM(amount) FROM sales GROUP BY region, product",
+      "expected_clauses": [
+        "GROUPING SETS"
+      ],
+      "expected_diff_types": [
+        "grouping_sets_changed"
+      ],
       "expected_kps": [],
-      "representation": "known_gap",
-      "note": "Inherited from IR known_gap: GROUPING SETS is not first-class typed in current GROUP BY IR.",
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
+      "dialect": null,
+      "note": "Case-specific AST diff pair for IR case grouping_sets. Typed by the IR; SQLite execution remains unsupported.",
       "error": null,
-      "diff_count": 0,
-      "actual_clauses": [],
-      "actual_diff_types": [],
-      "actual_kps": [],
+      "diff_count": 3,
+      "actual_clauses": [
+        "GROUP BY",
+        "GROUPING SETS"
+      ],
+      "actual_diff_types": [
+        "group_by_changed",
+        "group_by_expression_changed",
+        "grouping_sets_changed"
+      ],
+      "actual_kps": [
+        "group-by"
+      ],
       "missing_clauses": [],
       "missing_diff_types": [],
       "missing_kps": [],
       "passed": true,
-      "capability_bucket": "known_gap",
-      "ast_diffs": []
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "product | region",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "product | region",
+            "standard_group_columns": [],
+            "standard_source_table": "sales",
+            "student_group_columns": [
+              "region",
+              "product"
+            ],
+            "student_source_table": "sales"
+          }
+        },
+        {
+          "clause": "GROUPING SETS",
+          "diff_type": "grouping_sets_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.78,
+          "standard_sql": "GROUPING SETS ((region), (product), ())",
+          "student_sql": "[]",
+          "extra": {
+            "standard_sql": "GROUPING SETS ((region), (product), ())",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_expression_changed",
+          "table": null,
+          "column": "region",
+          "knowledge_point_id": "group-by",
+          "severity": 0.74,
+          "standard_sql": "GROUP BY GROUPING SETS ((region), (product), ())",
+          "student_sql": "product | region",
+          "extra": {
+            "standard_keys": [],
+            "student_keys": [
+              "product",
+              "region"
+            ],
+            "added_keys": [
+              "product",
+              "region"
+            ],
+            "removed_keys": [],
+            "standard_sql": "",
+            "student_sql": "product | region",
+            "standard_query_sql": "SELECT region, product, SUM(amount) FROM sales GROUP BY GROUPING SETS ((region), (product), ())",
+            "student_query_sql": "SELECT region, product, SUM(amount) FROM sales GROUP BY region, product",
+            "standard_group_columns": [],
+            "student_group_columns": [
+              "region",
+              "product"
+            ]
+          }
+        }
+      ]
     },
     {
-      "id": "from_ir__gap_aggregate_filter",
-      "source_ir_case_id": "gap_aggregate_filter",
+      "id": "from_ir__aggregate_filter",
+      "source_ir_case_id": "aggregate_filter",
       "category": "Aggregate",
       "standard": "SELECT COUNT(*) FILTER (WHERE score > 0) FROM exam",
-      "student": "SELECT COUNT(*) FILTER (WHERE score > 0) FROM exam",
-      "expected_clauses": [],
-      "expected_diff_types": [],
+      "student": "SELECT COUNT(*) FROM exam",
+      "expected_clauses": [
+        "AGGREGATE FILTER"
+      ],
+      "expected_diff_types": [
+        "aggregate_filter_changed"
+      ],
       "expected_kps": [],
-      "representation": "known_gap",
-      "note": "Inherited from IR known_gap: Aggregate FILTER predicate is not first-class typed in current aggregate IR.",
+      "representation": "first_class",
+      "execution_boundary": null,
+      "dialect": null,
+      "note": "Case-specific AST diff pair for IR case aggregate_filter. ",
       "error": null,
-      "diff_count": 0,
-      "actual_clauses": [],
-      "actual_diff_types": [],
-      "actual_kps": [],
+      "diff_count": 1,
+      "actual_clauses": [
+        "AGGREGATE FILTER"
+      ],
+      "actual_diff_types": [
+        "aggregate_filter_changed"
+      ],
+      "actual_kps": [
+        "aggregate"
+      ],
       "missing_clauses": [],
       "missing_diff_types": [],
       "missing_kps": [],
       "passed": true,
-      "capability_bucket": "known_gap",
-      "ast_diffs": []
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "AGGREGATE FILTER",
+          "diff_type": "aggregate_filter_changed",
+          "table": "exam",
+          "column": "score",
+          "knowledge_point_id": "aggregate",
+          "severity": 0.78,
+          "standard_sql": "COUNT(*) FILTER(WHERE score > 0)",
+          "student_sql": "COUNT(*)",
+          "extra": {
+            "standard_sql": "COUNT(*) FILTER(WHERE score > 0)",
+            "student_sql": "",
+            "standard_filter_predicate": "score > 0",
+            "student_filter_predicate": "",
+            "standard_source_table": "exam",
+            "standard_group_columns": [],
+            "standard_query_sql": "SELECT COUNT(*) FILTER(WHERE score > 0) FROM exam",
+            "student_query_sql": "SELECT COUNT(*) FROM exam"
+          }
+        }
+      ]
     },
     {
-      "id": "from_ir__gap_recursive_search_cycle",
-      "source_ir_case_id": "gap_recursive_search_cycle",
+      "id": "from_ir__recursive_search",
+      "source_ir_case_id": "recursive_search",
       "category": "Recursive CTE",
       "standard": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SEARCH DEPTH FIRST BY n SET ord SELECT n FROM t",
-      "student": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SEARCH DEPTH FIRST BY n SET ord SELECT n FROM t",
-      "expected_clauses": [],
-      "expected_diff_types": [],
+      "student": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t",
+      "expected_clauses": [
+        "SEARCH"
+      ],
+      "expected_diff_types": [
+        "recursive_search_changed"
+      ],
       "expected_kps": [],
-      "representation": "known_gap",
-      "note": "Inherited from IR known_gap: Recursive SEARCH/CYCLE clauses are outside current typed recursive CTE IR.",
+      "representation": "first_class",
+      "execution_boundary": null,
+      "dialect": "postgres",
+      "note": "Case-specific AST diff pair for IR case recursive_search. ",
       "error": null,
-      "diff_count": 0,
-      "actual_clauses": [],
-      "actual_diff_types": [],
-      "actual_kps": [],
+      "diff_count": 1,
+      "actual_clauses": [
+        "SEARCH"
+      ],
+      "actual_diff_types": [
+        "recursive_search_changed"
+      ],
+      "actual_kps": [
+        "cte-recursive"
+      ],
       "missing_clauses": [],
       "missing_diff_types": [],
       "missing_kps": [],
       "passed": true,
-      "capability_bucket": "known_gap",
-      "ast_diffs": []
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SEARCH",
+          "diff_type": "recursive_search_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "cte-recursive",
+          "severity": 0.78,
+          "standard_sql": "SEARCH DEPTH FIRST BY n SET ord",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "SEARCH DEPTH FIRST BY n SET ord",
+            "student_sql": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "from_ir__recursive_cycle",
+      "source_ir_case_id": "recursive_cycle",
+      "category": "Recursive CTE",
+      "standard": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) CYCLE n SET is_cycle USING path SELECT n FROM t",
+      "student": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t",
+      "expected_clauses": [
+        "CYCLE"
+      ],
+      "expected_diff_types": [
+        "recursive_cycle_changed"
+      ],
+      "expected_kps": [],
+      "representation": "first_class",
+      "execution_boundary": null,
+      "dialect": "postgres",
+      "note": "Case-specific AST diff pair for IR case recursive_cycle. ",
+      "error": null,
+      "diff_count": 1,
+      "actual_clauses": [
+        "CYCLE"
+      ],
+      "actual_diff_types": [
+        "recursive_cycle_changed"
+      ],
+      "actual_kps": [
+        "cte-recursive"
+      ],
+      "missing_clauses": [],
+      "missing_diff_types": [],
+      "missing_kps": [],
+      "passed": true,
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "CYCLE",
+          "diff_type": "recursive_cycle_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "cte-recursive",
+          "severity": 0.78,
+          "standard_sql": "CYCLE n SET is_cycle USING path",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "CYCLE n SET is_cycle USING path",
+            "student_sql": ""
+          }
+        }
+      ]
     },
     {
       "id": "from_ir__boundary_lateral",
       "source_ir_case_id": "boundary_lateral",
       "category": "Dialect Boundary",
       "standard": "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL (SELECT s.id + 1 AS value) x",
-      "student": "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL (SELECT s.id + 1 AS value) x",
-      "expected_clauses": [],
-      "expected_diff_types": [],
+      "student": "SELECT s.name FROM student s",
+      "expected_clauses": [
+        "LATERAL"
+      ],
+      "expected_diff_types": [
+        "lateral_changed"
+      ],
       "expected_kps": [],
-      "representation": "known_boundary",
-      "note": "Inherited from IR known_boundary: Known execution/transpilation boundary.",
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
+      "dialect": "postgres",
+      "note": "Case-specific AST diff pair for IR case boundary_lateral. Typed by the IR; native execution remains dialect-scoped.",
       "error": null,
-      "diff_count": 0,
-      "actual_clauses": [],
-      "actual_diff_types": [],
-      "actual_kps": [],
+      "diff_count": 7,
+      "actual_clauses": [
+        "CORRELATED SUBQUERY",
+        "FROM",
+        "JOIN",
+        "LATERAL",
+        "SELECT",
+        "SUBQUERY"
+      ],
+      "actual_diff_types": [
+        "column_dropped",
+        "correlated_predicate_changed",
+        "from_source_changed",
+        "join_missing",
+        "lateral_changed",
+        "projection_changed",
+        "subquery_removed"
+      ],
+      "actual_kps": [
+        "join-inner",
+        "select-basic",
+        "subquery",
+        "subquery-correlated"
+      ],
       "missing_clauses": [],
       "missing_diff_types": [],
       "missing_kps": [],
       "passed": true,
-      "capability_bucket": "known_boundary",
-      "ast_diffs": []
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "SELECT",
+          "diff_type": "projection_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.5,
+          "standard_sql": "SELECT s.name, x.value FROM student AS s CROSS JOIN LATERAL (SELECT s.id + 1 AS value) AS x",
+          "student_sql": "SELECT s.name FROM student AS s",
+          "extra": {
+            "standard_sql": "SELECT s.name, x.value FROM student AS s CROSS JOIN LATERAL (SELECT s.id + 1 AS value) AS x",
+            "student_sql": "SELECT s.name FROM student AS s"
+          }
+        },
+        {
+          "clause": "LATERAL",
+          "diff_type": "lateral_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "join-inner",
+          "severity": 0.78,
+          "standard_sql": "LATERAL (SELECT s.id + 1 AS value) AS x",
+          "student_sql": "[]",
+          "extra": {
+            "standard_sql": "LATERAL (SELECT s.id + 1 AS value) AS x",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "SELECT",
+          "diff_type": "column_dropped",
+          "table": null,
+          "column": "value",
+          "knowledge_point_id": "select-basic",
+          "severity": 0.7,
+          "standard_sql": "value",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "value",
+            "student_sql": "",
+            "position": 1
+          }
+        },
+        {
+          "clause": "JOIN",
+          "diff_type": "join_missing",
+          "table": "",
+          "column": null,
+          "knowledge_point_id": "join-inner",
+          "severity": 0.5,
+          "standard_sql": "CROSS JOIN LATERAL (SELECT s.id + 1 AS value) AS x",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "CROSS JOIN LATERAL (SELECT s.id + 1 AS value) AS x",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "CORRELATED SUBQUERY",
+          "diff_type": "correlated_predicate_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "subquery-correlated",
+          "severity": 0.78,
+          "standard_sql": "LATERAL (SELECT s.id + 1 AS value) AS x",
+          "student_sql": "",
+          "extra": {
+            "standard_sql": "LATERAL (SELECT s.id + 1 AS value) AS x",
+            "student_sql": "",
+            "standard_source_table": "student",
+            "standard_membership_table": "",
+            "standard_outer_column": "",
+            "standard_membership_column": "",
+            "student_source_table": "",
+            "student_membership_table": "",
+            "student_outer_column": "",
+            "student_membership_column": ""
+          }
+        },
+        {
+          "clause": "SUBQUERY",
+          "diff_type": "subquery_removed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "subquery",
+          "severity": 0.5,
+          "standard_sql": "SELECT s.id + 1 AS value",
+          "student_sql": "",
+          "extra": {
+            "subquery_depth": 1,
+            "standard_sql": "SELECT s.id + 1 AS value",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "FROM",
+          "diff_type": "from_source_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "select-basic",
+          "severity": 0.76,
+          "standard_sql": "FROM student AS s",
+          "student_sql": "FROM student AS s",
+          "extra": {
+            "standard_sources": [
+              [
+                "TABLE:student",
+                [
+                  [
+                    "LATERAL (SELECT s.id + 1 AS value) AS x",
+                    "CROSS"
+                  ]
+                ]
+              ],
+              [
+                "",
+                []
+              ]
+            ],
+            "student_sources": [
+              [
+                "TABLE:student",
+                []
+              ]
+            ],
+            "standard_sql": "FROM student AS s",
+            "student_sql": "FROM student AS s"
+          }
+        }
+      ]
     },
     {
-      "id": "from_ir__boundary_qualify",
-      "source_ir_case_id": "boundary_qualify",
-      "category": "Dialect Boundary",
+      "id": "from_ir__qualify",
+      "source_ir_case_id": "qualify",
+      "category": "Window",
       "standard": "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn FROM exam QUALIFY rn = 1",
-      "student": "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn FROM exam QUALIFY rn = 1",
-      "expected_clauses": [],
-      "expected_diff_types": [],
+      "student": "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn FROM exam QUALIFY rn <= 1",
+      "expected_clauses": [
+        "QUALIFY"
+      ],
+      "expected_diff_types": [
+        "qualify_changed"
+      ],
       "expected_kps": [],
-      "representation": "known_boundary",
-      "note": "Inherited from IR known_boundary: QUALIFY is treated as a dialect boundary for Phase 1.",
+      "representation": "first_class",
+      "execution_boundary": null,
+      "dialect": null,
+      "note": "Case-specific AST diff pair for IR case qualify. ",
       "error": null,
-      "diff_count": 0,
-      "actual_clauses": [],
-      "actual_diff_types": [],
-      "actual_kps": [],
+      "diff_count": 2,
+      "actual_clauses": [
+        "PREDICATE",
+        "QUALIFY"
+      ],
+      "actual_diff_types": [
+        "comparison_operator_changed",
+        "qualify_changed"
+      ],
+      "actual_kps": [
+        "where",
+        "window-row-number"
+      ],
       "missing_clauses": [],
       "missing_diff_types": [],
       "missing_kps": [],
       "passed": true,
-      "capability_bucket": "known_boundary",
-      "ast_diffs": []
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "QUALIFY",
+          "diff_type": "qualify_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "window-row-number",
+          "severity": 0.5,
+          "standard_sql": "QUALIFY rn = 1",
+          "student_sql": "QUALIFY rn <= 1",
+          "extra": {
+            "standard_sql": "QUALIFY rn = 1",
+            "student_sql": "QUALIFY rn <= 1"
+          }
+        },
+        {
+          "clause": "PREDICATE",
+          "diff_type": "comparison_operator_changed",
+          "table": null,
+          "column": "rn",
+          "knowledge_point_id": "where",
+          "severity": 0.5,
+          "standard_sql": "rn = 1",
+          "student_sql": "rn <= 1",
+          "extra": {
+            "column": "rn",
+            "standard_op": "EQ",
+            "student_op": "LTE",
+            "value": 1,
+            "student_value": 1,
+            "standard_value_kind": "literal",
+            "student_value_kind": "literal",
+            "standard_right_column": null,
+            "student_right_column": null,
+            "standard_right_table": null,
+            "student_right_table": null,
+            "values": null,
+            "student_values": null,
+            "standard_sql": "rn = 1",
+            "student_sql": "rn <= 1"
+          }
+        }
+      ]
     },
     {
       "id": "from_ir__boundary_rollup",
       "source_ir_case_id": "boundary_rollup",
       "category": "Dialect Boundary",
       "standard": "SELECT region, SUM(amount) FROM sales GROUP BY ROLLUP(region)",
-      "student": "SELECT region, SUM(amount) FROM sales GROUP BY ROLLUP(region)",
-      "expected_clauses": [],
-      "expected_diff_types": [],
+      "student": "SELECT region, SUM(amount) FROM sales GROUP BY region",
+      "expected_clauses": [
+        "ROLLUP"
+      ],
+      "expected_diff_types": [
+        "rollup_changed"
+      ],
       "expected_kps": [],
-      "representation": "known_boundary",
-      "note": "Inherited from IR known_boundary: Known execution/transpilation boundary.",
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
+      "dialect": null,
+      "note": "Case-specific AST diff pair for IR case boundary_rollup. Typed by the IR; SQLite execution remains unsupported.",
       "error": null,
-      "diff_count": 0,
-      "actual_clauses": [],
-      "actual_diff_types": [],
-      "actual_kps": [],
+      "diff_count": 3,
+      "actual_clauses": [
+        "GROUP BY",
+        "ROLLUP"
+      ],
+      "actual_diff_types": [
+        "group_by_changed",
+        "group_by_expression_changed",
+        "rollup_changed"
+      ],
+      "actual_kps": [
+        "group-by"
+      ],
       "missing_clauses": [],
       "missing_diff_types": [],
       "missing_kps": [],
       "passed": true,
-      "capability_bucket": "known_boundary",
-      "ast_diffs": []
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "region",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "region",
+            "standard_group_columns": [],
+            "standard_source_table": "sales",
+            "student_group_columns": [
+              "region"
+            ],
+            "student_source_table": "sales"
+          }
+        },
+        {
+          "clause": "ROLLUP",
+          "diff_type": "rollup_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.78,
+          "standard_sql": "ROLLUP (region)",
+          "student_sql": "[]",
+          "extra": {
+            "standard_sql": "ROLLUP (region)",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_expression_changed",
+          "table": null,
+          "column": "region",
+          "knowledge_point_id": "group-by",
+          "severity": 0.74,
+          "standard_sql": "GROUP BY ROLLUP (region)",
+          "student_sql": "region",
+          "extra": {
+            "standard_keys": [],
+            "student_keys": [
+              "region"
+            ],
+            "added_keys": [
+              "region"
+            ],
+            "removed_keys": [],
+            "standard_sql": "",
+            "student_sql": "region",
+            "standard_query_sql": "SELECT region, SUM(amount) FROM sales GROUP BY ROLLUP (region)",
+            "student_query_sql": "SELECT region, SUM(amount) FROM sales GROUP BY region",
+            "standard_group_columns": [],
+            "student_group_columns": [
+              "region"
+            ]
+          }
+        }
+      ]
     },
     {
       "id": "from_ir__boundary_cube",
       "source_ir_case_id": "boundary_cube",
       "category": "Dialect Boundary",
       "standard": "SELECT region, product, SUM(amount) FROM sales GROUP BY CUBE(region, product)",
-      "student": "SELECT region, product, SUM(amount) FROM sales GROUP BY CUBE(region, product)",
-      "expected_clauses": [],
-      "expected_diff_types": [],
+      "student": "SELECT region, product, SUM(amount) FROM sales GROUP BY region, product",
+      "expected_clauses": [
+        "CUBE"
+      ],
+      "expected_diff_types": [
+        "cube_changed"
+      ],
       "expected_kps": [],
-      "representation": "known_boundary",
-      "note": "Inherited from IR known_boundary: Known execution/transpilation boundary.",
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
+      "dialect": null,
+      "note": "Case-specific AST diff pair for IR case boundary_cube. Typed by the IR; SQLite execution remains unsupported.",
       "error": null,
-      "diff_count": 0,
-      "actual_clauses": [],
-      "actual_diff_types": [],
-      "actual_kps": [],
+      "diff_count": 3,
+      "actual_clauses": [
+        "CUBE",
+        "GROUP BY"
+      ],
+      "actual_diff_types": [
+        "cube_changed",
+        "group_by_changed",
+        "group_by_expression_changed"
+      ],
+      "actual_kps": [
+        "group-by"
+      ],
       "missing_clauses": [],
       "missing_diff_types": [],
       "missing_kps": [],
       "passed": true,
-      "capability_bucket": "known_boundary",
-      "ast_diffs": []
+      "capability_bucket": "supported",
+      "ast_diffs": [
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.5,
+          "standard_sql": "",
+          "student_sql": "product | region",
+          "extra": {
+            "standard_sql": "",
+            "student_sql": "product | region",
+            "standard_group_columns": [],
+            "standard_source_table": "sales",
+            "student_group_columns": [
+              "region",
+              "product"
+            ],
+            "student_source_table": "sales"
+          }
+        },
+        {
+          "clause": "CUBE",
+          "diff_type": "cube_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "group-by",
+          "severity": 0.78,
+          "standard_sql": "CUBE (region, product)",
+          "student_sql": "[]",
+          "extra": {
+            "standard_sql": "CUBE (region, product)",
+            "student_sql": ""
+          }
+        },
+        {
+          "clause": "GROUP BY",
+          "diff_type": "group_by_expression_changed",
+          "table": null,
+          "column": "region",
+          "knowledge_point_id": "group-by",
+          "severity": 0.74,
+          "standard_sql": "GROUP BY CUBE (region, product)",
+          "student_sql": "product | region",
+          "extra": {
+            "standard_keys": [],
+            "student_keys": [
+              "product",
+              "region"
+            ],
+            "added_keys": [
+              "product",
+              "region"
+            ],
+            "removed_keys": [],
+            "standard_sql": "",
+            "student_sql": "product | region",
+            "standard_query_sql": "SELECT region, product, SUM(amount) FROM sales GROUP BY CUBE (region, product)",
+            "student_query_sql": "SELECT region, product, SUM(amount) FROM sales GROUP BY region, product",
+            "standard_group_columns": [],
+            "student_group_columns": [
+              "region",
+              "product"
+            ]
+          }
+        }
+      ]
     },
     {
       "id": "from_ir__set_operation_intersect_all",
       "source_ir_case_id": "set_operation_intersect_all",
       "category": "Set Operation",
-      "standard": "SELECT id FROM a UNION SELECT id FROM b",
-      "student": "SELECT id FROM a UNION ALL SELECT id FROM b",
+      "standard": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+      "student": "SELECT id FROM a INTERSECT SELECT id FROM b",
       "expected_clauses": [
-        "UNION"
+        "INTERSECT"
       ],
       "expected_diff_types": [
-        "set_operator_changed"
+        "set_modifier_changed"
       ],
       "expected_kps": [],
-      "representation": "supported",
-      "note": "Category-level AST diff pair generated from IR case set_operation_intersect_all.",
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
+      "dialect": null,
+      "note": "Case-specific AST diff pair for IR case set_operation_intersect_all. IR supports the ALL flag; execution support is evaluated in the sandbox stage.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 4,
       "actual_clauses": [
+        "INTERSECT",
         "UNION"
       ],
       "actual_diff_types": [
+        "set_all_modifier_changed",
+        "set_modifier_changed",
         "set_operator_changed"
       ],
       "actual_kps": [
+        "intersect",
         "union"
       ],
       "missing_clauses": [],
@@ -5352,21 +7604,80 @@
       "capability_bucket": "supported",
       "ast_diffs": [
         {
-          "clause": "UNION",
+          "clause": "INTERSECT",
           "diff_type": "set_operator_changed",
           "table": null,
           "column": null,
-          "knowledge_point_id": "union",
+          "knowledge_point_id": "intersect",
           "severity": 0.5,
-          "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
-          "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+          "standard_sql": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+          "student_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
           "extra": {
-            "standard_op": "UNION",
-            "student_op": "UNION",
-            "standard_modifier": "DISTINCT",
-            "student_modifier": "ALL",
-            "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
-            "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b"
+            "standard_op": "INTERSECT",
+            "student_op": "INTERSECT",
+            "standard_modifier": "ALL",
+            "student_modifier": "DISTINCT",
+            "standard_sql": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+            "student_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
+            "standard_left_source_table": "a",
+            "standard_right_source_table": "b",
+            "standard_projection_columns": [
+              "id"
+            ],
+            "student_left_source_table": "a",
+            "student_right_source_table": "b",
+            "student_projection_columns": [
+              "id"
+            ]
+          }
+        },
+        {
+          "clause": "INTERSECT",
+          "diff_type": "set_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "intersect",
+          "severity": 0.78,
+          "standard_sql": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+          "student_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
+          "extra": {
+            "operator": "INTERSECT",
+            "standard_modifier": "ALL",
+            "student_modifier": "DISTINCT",
+            "standard_sql": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+            "student_sql": "SELECT id FROM a INTERSECT SELECT id FROM b"
+          }
+        },
+        {
+          "clause": "UNION",
+          "diff_type": "set_all_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "union",
+          "severity": 0.74,
+          "standard_sql": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+          "student_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
+          "extra": {
+            "standard_sql": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+            "student_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
+            "standard_modifier": "ALL",
+            "student_modifier": "DISTINCT"
+          }
+        },
+        {
+          "clause": "UNION",
+          "diff_type": "set_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "intersect",
+          "severity": 0.74,
+          "standard_sql": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+          "student_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
+          "extra": {
+            "standard_sql": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+            "student_sql": "SELECT id FROM a INTERSECT SELECT id FROM b",
+            "standard_modifier": "ALL",
+            "student_modifier": "DISTINCT"
           }
         }
       ]
@@ -5375,26 +7686,32 @@
       "id": "from_ir__set_operation_except_all",
       "source_ir_case_id": "set_operation_except_all",
       "category": "Set Operation",
-      "standard": "SELECT id FROM a UNION SELECT id FROM b",
-      "student": "SELECT id FROM a UNION ALL SELECT id FROM b",
+      "standard": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+      "student": "SELECT id FROM a EXCEPT SELECT id FROM b",
       "expected_clauses": [
-        "UNION"
+        "EXCEPT"
       ],
       "expected_diff_types": [
-        "set_operator_changed"
+        "set_modifier_changed"
       ],
       "expected_kps": [],
-      "representation": "supported",
-      "note": "Category-level AST diff pair generated from IR case set_operation_except_all.",
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
+      "dialect": null,
+      "note": "Case-specific AST diff pair for IR case set_operation_except_all. IR supports the ALL flag; execution support is evaluated in the sandbox stage.",
       "error": null,
-      "diff_count": 1,
+      "diff_count": 4,
       "actual_clauses": [
+        "EXCEPT",
         "UNION"
       ],
       "actual_diff_types": [
+        "set_all_modifier_changed",
+        "set_modifier_changed",
         "set_operator_changed"
       ],
       "actual_kps": [
+        "except",
         "union"
       ],
       "missing_clauses": [],
@@ -5404,21 +7721,80 @@
       "capability_bucket": "supported",
       "ast_diffs": [
         {
-          "clause": "UNION",
+          "clause": "EXCEPT",
           "diff_type": "set_operator_changed",
           "table": null,
           "column": null,
-          "knowledge_point_id": "union",
+          "knowledge_point_id": "except",
           "severity": 0.5,
-          "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
-          "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b",
+          "standard_sql": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+          "student_sql": "SELECT id FROM a EXCEPT SELECT id FROM b",
           "extra": {
-            "standard_op": "UNION",
-            "student_op": "UNION",
-            "standard_modifier": "DISTINCT",
-            "student_modifier": "ALL",
-            "standard_sql": "SELECT id FROM a UNION SELECT id FROM b",
-            "student_sql": "SELECT id FROM a UNION ALL SELECT id FROM b"
+            "standard_op": "EXCEPT",
+            "student_op": "EXCEPT",
+            "standard_modifier": "ALL",
+            "student_modifier": "DISTINCT",
+            "standard_sql": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+            "student_sql": "SELECT id FROM a EXCEPT SELECT id FROM b",
+            "standard_left_source_table": "a",
+            "standard_right_source_table": "b",
+            "standard_projection_columns": [
+              "id"
+            ],
+            "student_left_source_table": "a",
+            "student_right_source_table": "b",
+            "student_projection_columns": [
+              "id"
+            ]
+          }
+        },
+        {
+          "clause": "EXCEPT",
+          "diff_type": "set_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "except",
+          "severity": 0.78,
+          "standard_sql": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+          "student_sql": "SELECT id FROM a EXCEPT SELECT id FROM b",
+          "extra": {
+            "operator": "EXCEPT",
+            "standard_modifier": "ALL",
+            "student_modifier": "DISTINCT",
+            "standard_sql": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+            "student_sql": "SELECT id FROM a EXCEPT SELECT id FROM b"
+          }
+        },
+        {
+          "clause": "UNION",
+          "diff_type": "set_all_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "union",
+          "severity": 0.74,
+          "standard_sql": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+          "student_sql": "SELECT id FROM a EXCEPT SELECT id FROM b",
+          "extra": {
+            "standard_sql": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+            "student_sql": "SELECT id FROM a EXCEPT SELECT id FROM b",
+            "standard_modifier": "ALL",
+            "student_modifier": "DISTINCT"
+          }
+        },
+        {
+          "clause": "UNION",
+          "diff_type": "set_modifier_changed",
+          "table": null,
+          "column": null,
+          "knowledge_point_id": "except",
+          "severity": 0.74,
+          "standard_sql": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+          "student_sql": "SELECT id FROM a EXCEPT SELECT id FROM b",
+          "extra": {
+            "standard_sql": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+            "student_sql": "SELECT id FROM a EXCEPT SELECT id FROM b",
+            "standard_modifier": "ALL",
+            "student_modifier": "DISTINCT"
           }
         }
       ]

@@ -9,11 +9,14 @@ ASTDiff and ParSEval-style data generator can be tested against known mistakes.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import hashlib
 import html
 import json
+import multiprocessing
 import random
 import re
+import resource
 import sys
 import urllib.parse
 import urllib.request
@@ -31,6 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "data_construct_test" / "scripts"))
 from core.ast_schema import SQLStructureIR  # noqa: E402
 from core.parseval_data_generator import (  # noqa: E402
     _parse_sql,
+    _parse_sql_strict,
     extract_ast_diffs,
     generate_and_compare,
 )
@@ -386,7 +390,7 @@ def mutate_sql(sql: str, category: str) -> tuple[str | None, str]:
         if mutated != text:
             return mutated, "distinct_removed"
     if category == "JOIN ON" and re.search(r"(?is)\bon\b", text):
-        mutated = re.sub(r"(?is)(\bon\b[^;]*?)(=)", r"\1<>", text, count=1)
+        mutated = _mutate_join_comparison(text)
         if mutated != text:
             return mutated, "join_on_operator_changed"
     if category in {"WHERE", "HAVING", "Subquery", "Correlated Subquery", "CTE"}:
@@ -494,6 +498,11 @@ def _mutate_observable_set_operation(sql: str) -> tuple[str, str]:
     ) if ast else None
     if not isinstance(node, (exp.Union, exp.Intersect, exp.Except)):
         return sql, "no_mutation"
+    if isinstance(node, exp.Union) and (
+        _is_monotonic_schema_free_recursive_union(node)
+        or _is_single_parent_hierarchy_recursive_union(node)
+    ):
+        return sql, "no_mutation"
     parent = node.parent
     inside_membership = False
     while parent is not None:
@@ -521,6 +530,116 @@ def _mutate_observable_set_operation(sql: str) -> tuple[str, str]:
     return re.sub(r"(?is)\bunion(?:\s+all)?\b", "INTERSECT", sql, count=1), "set_operator_changed"
 
 
+def _is_monotonic_schema_free_recursive_union(node: exp.Union) -> bool:
+    """Reject UNION modifier mutations that cannot create duplicate states."""
+    cte = node.find_ancestor(exp.CTE)
+    if not isinstance(cte, exp.CTE) or not cte.alias_or_name:
+        return False
+    cte_name = _norm_sql_fragment(str(cte.alias_or_name))
+    table_names = {
+        _norm_sql_fragment(table.name)
+        for table in cte.this.find_all(exp.Table)
+        if table.name
+    }
+    if table_names != {cte_name}:
+        return False
+    recursive_select = (
+        node.expression
+        if isinstance(node.expression, exp.Select)
+        else node.expression.find(exp.Select)
+    )
+    if not isinstance(recursive_select, exp.Select) or not recursive_select.expressions:
+        return False
+    expression = recursive_select.expressions[0]
+    expression = expression.this if isinstance(expression, exp.Alias) else expression
+    if not isinstance(expression, (exp.Add, exp.Sub, exp.Mul)):
+        return False
+    operands = (expression.left, expression.right)
+    if not any(isinstance(item, exp.Column) for item in operands):
+        return False
+    deltas = [item for item in operands if isinstance(item, exp.Literal) and item.is_number]
+    if not deltas:
+        return False
+    numeric_deltas = [float(item.this) for item in deltas]
+    if isinstance(expression, (exp.Add, exp.Sub)) and all(
+        value == 0 for value in numeric_deltas
+    ):
+        return False
+    if isinstance(expression, exp.Mul) and not any(
+        abs(value) > 1 for value in numeric_deltas
+    ):
+        return False
+    where = recursive_select.args.get("where")
+    return bool(
+        isinstance(where, exp.Where)
+        and where.find(exp.Column)
+        and next(
+            (
+                literal
+                for literal in where.find_all(exp.Literal)
+                if literal.is_number
+            ),
+            None,
+        )
+    )
+
+
+def _is_single_parent_hierarchy_recursive_union(node: exp.Union) -> bool:
+    """Recognize tree recursion where every entity has one parent path."""
+    cte = node.find_ancestor(exp.CTE)
+    if not isinstance(cte, exp.CTE) or not cte.alias_or_name:
+        return False
+    cte_name = _norm_sql_fragment(str(cte.alias_or_name))
+    recursive_select = (
+        node.expression
+        if isinstance(node.expression, exp.Select)
+        else node.expression.find(exp.Select)
+    )
+    if not isinstance(recursive_select, exp.Select):
+        return False
+    aliases = {
+        _norm_sql_fragment(table.alias_or_name): _norm_sql_fragment(table.name)
+        for table in recursive_select.find_all(exp.Table)
+    }
+    physical_tables = {
+        table_name for table_name in aliases.values() if table_name != cte_name
+    }
+    if len(physical_tables) != 1:
+        return False
+    hierarchy_tokens = ("parent", "manager", "boss", "supervisor", "reports_to")
+    for equality in recursive_select.find_all(exp.EQ):
+        if not isinstance(equality.left, exp.Column) or not isinstance(equality.right, exp.Column):
+            continue
+        columns = (equality.left, equality.right)
+        physical = next(
+            (
+                column
+                for column in columns
+                if aliases.get(_norm_sql_fragment(column.table), "") in physical_tables
+            ),
+            None,
+        )
+        recursive = next(
+            (
+                column
+                for column in columns
+                if aliases.get(_norm_sql_fragment(column.table), "") == cte_name
+            ),
+            None,
+        )
+        if (
+            isinstance(physical, exp.Column)
+            and isinstance(recursive, exp.Column)
+            and any(token in _norm_sql_fragment(physical.name) for token in hierarchy_tokens)
+            and (
+                _norm_sql_fragment(recursive.name) == "id"
+                or _norm_sql_fragment(recursive.name).endswith("_id")
+            )
+        ):
+            return True
+    return False
+
+
 def _mutate_comparison(sql: str) -> str:
     replacements = [(">=", ">"), ("<=", "<"), ("<>", "="), ("!=", "="), (">", ">="), ("<", "<="), ("=", "<>")]
     for old, new in replacements:
@@ -529,6 +648,45 @@ def _mutate_comparison(sql: str) -> str:
         if mutated != sql:
             return mutated
     return _bump_first_int(sql) or sql
+
+
+def _mutate_join_comparison(sql: str) -> str:
+    ast = _parse_sql(sql)
+    if ast is None:
+        return sql
+    mutated = ast.copy()
+    replacements = {
+        exp.GTE: exp.GT,
+        exp.LTE: exp.LT,
+        exp.GT: exp.GTE,
+        exp.LT: exp.LTE,
+        exp.EQ: exp.NEQ,
+        exp.NEQ: exp.EQ,
+    }
+    for join in mutated.find_all(exp.Join):
+        predicate = join.args.get("on")
+        if not isinstance(predicate, exp.Expression):
+            continue
+        comparison = next(
+            (
+                node
+                for node in predicate.walk()
+                if type(node) in replacements
+                and node.find_ancestor(exp.Join) is join
+            ),
+            None,
+        )
+        if comparison is None:
+            continue
+        replacement_type = replacements[type(comparison)]
+        comparison.replace(
+            replacement_type(
+                this=comparison.this.copy(),
+                expression=comparison.expression.copy(),
+            )
+        )
+        return mutated.sql()
+    return sql
 
 
 def _mutate_aggregate(sql: str) -> str:
@@ -568,7 +726,26 @@ def _mutate_group_by(sql: str) -> str:
             return mutated.sql()
 
     if len(current_items) > 1:
-        grouped_select.set("group", exp.Group(expressions=[item.copy() for item in current_items[:-1]]))
+        key_index = next(
+            (
+                index
+                for index, item in enumerate(current_items)
+                for column in ([item] if isinstance(item, exp.Column) else item.find_all(exp.Column))
+                if _norm_sql_fragment(column.name) == "id"
+                or _norm_sql_fragment(column.name).endswith("_id")
+            ),
+            len(current_items) - 1,
+        )
+        grouped_select.set(
+            "group",
+            exp.Group(
+                expressions=[
+                    item.copy()
+                    for index, item in enumerate(current_items)
+                    if index != key_index
+                ]
+            ),
+        )
         return mutated.sql()
 
     grouped_select.set("group", exp.Group(expressions=[exp.Literal.string("__group_probe__")]))
@@ -607,34 +784,123 @@ def _mutate_dialect_boundary(sql: str) -> str:
     return _bump_first_int(sql) or sql
 
 
-def build_cases(records: list[dict[str, Any]], seed: int) -> list[dict[str, Any]]:
+def _case_from_record(record: dict[str, Any], category: str) -> dict[str, Any] | None:
+    student, target = mutate_sql(record["sql"], category)
+    if not student or student == record["sql"]:
+        return None
+    if _parse_sql(record["sql"]) is None or _parse_sql(student) is None:
+        return None
+    case_key = hashlib.sha256(f"{record['id']}\0{category}\0{student}".encode()).hexdigest()[:20]
+    return {
+        "id": f"online_random250_{case_key}",
+        "dataset": "online_random250",
+        "structure": category,
+        "source": record["source_name"],
+        "source_id": record["source_id"],
+        "source_url": record["source_url"],
+        "member": record["member"],
+        "standard": record["sql"],
+        "student": student,
+        "student_generation_method": "deterministic_mutation",
+        "strict_target": target,
+        "expected_equivalent": False,
+        "online_labels": record["labels"],
+    }
+
+
+def _smoke_quotas(total_limit: int) -> dict[str, int]:
+    """Distribute a smoke-test limit across categories without building 250 cases."""
+
+    quotas = {category: 0 for category in QUOTAS}
+    remaining = total_limit
+    while remaining:
+        progressed = False
+        for category, maximum in QUOTAS.items():
+            if quotas[category] >= maximum:
+                continue
+            quotas[category] += 1
+            remaining -= 1
+            progressed = True
+            if remaining == 0:
+                break
+        if not progressed:
+            break
+    return {category: quota for category, quota in quotas.items() if quota}
+
+
+def _build_smoke_cases(
+    records: list[dict[str, Any]],
+    seed: int,
+    total_limit: int,
+) -> list[dict[str, Any]]:
+    """Build only the requested cases, parsing candidates lazily.
+
+    The full corpus builder validates every candidate before quota sampling.
+    That is appropriate for a report regeneration, but made ``--case-limit 1``
+    parse thousands of unused standard/student pairs.  Smoke mode instead
+    shuffles cheap record references and parses only until each small quota is
+    filled.
+    """
+
+    rng = random.Random(seed)
+    selected: list[dict[str, Any]] = []
+    used_standards: set[str] = set()
+    shortages: dict[str, dict[str, int]] = {}
+
+    for category, quota in _smoke_quotas(total_limit).items():
+        candidates = [record for record in records if category in record["labels"]]
+        rng.shuffle(candidates)
+        picks: list[dict[str, Any]] = []
+
+        for allow_reused_standard in (False, True):
+            for record in candidates:
+                standard_key = hashlib.sha256(record["sql"].lower().encode()).hexdigest()
+                if not allow_reused_standard and standard_key in used_standards:
+                    continue
+                case = _case_from_record(record, category)
+                if case is None or case in picks:
+                    continue
+                picks.append(case)
+                used_standards.add(standard_key)
+                if len(picks) == quota:
+                    break
+            if len(picks) == quota:
+                break
+
+        if len(picks) < quota:
+            shortages[category] = {
+                "available": len(candidates),
+                "selected": len(picks),
+                "quota": quota,
+            }
+        selected.extend(picks)
+
+    if shortages:
+        raise RuntimeError(f"not enough online mined smoke candidates: {json.dumps(shortages, ensure_ascii=False)}")
+    rng.shuffle(selected)
+    for index, item in enumerate(selected, 1):
+        item["sample_index"] = index
+    return selected
+
+
+def build_cases(
+    records: list[dict[str, Any]],
+    seed: int,
+    total_limit: int = 0,
+) -> list[dict[str, Any]]:
+    if total_limit:
+        return _build_smoke_cases(records, seed, total_limit)
+
     rng = random.Random(seed)
     pools: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         for category in record["labels"]:
             if category not in QUOTAS:
                 continue
-            student, target = mutate_sql(record["sql"], category)
-            if not student or student == record["sql"]:
+            case = _case_from_record(record, category)
+            if case is None:
                 continue
-            if _parse_sql(record["sql"]) is None or _parse_sql(student) is None:
-                continue
-            case_key = hashlib.sha256(f"{record['id']}\0{category}\0{student}".encode()).hexdigest()[:20]
-            pools[category].append({
-                "id": f"online_random250_{case_key}",
-                "dataset": "online_random250",
-                "structure": category,
-                "source": record["source_name"],
-                "source_id": record["source_id"],
-                "source_url": record["source_url"],
-                "member": record["member"],
-                "standard": record["sql"],
-                "student": student,
-                "student_generation_method": "deterministic_mutation",
-                "strict_target": target,
-                "expected_equivalent": False,
-                "online_labels": record["labels"],
-            })
+            pools[category].append(case)
 
     selected: list[dict[str, Any]] = []
     used_standards: set[str] = set()
@@ -684,12 +950,38 @@ def _diff_dict(diff: Any) -> dict[str, Any]:
 def evaluate_case(case: dict[str, Any], max_rows: int) -> dict[str, Any]:
     result = {**case}
     errors: list[str] = []
-    standard_ast = _parse_sql(case["standard"])
-    student_ast = _parse_sql(case["student"])
+    standard_ast = _parse_sql_strict(case["standard"])
+    student_ast = _parse_sql_strict(case["student"])
     result["standard_parse_ok"] = standard_ast is not None
     result["student_parse_ok"] = student_ast is not None
     if standard_ast is None or student_ast is None:
-        errors.append("parse_failed")
+        standard_failed = standard_ast is None
+        result["executed"] = False
+        result["execution_error"] = (
+            "standard_sql_parse_failed" if standard_failed else "student_sql_parse_failed"
+        )
+        result["row_equivalent"] = False
+        result["observable_mismatch"] = False
+        result["verdict_status"] = "INPUT_GAP" if standard_failed else "SUPPORTED"
+        result["equivalence_conclusion"] = (
+            "UNDECIDED" if standard_failed else "NOT_EQUIVALENT"
+        )
+        result["error_code"] = (
+            "STANDARD_SQL_PARSE_ERROR" if standard_failed else "STUDENT_SQL_PARSE_ERROR"
+        )
+        result["boundary_evidence"] = (
+            {
+                "reason": "invalid_standard_sql",
+                "sql_role": "standard",
+                "error_code": "STANDARD_SQL_PARSE_ERROR",
+            }
+            if standard_failed
+            else {}
+        )
+        result["data_generation_status"] = (
+            "INPUT_GAP" if standard_failed else "INVALID_STUDENT_SQL"
+        )
+        errors.append(result["data_generation_status"])
         result["errors"] = errors
         result["strict_pass"] = False
         return result
@@ -715,6 +1007,11 @@ def evaluate_case(case: dict[str, Any], max_rows: int) -> dict[str, Any]:
     run = generate_and_compare(schema, case["standard"], case["student"], max_rows_per_table=max_rows)
     result["executed"] = run.executed
     result["execution_error"] = run.error
+    result["verdict_status"] = run.status
+    result["equivalence_conclusion"] = run.equivalence_conclusion
+    result["boundary_evidence"] = run.boundary_evidence
+    result["error_code"] = run.error_code
+    result["judge_status"] = run.judge_status
     result["row_equivalent"] = run.is_equivalent is True
     result["observable_mismatch"] = (
         run.is_equivalent is False
@@ -735,8 +1032,61 @@ def evaluate_case(case: dict[str, Any], max_rows: int) -> dict[str, Any]:
     return result
 
 
+def _configure_worker_memory(memory_mb: int) -> None:
+    """Apply a hard address-space cap before evaluating one or more cases."""
+
+    limit = int(memory_mb) * 1024 * 1024
+    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+
+def _evaluate_case_payload(payload: tuple[dict[str, Any], int]) -> dict[str, Any]:
+    case, max_rows = payload
+    return evaluate_case(case, max_rows=max_rows)
+
+
+def evaluate_cases_isolated(
+    cases: list[dict[str, Any]],
+    *,
+    max_rows: int,
+    worker_memory_mb: int = 1536,
+    worker_recycle_cases: int = 1,
+) -> list[dict[str, Any]]:
+    """Evaluate cases in one bounded worker, recycled before memory accumulates.
+
+    SQL ASTs contain parent links and the witness suite retains several worlds
+    during one comparison.  Running hundreds of cases in the parent process
+    allows those temporary object graphs to accumulate.  A single spawned
+    worker preserves deterministic ordering and CPU usage, while
+    ``max_tasks_per_child`` bounds retained memory without parallel fan-out.
+    """
+
+    if not cases:
+        return []
+    context = multiprocessing.get_context("spawn")
+    payloads = [(case, max_rows) for case in cases]
+    with ProcessPoolExecutor(
+        max_workers=1,
+        mp_context=context,
+        initializer=_configure_worker_memory,
+        initargs=(worker_memory_mb,),
+        max_tasks_per_child=max(1, int(worker_recycle_cases)),
+    ) as executor:
+        return list(executor.map(_evaluate_case_payload, payloads, chunksize=1))
+
+
 def _data_generation_status(result: dict[str, Any]) -> str:
+    verdict_status = result.get("verdict_status")
+    if verdict_status in {
+        "INPUT_GAP",
+        "ENGINE_GAP",
+        "SEMANTIC_BOUNDARY",
+        "KNOWN_GAP",
+        "SUPPORTED_WITH_LIMITS",
+    }:
+        return str(verdict_status)
     if not result["executed"]:
+        if result.get("error_code") == "STUDENT_SQL_PARSE_ERROR":
+            return "INVALID_STUDENT_SQL"
         return "EXEC_ERROR"
     if result["observable_mismatch"]:
         return "PASS"
@@ -769,6 +1119,10 @@ def summarize(records: list[dict[str, Any]], cases: list[dict[str, Any]], result
         "tactic_activated": sum(1 for result in results if result.get("generation_tactics")),
         "by_structure": by_structure,
         "by_status": dict(Counter(result.get("data_generation_status") for result in results)),
+        "by_verdict_status": dict(Counter(result.get("verdict_status") for result in results)),
+        "by_equivalence_conclusion": dict(
+            Counter(result.get("equivalence_conclusion") for result in results)
+        ),
         "by_source": dict(Counter(case["source_id"] for case in cases)),
         "source_urls": sorted({case["source_url"] for case in cases}),
         "errors": dict(Counter(error for result in results for error in result.get("errors", []))),
@@ -805,6 +1159,8 @@ def write_outputs(records: list[dict[str, Any]], results: list[dict[str, Any]], 
         f"- Observable counterexamples: `{summary['observable_counterexamples']}`",
         f"- Tactic activated: `{summary['tactic_activated']}`",
         f"- Data-generation status: `{summary['by_status']}`",
+        f"- Verdict status: `{summary['by_verdict_status']}`",
+        f"- Equivalence conclusion: `{summary['by_equivalence_conclusion']}`",
         "",
         "## By Structure",
         "",
@@ -823,6 +1179,9 @@ def write_outputs(records: list[dict[str, Any]], results: list[dict[str, Any]], 
             f"- source: {result['source']} / `{result['member']}` <{result['source_url']}>",
             f"- target: `{result['strict_target']}`",
             f"- status: `{result.get('data_generation_status')}`",
+            f"- verdict: `{result.get('verdict_status')}` / `{result.get('equivalence_conclusion')}`",
+            f"- error_code: `{result.get('error_code')}`",
+            f"- boundary_evidence: `{result.get('boundary_evidence', {})}`",
             f"- errors: `{result.get('errors')}`",
             f"- standard: `{result['standard']}`",
             f"- student: `{result['student']}`",
@@ -846,15 +1205,64 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--offline-cache-only", action="store_true")
     parser.add_argument("--print-summary", action="store_true")
+    parser.add_argument(
+        "--worker-memory-mb",
+        type=int,
+        default=1536,
+        help="hard RLIMIT_AS for the single evaluation worker",
+    )
+    parser.add_argument(
+        "--worker-recycle-cases",
+        type=int,
+        default=1,
+        help="restart the worker after this many cases",
+    )
+    parser.add_argument(
+        "--case-limit",
+        type=int,
+        default=0,
+        help="lazily build and evaluate only N quota-balanced smoke cases",
+    )
+    parser.add_argument(
+        "--in-process",
+        action="store_true",
+        help="debug only: disable the memory-isolated worker",
+    )
+    parser.add_argument(
+        "--no-write",
+        action="store_true",
+        help="evaluate and print without replacing report files",
+    )
     args = parser.parse_args()
 
+    if not 1 <= args.max_rows <= 32:
+        parser.error("--max-rows must be between 1 and 32")
+    if not 256 <= args.worker_memory_mb <= 4096:
+        parser.error("--worker-memory-mb must be between 256 and 4096")
+    if args.worker_recycle_cases < 1:
+        parser.error("--worker-recycle-cases must be at least 1")
+    if args.case_limit < 0:
+        parser.error("--case-limit cannot be negative")
+    if args.case_limit > sum(QUOTAS.values()):
+        parser.error(f"--case-limit cannot exceed {sum(QUOTAS.values())}")
+
     records = collect_online_queries(args.offline_cache_only, args.timeout)
-    cases = build_cases(records, args.seed)
-    if len(cases) != 250:
-        raise RuntimeError(f"expected 250 cases, got {len(cases)}")
-    results = [evaluate_case(case, max_rows=args.max_rows) for case in cases]
+    cases = build_cases(records, args.seed, total_limit=args.case_limit)
+    expected_cases = args.case_limit or sum(QUOTAS.values())
+    if len(cases) != expected_cases:
+        raise RuntimeError(f"expected {expected_cases} cases, got {len(cases)}")
+    if args.in_process:
+        results = [evaluate_case(case, max_rows=args.max_rows) for case in cases]
+    else:
+        results = evaluate_cases_isolated(
+            cases,
+            max_rows=args.max_rows,
+            worker_memory_mb=args.worker_memory_mb,
+            worker_recycle_cases=args.worker_recycle_cases,
+        )
     summary = summarize(records, cases, results, args.seed)
-    write_outputs(records, results, summary)
+    if not args.no_write:
+        write_outputs(records, results, summary)
     if args.print_summary:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
 

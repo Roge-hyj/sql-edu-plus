@@ -1,3 +1,5 @@
+import pytest
+
 from core.error_attribution import evidence_weights_from_observation
 
 
@@ -69,6 +71,34 @@ def test_correct_submission_has_no_error_attributions():
 
     assert result.attributions == []
     assert result.llm_arbitration_input["candidate_kps"] == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        (
+            "SELECT * FROM departments WHERE department_id IN "
+            "(SELECT department_id FROM employees GROUP BY department_id "
+            "HAVING MIN(salary) >= 8000)"
+        ),
+        (
+            "SELECT s.name, c.cust_name FROM salesman s CROSS JOIN customer c "
+            "WHERE s.city IS NOT NULL"
+        ),
+    ],
+)
+def test_identical_complex_submission_has_no_misalignment_attributions(sql):
+    result = evidence_weights_from_observation(
+        student_sql=sql,
+        answer_sql=sql,
+        is_correct=True,
+        judge_detail={"comparison": {"is_equivalent_on_generated_data": True}},
+        ast_diffs=[],
+    )
+
+    assert result.observation["E_AST"]["normalized_ast_equal"] is True
+    assert result.attributions == []
+    assert result.llm_arbitration_input["misalignment_comparison"] == []
 
 
 def test_equivalent_cte_inline_rewrite_is_not_a_blocking_attribution():

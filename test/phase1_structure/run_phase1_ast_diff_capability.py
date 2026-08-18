@@ -34,6 +34,8 @@ def _case(
     expected_diff_types: list[str] | None = None,
     expected_kps: list[str] | None = None,
     representation: str = "supported",
+    execution_boundary: str | None = None,
+    dialect: str | None = None,
     note: str = "",
 ) -> dict[str, Any]:
     return {
@@ -45,6 +47,8 @@ def _case(
         "expected_diff_types": expected_diff_types or [],
         "expected_kps": expected_kps or [],
         "representation": representation,
+        "execution_boundary": execution_boundary,
+        "dialect": dialect,
         "note": note,
     }
 
@@ -96,8 +100,8 @@ def build_cases() -> list[dict[str, Any]]:
             "DISTINCT",
             "SELECT COUNT(DISTINCT dept) FROM student",
             "SELECT COUNT(dept) FROM student",
-            expected_clauses=["DISTINCT"],
-            expected_diff_types=["distinct_changed"],
+            expected_clauses=["AGGREGATE"],
+            expected_diff_types=["aggregate_distinct_changed"],
         ),
         _case(
             "where_missing",
@@ -177,7 +181,7 @@ def build_cases() -> list[dict[str, Any]]:
             "SELECT * FROM course WHERE title LIKE 'Intro%'",
             "SELECT * FROM course WHERE title LIKE 'Advanced%'",
             expected_clauses=["PREDICATE"],
-            expected_diff_types=["literal_changed"],
+            expected_diff_types=["like_pattern_changed"],
         ),
         _case(
             "logic_and_to_or",
@@ -224,6 +228,22 @@ def build_cases() -> list[dict[str, Any]]:
             "JOIN ON",
             "SELECT * FROM a JOIN b ON a.id = b.a_id AND b.score > 10",
             "SELECT * FROM a JOIN b ON a.id = b.a_id",
+            expected_clauses=["JOIN ON"],
+            expected_diff_types=["join_on_changed"],
+        ),
+        _case(
+            "join_using_key_changed",
+            "JOIN ON",
+            "SELECT a.id FROM a JOIN b USING (id)",
+            "SELECT a.id FROM a JOIN b USING (account_id)",
+            expected_clauses=["JOIN ON"],
+            expected_diff_types=["join_on_changed"],
+        ),
+        _case(
+            "join_using_key_removed",
+            "JOIN ON",
+            "SELECT a.student_id FROM a JOIN b USING (student_id, course_id)",
+            "SELECT a.student_id FROM a JOIN b USING (student_id)",
             expected_clauses=["JOIN ON"],
             expected_diff_types=["join_on_changed"],
         ),
@@ -369,30 +389,126 @@ def build_cases() -> list[dict[str, Any]]:
             "SELECT RANK() OVER (ORDER BY salary DESC) FROM instructor",
             "SELECT ROW_NUMBER() OVER (ORDER BY salary DESC) FROM instructor",
             expected_clauses=["WINDOW"],
-            expected_diff_types=["window_over_changed"],
+            expected_diff_types=["window_function_changed"],
         ),
         _case(
-            "distinct_on_gap",
-            "Dialect Boundary",
+            "distinct_on_changed",
+            "DISTINCT",
             "SELECT DISTINCT ON (dept) dept, name FROM student ORDER BY dept, name",
             "SELECT DISTINCT dept, name FROM student ORDER BY dept, name",
-            representation="known_gap",
-            note="PostgreSQL DISTINCT ON is outside current AST diff typing.",
+            expected_clauses=["DISTINCT ON"],
+            expected_diff_types=["distinct_on_changed"],
+            dialect="postgres",
         ),
         _case(
-            "rollup_gap",
-            "Dialect Boundary",
+            "rollup_changed",
+            "GROUP BY",
             "SELECT region, SUM(amount) FROM sales GROUP BY ROLLUP(region)",
             "SELECT region, SUM(amount) FROM sales GROUP BY region",
-            representation="known_gap",
-            note="ROLLUP is parsed but current SQLite-oriented semantic path treats it as boundary.",
+            expected_clauses=["ROLLUP"],
+            expected_diff_types=["rollup_changed"],
+            execution_boundary="sqlite",
+        ),
+        _case(
+            "grouping_sets_changed",
+            "GROUP BY",
+            "SELECT region, SUM(amount) FROM sales GROUP BY GROUPING SETS ((region), ())",
+            "SELECT region, SUM(amount) FROM sales GROUP BY region",
+            expected_clauses=["GROUPING SETS"],
+            expected_diff_types=["grouping_sets_changed"],
+            execution_boundary="sqlite",
+        ),
+        _case(
+            "cube_changed",
+            "GROUP BY",
+            "SELECT region, product, SUM(amount) FROM sales "
+            "GROUP BY CUBE(region, product)",
+            "SELECT region, product, SUM(amount) FROM sales "
+            "GROUP BY region, product",
+            expected_clauses=["CUBE"],
+            expected_diff_types=["cube_changed"],
+            execution_boundary="sqlite",
+        ),
+        _case(
+            "aggregate_filter_changed",
+            "Aggregate",
+            "SELECT COUNT(*) FILTER (WHERE score > 0) FROM exam",
+            "SELECT COUNT(*) FROM exam",
+            expected_clauses=["AGGREGATE FILTER"],
+            expected_diff_types=["aggregate_filter_changed"],
+        ),
+        _case(
+            "recursive_search_changed",
+            "Recursive CTE",
+            "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) "
+            "SEARCH DEPTH FIRST BY n SET ord SELECT n FROM t",
+            "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) "
+            "SELECT n FROM t",
+            expected_clauses=["SEARCH"],
+            expected_diff_types=["recursive_search_changed"],
+            dialect="postgres",
+        ),
+        _case(
+            "recursive_cycle_changed",
+            "Recursive CTE",
+            "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) "
+            "CYCLE n SET is_cycle USING path SELECT n FROM t",
+            "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) "
+            "SELECT n FROM t",
+            expected_clauses=["CYCLE"],
+            expected_diff_types=["recursive_cycle_changed"],
+            dialect="postgres",
+        ),
+        _case(
+            "qualify_changed",
+            "Window",
+            "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn "
+            "FROM exam QUALIFY rn = 1",
+            "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn "
+            "FROM exam QUALIFY rn <= 1",
+            expected_clauses=["QUALIFY"],
+            expected_diff_types=["qualify_changed"],
+        ),
+        _case(
+            "intersect_all_modifier_changed",
+            "Set Operation",
+            "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+            "SELECT id FROM a INTERSECT SELECT id FROM b",
+            expected_clauses=["INTERSECT"],
+            expected_diff_types=["set_modifier_changed"],
+            execution_boundary="sqlite",
+        ),
+        _case(
+            "except_all_modifier_changed",
+            "Set Operation",
+            "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+            "SELECT id FROM a EXCEPT SELECT id FROM b",
+            expected_clauses=["EXCEPT"],
+            expected_diff_types=["set_modifier_changed"],
+            execution_boundary="sqlite",
+        ),
+        _case(
+            "lateral_changed",
+            "Dialect Boundary",
+            "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL "
+            "(SELECT s.id + 1 AS value) x",
+            "SELECT s.name FROM student s",
+            expected_clauses=["LATERAL"],
+            expected_diff_types=["lateral_changed"],
+            execution_boundary="sqlite",
+            dialect="postgres",
+            note="Structure diff is typed; execution remains dialect-scoped.",
         ),
     ]
 
 
 def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
     try:
-        diffs = extract_ast_diffs(case["standard"], case["student"])
+        diffs = extract_ast_diffs(
+            case["standard"],
+            case["student"],
+            dialect=case.get("dialect"),
+        )
         error = None
     except Exception as exc:
         diffs = []
@@ -409,7 +525,7 @@ def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
     passed = not missing_clauses and not missing_diff_types and not missing_kps and error is None
 
     if case["representation"] in {"known_gap", "known_boundary"}:
-        bucket = case["representation"]
+        bucket = case["representation"] if passed else "unexpected_failure"
     elif passed:
         bucket = "supported"
     else:
@@ -434,52 +550,79 @@ def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     buckets = Counter(item["capability_bucket"] for item in results)
     categories = defaultdict(Counter)
+    category_execution_boundaries = Counter()
     for item in results:
         categories[item["category"]][item["capability_bucket"]] += 1
-    ir_coverage = build_ir_to_ast_coverage(categories)
+        if item.get("execution_boundary"):
+            category_execution_boundaries[item["category"]] += 1
+    ir_coverage = build_ir_to_ast_coverage(
+        categories, category_execution_boundaries
+    )
     total = len(results)
+    supported = buckets["supported"]
+    non_boundary_total = sum(1 for item in results if not item.get("execution_boundary"))
+    non_boundary_supported = sum(
+        1
+        for item in results
+        if not item.get("execution_boundary") and item["capability_bucket"] == "supported"
+    )
+    execution_boundary_ids = [item["id"] for item in results if item.get("execution_boundary")]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total": total,
         "buckets": dict(buckets),
         "category_buckets": {category: dict(counter) for category, counter in sorted(categories.items())},
+        "category_execution_boundaries": dict(sorted(category_execution_boundaries.items())),
         "ir_to_ast_category_coverage": ir_coverage,
-        "support_rate": buckets["supported"] / max(total - buckets["known_boundary"], 1),
+        "structure_support_rate": supported / max(total, 1),
+        "non_boundary_support_rate": non_boundary_supported / max(non_boundary_total, 1),
+        # Backward-compatible alias with explicit all-case semantics.
+        "support_rate": supported / max(total, 1),
+        "execution_boundary_count": len(execution_boundary_ids),
+        "execution_boundary_ids": execution_boundary_ids,
         "unexpected_failure_count": buckets["unexpected_failure"],
     }
 
 
-def build_ir_to_ast_coverage(ast_categories: dict[str, Counter]) -> list[dict[str, Any]]:
+def build_ir_to_ast_coverage(
+    ast_categories: dict[str, Counter],
+    ast_execution_boundaries: Counter,
+) -> list[dict[str, Any]]:
     ir_report = OUTPUT_DIR / "phase1_ir_structure_capability.json"
     if not ir_report.exists():
         return []
     data = json.loads(ir_report.read_text(encoding="utf-8"))
     ir_categories = data.get("summary", {}).get("category_buckets", {})
+    ir_execution_boundaries = data.get("summary", {}).get(
+        "category_execution_boundaries", {}
+    )
     rows: list[dict[str, Any]] = []
     for category, counter in sorted(ir_categories.items()):
         ir_supported = int(counter.get("first_class", 0)) + int(counter.get("weak_textual", 0))
         ir_gap = int(counter.get("known_gap", 0))
-        ir_boundary = int(counter.get("known_boundary", 0))
+        ir_boundary = int(ir_execution_boundaries.get(category, 0))
         ast_counter = ast_categories.get(category, Counter())
         ast_supported = int(ast_counter.get("supported", 0))
         ast_gap = int(ast_counter.get("known_gap", 0))
-        ast_boundary = int(ast_counter.get("known_boundary", 0))
+        ast_boundary = int(ast_execution_boundaries.get(category, 0))
         if ast_supported:
             status = "diff_supported"
         elif ast_gap:
             status = "diff_known_gap"
         elif ast_boundary:
-            status = "diff_boundary"
+            status = "execution_boundary_without_diff_support"
         else:
             status = "missing_diff_cases"
         rows.append({
             "category": category,
             "ir_supported_cases": ir_supported,
             "ir_known_gap_cases": ir_gap,
-            "ir_known_boundary_cases": ir_boundary,
+            "ir_execution_boundary_cases": ir_boundary,
+            "ir_known_boundary_cases": int(counter.get("known_boundary", 0)),
             "ast_supported_cases": ast_supported,
             "ast_known_gap_cases": ast_gap,
-            "ast_known_boundary_cases": ast_boundary,
+            "ast_execution_boundary_cases": ast_boundary,
+            "ast_known_boundary_cases": int(ast_counter.get("known_boundary", 0)),
             "status": status,
         })
     return rows
@@ -497,20 +640,25 @@ def write_markdown(summary: dict[str, Any], results: list[dict[str, Any]], path:
         "",
         f"- Total cases: `{summary['total']}`",
         f"- Buckets: `{summary['buckets']}`",
-        f"- Non-boundary support rate: `{summary['support_rate']:.2%}`",
+        f"- Structure support rate: `{summary['structure_support_rate']:.2%}`",
+        f"- Non-boundary support rate: `{summary['non_boundary_support_rate']:.2%}`",
+        f"- SQLite execution boundaries: `{summary['execution_boundary_count']}` "
+        f"(`{summary['execution_boundary_ids']}`)",
         f"- Unexpected failures: `{summary['unexpected_failure_count']}`",
         "",
         "## IR To AST Diff Continuity",
         "",
-        "| IR category | IR supported | IR gaps | AST supported | AST gaps | status |",
-        "| --- | ---: | ---: | ---: | ---: | --- |",
+        "| IR category | IR supported | IR gaps | IR boundaries | AST supported | AST gaps | AST boundaries | status |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in summary.get("ir_to_ast_category_coverage") or []:
         lines.append(
             f"| {row['category']} | {row['ir_supported_cases']} | {row['ir_known_gap_cases']} | "
-            f"{row['ast_supported_cases']} | {row['ast_known_gap_cases']} | `{row['status']}` |"
+            f"{row['ir_execution_boundary_cases']} | {row['ast_supported_cases']} | "
+            f"{row['ast_known_gap_cases']} | {row['ast_execution_boundary_cases']} | `{row['status']}` |"
         )
     lines.extend([
+        "",
         "## Category Matrix",
         "",
         "| category | supported | known_gap | known_boundary | unexpected_failure |",

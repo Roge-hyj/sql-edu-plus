@@ -38,6 +38,7 @@ def _case(
     checks: list[dict[str, Any]],
     *,
     representation: str = "first_class",
+    execution_boundary: str | None = None,
     dialect_hint: str | None = None,
     note: str = "",
 ) -> dict[str, Any]:
@@ -47,6 +48,7 @@ def _case(
         "sql": sql,
         "checks": checks,
         "representation": representation,
+        "execution_boundary": execution_boundary,
         "dialect_hint": dialect_hint,
         "note": note,
     }
@@ -408,7 +410,7 @@ def build_cases() -> list[dict[str, Any]]:
             "SELECT * FROM student JOIN takes USING (id)",
             [
                 {"type": "field_count_at_least", "field": "joins", "value": 1},
-                {"type": "field_contains", "field": "joins", "needles": ["USING", "id"]},
+                {"type": "join_conditions_contain", "needles": ["USING", "id"]},
             ],
         ),
         _case(
@@ -417,7 +419,7 @@ def build_cases() -> list[dict[str, Any]]:
             "SELECT * FROM enrollment JOIN grades USING (student_id, course_id)",
             [
                 {"type": "field_count_at_least", "field": "joins", "value": 1},
-                {"type": "field_contains", "field": "joins", "needles": ["USING", "student_id", "course_id"]},
+                {"type": "join_conditions_contain", "needles": ["USING", "student_id", "course_id"]},
             ],
         ),
         _case(
@@ -663,69 +665,98 @@ def build_cases() -> list[dict[str, Any]]:
             ],
         ),
         _case(
-            "gap_distinct_on",
+            "distinct_on",
             "DISTINCT",
             "SELECT DISTINCT ON (dept) dept, name FROM student ORDER BY dept, name",
-            [],
-            representation="known_gap",
+            [
+                {"type": "field_equals", "field": "distinct", "value": True},
+                {"type": "field_contains", "field": "distinct_on", "needles": ["dept"]},
+            ],
             dialect_hint="postgres",
-            note="PostgreSQL DISTINCT ON is outside current typed DISTINCT IR.",
         ),
         _case(
-            "gap_grouping_sets",
+            "grouping_sets",
             "GROUP BY",
-            "SELECT region, product, SUM(amount) FROM sales GROUP BY GROUPING SETS ((region), (product))",
-            [],
-            representation="known_gap",
-            note="GROUPING SETS is not first-class typed in current GROUP BY IR.",
+            "SELECT region, product, SUM(amount) FROM sales "
+            "GROUP BY GROUPING SETS ((region), (product), ())",
+            [
+                {"type": "field_count_at_least", "field": "grouping_sets", "value": 1},
+                {"type": "field_contains", "field": "grouping_sets", "needles": ["region", "product", "empty"]},
+            ],
+            execution_boundary="sqlite",
+            note="Typed by the IR; SQLite execution remains unsupported.",
         ),
         _case(
-            "gap_aggregate_filter",
+            "aggregate_filter",
             "Aggregate",
             "SELECT COUNT(*) FILTER (WHERE score > 0) FROM exam",
-            [],
-            representation="known_gap",
-            note="Aggregate FILTER predicate is not first-class typed in current aggregate IR.",
+            [
+                {"type": "field_contains", "field": "aggregate_functions", "needles": ["filter_predicate", "score > 0"]},
+                {"type": "predicate_contexts_include", "values": ["AGGREGATE FILTER"]},
+                {"type": "field_equals", "field": "where_predicates", "value": []},
+            ],
         ),
         _case(
-            "gap_recursive_search_cycle",
+            "recursive_search",
             "Recursive CTE",
             "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SEARCH DEPTH FIRST BY n SET ord SELECT n FROM t",
-            [],
-            representation="known_gap",
-            note="Recursive SEARCH/CYCLE clauses are outside current typed recursive CTE IR.",
+            [
+                {"type": "field_contains", "field": "recursive_decorations", "needles": ["DEPTH", "n", "ord"]},
+            ],
+            dialect_hint="postgres",
+        ),
+        _case(
+            "recursive_cycle",
+            "Recursive CTE",
+            "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) CYCLE n SET is_cycle USING path SELECT n FROM t",
+            [
+                {"type": "field_contains", "field": "recursive_decorations", "needles": ["CYCLE", "n", "is_cycle", "path"]},
+            ],
+            dialect_hint="postgres",
         ),
         _case(
             "boundary_lateral",
             "Dialect Boundary",
             "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL (SELECT s.id + 1 AS value) x",
-            [],
-            representation="known_boundary",
-            note="Known execution/transpilation boundary.",
+            [
+                {"type": "field_count_at_least", "field": "lateral_sources", "value": 1},
+                {"type": "field_contains", "field": "lateral_sources", "needles": ["x", "LATERAL"]},
+            ],
+            execution_boundary="sqlite",
+            dialect_hint="postgres",
+            note="Typed by the IR; native execution remains dialect-scoped.",
         ),
         _case(
-            "boundary_qualify",
-            "Dialect Boundary",
+            "qualify",
+            "Window",
             "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn FROM exam QUALIFY rn = 1",
-            [],
-            representation="known_boundary",
-            note="QUALIFY is treated as a dialect boundary for Phase 1.",
+            [
+                {"type": "field_contains", "field": "qualify_predicates", "needles": ["rn = 1"]},
+                {"type": "predicate_contexts_include", "values": ["QUALIFY"]},
+                {"type": "field_equals", "field": "order_by", "value": []},
+            ],
         ),
         _case(
             "boundary_rollup",
             "Dialect Boundary",
             "SELECT region, SUM(amount) FROM sales GROUP BY ROLLUP(region)",
-            [],
-            representation="known_boundary",
-            note="Known execution/transpilation boundary.",
+            [
+                {"type": "field_count_at_least", "field": "rollup", "value": 1},
+                {"type": "field_contains", "field": "rollup", "needles": ["region"]},
+            ],
+            execution_boundary="sqlite",
+            note="Typed by the IR; SQLite execution remains unsupported.",
         ),
         _case(
             "boundary_cube",
             "Dialect Boundary",
             "SELECT region, product, SUM(amount) FROM sales GROUP BY CUBE(region, product)",
-            [],
-            representation="known_boundary",
-            note="Known execution/transpilation boundary.",
+            [
+                {"type": "field_count_at_least", "field": "cube", "value": 1},
+                {"type": "field_contains", "field": "cube", "needles": ["region", "product"]},
+            ],
+            execution_boundary="sqlite",
+            note="Typed by the IR; SQLite execution remains unsupported.",
         ),
         _case(
             "set_operation_intersect_all",
@@ -735,6 +766,7 @@ def build_cases() -> list[dict[str, Any]]:
                 {"type": "set_operations_include", "values": ["INTERSECT"]},
                 {"type": "set_operation_detail", "operator": "INTERSECT", "all": True},
             ],
+            execution_boundary="sqlite",
             note="IR supports the ALL flag; execution support is evaluated in the sandbox stage.",
         ),
         _case(
@@ -745,6 +777,7 @@ def build_cases() -> list[dict[str, Any]]:
                 {"type": "set_operations_include", "values": ["EXCEPT"]},
                 {"type": "set_operation_detail", "operator": "EXCEPT", "all": True},
             ],
+            execution_boundary="sqlite",
             note="IR supports the ALL flag; execution support is evaluated in the sandbox stage.",
         ),
     ]
@@ -957,11 +990,13 @@ def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
             })
 
     checks_passed = all(item["passed"] for item in check_results)
+    checks_configured = bool(case["checks"])
     if case["representation"] in {"known_boundary", "known_gap"}:
-        bucket = "known_boundary"
-        if case["representation"] == "known_gap":
-            bucket = "known_gap"
-    elif parse_ok and ir_build_ok and checks_passed:
+        if not (parse_ok and ir_build_ok and checks_configured and checks_passed):
+            bucket = "unexpected_failure"
+        else:
+            bucket = case["representation"]
+    elif parse_ok and ir_build_ok and checks_configured and checks_passed:
         bucket = case["representation"]
     else:
         bucket = "unexpected_failure"
@@ -973,6 +1008,7 @@ def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
         "parse_error": parse_error,
         "ir_build_ok": ir_build_ok,
         "ir": ir_dict,
+        "checks_configured": checks_configured,
         "checks_passed": checks_passed,
         "check_results": check_results,
         "capability_bucket": bucket,
@@ -983,8 +1019,24 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(results)
     buckets = Counter(item["capability_bucket"] for item in results)
     categories = defaultdict(Counter)
+    category_execution_boundaries = Counter()
     for item in results:
         categories[item["category"]][item["capability_bucket"]] += 1
+        if item.get("execution_boundary"):
+            category_execution_boundaries[item["category"]] += 1
+    structure_supported = buckets["first_class"] + buckets["weak_textual"]
+    non_boundary_total = sum(
+        1 for item in results if not item.get("execution_boundary")
+    )
+    non_boundary_supported = sum(
+        1
+        for item in results
+        if not item.get("execution_boundary")
+        and item["capability_bucket"] in {"first_class", "weak_textual"}
+    )
+    execution_boundary_ids = [
+        item["id"] for item in results if item.get("execution_boundary")
+    ]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total": total,
@@ -992,7 +1044,13 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "ir_build_success": sum(1 for item in results if item["ir_build_ok"]),
         "buckets": dict(buckets),
         "category_buckets": {category: dict(counter) for category, counter in sorted(categories.items())},
-        "case_support_rate": (buckets["first_class"] + buckets["weak_textual"]) / max(total - buckets["known_boundary"], 1),
+        "category_execution_boundaries": dict(sorted(category_execution_boundaries.items())),
+        "structure_support_rate": structure_supported / max(total, 1),
+        "non_boundary_support_rate": non_boundary_supported / max(non_boundary_total, 1),
+        # Backward-compatible alias. Its value now has explicit all-case semantics.
+        "case_support_rate": structure_supported / max(total, 1),
+        "execution_boundary_count": len(execution_boundary_ids),
+        "execution_boundary_ids": execution_boundary_ids,
     }
 
 
@@ -1010,38 +1068,45 @@ def write_markdown(summary: dict[str, Any], results: list[dict[str, Any]], path:
     lines.append(f"- Parse success: `{summary['parse_success']}`")
     lines.append(f"- IR build success: `{summary['ir_build_success']}`")
     lines.append(f"- Buckets: `{summary['buckets']}`")
-    lines.append(f"- Non-boundary support rate: `{summary['case_support_rate']:.2%}`")
+    lines.append(f"- Structure support rate: `{summary['structure_support_rate']:.2%}`")
+    lines.append(f"- Non-boundary support rate: `{summary['non_boundary_support_rate']:.2%}`")
+    lines.append(
+        f"- SQLite execution boundaries: `{summary['execution_boundary_count']}` "
+        f"(`{summary['execution_boundary_ids']}`)"
+    )
     lines.append("")
     lines.append("Bucket meanings:")
     lines.append("")
     lines.append("- `first_class`: captured by dedicated IR fields.")
     lines.append("- `weak_textual`: visible only as SQL text inside an IR field.")
-    lines.append("- `known_boundary`: outside current Phase 1 IR/execution boundary.")
+    lines.append("- Execution boundaries are tracked separately from structure buckets.")
+    lines.append("- `known_boundary`: legacy bucket for an untyped boundary case; none are present in the current corpus.")
     lines.append("- `known_gap`: in or near teaching scope, but not first-class typed by the current IR.")
     lines.append("- `unexpected_failure`: expected supported structure was not captured.")
     lines.append("")
     lines.append("## Category Matrix")
     lines.append("")
-    lines.append("| category | first_class | weak_textual | known_gap | known_boundary | unexpected_failure |")
+    lines.append("| category | first_class | weak_textual | known_gap | unexpected_failure | execution boundaries |")
     lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
     for category, counter in summary["category_buckets"].items():
         lines.append(
             f"| {category} | {counter.get('first_class', 0)} | {counter.get('weak_textual', 0)} | "
-            f"{counter.get('known_gap', 0)} | {counter.get('known_boundary', 0)} | "
-            f"{counter.get('unexpected_failure', 0)} |"
+            f"{counter.get('known_gap', 0)} | {counter.get('unexpected_failure', 0)} | "
+            f"{summary['category_execution_boundaries'].get(category, 0)} |"
         )
     lines.append("")
     lines.append("## Cases")
     lines.append("")
-    lines.append("| result | category | id | dialect | checks | note |")
-    lines.append("| --- | --- | --- | --- | --- | --- |")
+    lines.append("| result | category | id | dialect | execution boundary | checks | note |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
     for item in results:
         passed = sum(1 for check in item["check_results"] if check["passed"])
         total_checks = len(item["check_results"])
         note = item.get("note") or ""
         lines.append(
             f"| `{item['capability_bucket']}` | {item['category']} | `{item['id']}` | "
-            f"`{item.get('dialect')}` | `{passed}/{total_checks}` | {note} |"
+            f"`{item.get('dialect')}` | `{item.get('execution_boundary') or '-'}` | "
+            f"`{passed}/{total_checks}` | {note} |"
         )
     failures = [item for item in results if item["capability_bucket"] == "unexpected_failure"]
     if failures:

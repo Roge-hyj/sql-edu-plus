@@ -24,6 +24,12 @@ WithQuery
 
 CteDef
   ::= Identifier [ "(" IdentifierList ")" ] AS "(" Query ")"
+      [ RecursiveDecoration ]
+
+RecursiveDecoration
+  ::= SEARCH ( DEPTH | BREADTH ) FIRST BY ExprList SET Identifier
+   | CYCLE ExprList SET Identifier [ TO Expr DEFAULT Expr ]
+      USING Identifier
 
 SetQuery
   ::= Query SetOp Query
@@ -41,8 +47,13 @@ SetOp
 
 ```text
 SelectQuery
-  ::= SELECT [ DISTINCT ] ProjectionList [ FromClause ] [ WhereClause ]
-      [ GroupByClause ] [ HavingClause ] [ OrderByClause ] [ LimitClause ]
+  ::= SELECT [ DistinctClause ] ProjectionList [ FromClause ] [ WhereClause ]
+      [ GroupByClause ] [ HavingClause ] [ QualifyClause ] [ OrderByClause ]
+      [ LimitClause ]
+
+DistinctClause
+  ::= DISTINCT
+   | DISTINCT ON "(" ExprList ")"
 
 ProjectionList
   ::= ProjectionItem { "," ProjectionItem }
@@ -66,6 +77,7 @@ FromClause
 TableSource
   ::= TableName [ Alias ]
    | "(" Query ")" Alias
+   | LATERAL "(" Query ")" Alias
    | TableSource JoinOp TableSource [ JoinCondition ]
 
 JoinOp
@@ -136,12 +148,18 @@ ArithmeticOp
   ::= "+" | "-" | "*" | "/" | "%"
 
 AggregateCall
+  ::= AggregateCore [ AggregateFilterClause ]
+
+AggregateCore
   ::= COUNT "(" "*" ")"
    | COUNT "(" [ DISTINCT ] Expr ")"
    | SUM "(" [ DISTINCT ] Expr ")"
    | AVG "(" [ DISTINCT ] Expr ")"
    | MIN "(" Expr ")"
    | MAX "(" Expr ")"
+
+AggregateFilterClause
+  ::= FILTER "(" WHERE Predicate ")"
 
 FunctionCall
   ::= LOWER "(" Expr ")"
@@ -157,7 +175,20 @@ FunctionCall
 
 ```text
 GroupByClause
-  ::= GROUP BY ExprList
+  ::= GROUP BY GroupingElement { "," GroupingElement }
+
+GroupingElement
+  ::= Expr
+   | GROUPING SETS "(" GroupingSet { "," GroupingSet } ")"
+   | ROLLUP "(" ExprList ")"
+   | CUBE "(" ExprList ")"
+
+GroupingSet
+  ::= "(" [ ExprList ] ")"
+   | Expr
+
+QualifyClause
+  ::= QUALIFY Predicate
 
 OrderByClause
   ::= ORDER BY OrderItem { "," OrderItem }
@@ -217,29 +248,39 @@ FrameBound
 
 ## Boundary Constructs
 
-The following constructs are recorded separately because parser support,
-SQLite execution support, or Phase 1 semantic support can differ by dialect:
+The following constructs have first-class structure recognition and AST-diff
+support, but remain explicit backend execution boundaries in the current
+SQLite-based counterexample path:
 
 ```text
-Boundary
+ExecutionBoundary
   ::= LATERAL SubQuery
+   | GROUP BY GROUPING SETS "(" GroupingSet { "," GroupingSet } ")"
    | GROUP BY ROLLUP "(" ExprList ")"
    | GROUP BY CUBE "(" ExprList ")"
-   | QUALIFY Predicate
+   | Query INTERSECT ALL Query
+   | Query EXCEPT ALL Query
 ```
 
-## Current Known Gaps
+## Current Typed Coverage
 
-The following constructs are represented as known gaps in the IR benchmark.
-They are useful in SQL practice, but are not currently modeled as first-class
-typed IR nodes:
+The current IR benchmark has `77/77` typed structures and no known
+typed-structure gaps. The independent AST Diff benchmark supports `53/53`
+targeted pairs, and the linked IR-to-AST benchmark supports `77/77` pairs. The
+following constructs were previously gaps or dialect boundaries and are now
+represented by the formal productions above, first-class typed IR fields, and
+dedicated AST differences:
 
 ```text
-KnownGap
+TypedNow
   ::= SELECT DISTINCT ON "(" ExprList ")"
    | GROUP BY GROUPING SETS "(" ... ")"
    | AggregateCall FILTER "(" WHERE Predicate ")"
    | RecursiveSearchCycleClause
+   | QUALIFY Predicate
+   | LATERAL SubQuery
+   | GROUP BY ROLLUP "(" ExprList ")"
+   | GROUP BY CUBE "(" ExprList ")"
 ```
 
 The following constructs were previously retained as weak textual evidence, but
@@ -256,3 +297,10 @@ TypedNow
 Quantifier
   ::= ANY | ALL
 ```
+
+`GROUPING SETS`, `LATERAL`, `ROLLUP`, `CUBE`, `INTERSECT ALL`, and `EXCEPT ALL`
+are structurally typed and AST-diff supported, while being marked separately as
+SQLite execution boundaries because that backend cannot preserve their
+semantics. Execution status does not reduce typed IR or AST-diff coverage. A
+single recursive CTE containing both `SEARCH` and `CYCLE` remains dependent on
+parser support; standalone `SEARCH` and `CYCLE` decorations are typed.

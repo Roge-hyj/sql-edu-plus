@@ -104,11 +104,18 @@ def infer_schema(*sqls: str) -> str:
         for cte in ast.find_all(exp.CTE):
             if cte.alias:
                 cte_names.add(_norm(cte.alias))
+            table_alias = cte.args.get("alias")
+            if isinstance(table_alias, exp.TableAlias):
+                for column in table_alias.args.get("columns") or []:
+                    if isinstance(column, exp.Identifier) and column.name:
+                        cte_output_columns.add(_norm(column.name))
             select = cte.this.find(exp.Select) if isinstance(cte.this, exp.Expression) else None
             if isinstance(select, exp.Select):
                 for item in select.expressions or []:
                     if isinstance(item, exp.Alias) and item.alias:
                         cte_output_columns.add(_norm(item.alias))
+                    elif isinstance(item, exp.Column) and item.name:
+                        cte_output_columns.add(_norm(item.name))
         for table in ast.find_all(exp.Table):
             table_name = _clean(table.name)
             if not table_name or _norm(table_name) in cte_names:
@@ -119,6 +126,19 @@ def infer_schema(*sqls: str) -> str:
             aliases[table_norm] = canonical_name
             if table.alias:
                 aliases[_norm(table.alias)] = canonical_name
+
+    # Seed ownership from qualified references before assigning unqualified
+    # columns. This lets ``m.first_player`` establish the physical owner for
+    # an earlier SELECT expression that spells the same column without ``m``.
+    for ast in asts:
+        if not ast:
+            continue
+        for column in ast.find_all(exp.Column):
+            column_name = _clean(column.name)
+            table_ref = _norm(column.table or "")
+            if not column_name or column_name == "*" or table_ref not in aliases:
+                continue
+            table_columns[aliases[table_ref]].add(column_name)
 
     for ast in asts:
         if not ast:
@@ -153,24 +173,100 @@ def infer_schema(*sqls: str) -> str:
                 continue
             if scope_tables:
                 column_norm = _norm(column_name)
-                preferred = next(
-                    (
-                        table_name for table_name in scope_tables
-                        if column_norm.startswith(_norm(table_name).rstrip("s") + "_")
-                        or column_norm.startswith(_norm(table_name) + "_")
-                    ),
-                    scope_tables[0],
-                )
+                known_owners = [
+                    table_name
+                    for table_name in scope_tables
+                    if any(_norm(item) == column_norm for item in table_columns[table_name])
+                ]
+                if len(known_owners) == 1:
+                    preferred = known_owners[0]
+                else:
+                    prefix = column_norm.split("_", 1)[0]
+                    affinity = sorted(
+                        (
+                            sum(
+                                1
+                                for item in table_columns[table_name]
+                                if _norm(item).split("_", 1)[0] == prefix
+                            ),
+                            -scope_tables.index(table_name),
+                            table_name,
+                        )
+                        for table_name in scope_tables
+                    )
+                    preferred = affinity[-1][2]
                 table_columns[preferred].add(column_name)
 
+    numeric_columns = _infer_numeric_column_refs(
+        asts,
+        table_columns,
+        physical_names,
+        aliases,
+    )
     parts = []
     for table_name in sorted(table_columns):
         cols = table_columns[table_name]
         if not cols:
             cols = {"id", "name"}
         ordered = _order_columns(table_name, cols)
-        parts.append(f"{table_name}({', '.join(ordered)})")
+        rendered = [
+            f"{column} NUMERIC"
+            if (_norm(table_name), _norm(column)) in numeric_columns
+            else column
+            for column in ordered
+        ]
+        parts.append(f"{table_name}({', '.join(rendered)})")
     return "; ".join(parts)
+
+
+def _infer_numeric_column_refs(
+    asts: list[exp.Expression | None],
+    table_columns: dict[str, set[str]],
+    physical_names: dict[str, str],
+    table_aliases: dict[str, str],
+) -> set[tuple[str, str]]:
+    """Infer only types proven by numeric literal comparisons."""
+    projection_sources: dict[str, exp.Column] = {}
+    for ast in asts:
+        if ast is None:
+            continue
+        for alias in ast.find_all(exp.Alias):
+            if alias.alias and isinstance(alias.this, exp.Column):
+                projection_sources[_norm(alias.alias)] = alias.this
+
+    result: set[tuple[str, str]] = set()
+    comparisons = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)
+    for ast in asts:
+        if ast is None:
+            continue
+        for comparison in ast.find_all(*comparisons):
+            column: exp.Column | None = None
+            literal: exp.Literal | None = None
+            if isinstance(comparison.left, exp.Column) and isinstance(comparison.right, exp.Literal):
+                column, literal = comparison.left, comparison.right
+            elif isinstance(comparison.right, exp.Column) and isinstance(comparison.left, exp.Literal):
+                column, literal = comparison.right, comparison.left
+            if column is None or literal is None or not literal.is_number:
+                continue
+            source = projection_sources.get(_norm(column.name), column)
+            column_name = _norm(source.name)
+            table_ref = _norm(source.table or "")
+            if table_ref:
+                physical = table_aliases.get(table_ref) or physical_names.get(table_ref)
+                if physical and any(
+                    _norm(candidate) == column_name
+                    for candidate in table_columns.get(physical, set())
+                ):
+                    result.add((_norm(physical), column_name))
+                    continue
+            candidates = [
+                table_name
+                for table_name, columns in table_columns.items()
+                if any(_norm(candidate) == column_name for candidate in columns)
+            ]
+            if len(candidates) == 1:
+                result.add((_norm(candidates[0]), column_name))
+    return result
 
 
 def _order_columns(table_name: str, columns: set[str]) -> list[str]:
@@ -315,10 +411,21 @@ def evaluate_case(case: dict[str, Any], *, max_rows: int) -> dict[str, Any]:
     except Exception as exc:
         diff_error = f"{type(exc).__name__}: {exc}"
 
-    run = generate_and_compare(schema, standard, student, max_rows_per_table=max_rows)
+    run = generate_and_compare(
+        schema,
+        standard,
+        student,
+        max_rows_per_table=max_rows,
+        sql_dialect=case.get("declared_sql_dialect"),
+        execution_backend=case.get("execution_backend", "sqlite"),
+    )
     column_names_match = bool((run.data_evidence or {}).get("column_names_match", True))
     row_equivalent = run.is_equivalent is True
-    observable_mismatch = (run.is_equivalent is False) or (run.executed and not column_names_match)
+    # The judge contract compares output arity and row values. SQLite-derived
+    # expression labels (for example MAX(x) vs MIN(x)) are diagnostic metadata,
+    # not a semantic counterexample. Alias-only changes are intentionally
+    # equivalent in the core judge as well.
+    observable_mismatch = run.is_equivalent is False
     row_value_ok = row_equivalent if expected_equivalent else not row_equivalent
     outcome_ok = (not observable_mismatch) if expected_equivalent else observable_mismatch
     tactics = (run.data_evidence or {}).get("generation_tactics", [])
@@ -364,6 +471,13 @@ def evaluate_case(case: dict[str, Any], *, max_rows: int) -> dict[str, Any]:
         "diff_error": diff_error,
         "generation_tactics": tactics,
         "mutation_summary": mutation_summary,
+        "mutation_tests": (run.mutation_evidence or {}).get("tests", []),
+        "declared_sql_dialect": case.get("declared_sql_dialect"),
+        "resolved_sql_dialect": (run.data_evidence or {}).get("sql_dialect"),
+        "execution_backend": (run.data_evidence or {}).get("execution_backend"),
+        "validation_mode": "sqlite_compatibility",
+        "executable_standard_sql": run.standard_sqlite,
+        "executable_student_sql": run.student_sqlite,
         "test_database_sample": {table: rows[:5] for table, rows in run.test_database.items()},
     }
 
@@ -390,6 +504,14 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                 missing_tactic[diff_type] += 1
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "validation_mode": "sqlite_compatibility",
+        "native_semantics_verified": False,
+        "resolved_dialect_counts": dict(
+            Counter(str(result.get("resolved_sql_dialect") or "unresolved") for result in results)
+        ),
+        "execution_backend_counts": dict(
+            Counter(str(result.get("execution_backend") or "unknown") for result in results)
+        ),
         "total": len(results),
         "pass": sum(1 for result in results if result["status"] == "PASS"),
         "fail": sum(1 for result in results if result["status"] != "PASS"),
@@ -530,6 +652,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-rows", type=int, default=10)
     parser.add_argument("--print-summary", action="store_true")
+    parser.add_argument("--fail-on-non-pass", action="store_true")
     args = parser.parse_args()
 
     cases = _load_common150_cases() + _online_extra_cases()
@@ -538,6 +661,8 @@ def main() -> None:
     write_report(results, summary)
     if args.print_summary:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if args.fail_on_non_pass and summary["fail"]:
+        raise SystemExit(f"{summary['fail']} data-generation cases did not pass")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,15 @@
 import pytest
+from fastapi import HTTPException
+from sqlalchemy import func, select
+
+from models.submission import Submission
 from routers.ai import check_sql, SQLCheckRequest
 from schemas.agent import SQLCheckResultSchema
+
+
+@pytest.fixture(autouse=True)
+def _use_sqlite_compatibility_backend(monkeypatch):
+    monkeypatch.setattr("routers.ai.settings.PARSEVAL_EXECUTION_BACKEND", "sqlite")
 
 
 @pytest.mark.asyncio
@@ -143,14 +152,15 @@ async def test_check_sql_unsupported_dialect_feature_is_not_attributed_to_studen
         question_id=test_question.id,
     )
 
-    response = await check_sql(
-        payload=payload,
-        user_id=test_user.id,
-        session=test_db_session,
-    )
+    with pytest.raises(HTTPException) as caught:
+        await check_sql(
+            payload=payload,
+            user_id=test_user.id,
+            session=test_db_session,
+        )
 
-    assert response.is_correct is False
-    assert response.judge_status == "UNSUPPORTED"
-    assert response.error_attributions == []
-    assert response.observation["judge_status"] == "UNSUPPORTED"
-    assert "未完成判定" in response.hint["overall_comment"]
+    assert getattr(caught.value, "status_code", None) == 422
+    assert caught.value.detail["code"] == "UNSUPPORTED"
+    assert await test_db_session.scalar(
+        select(func.count()).select_from(Submission)
+    ) == 0

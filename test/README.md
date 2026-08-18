@@ -16,6 +16,19 @@ The tests are organized by system block instead of as one opaque end-to-end scor
 
 ## Current Test
 
+Run the complete strict Phase 1 gate from the project root. It runs the
+structure reports, curated end-to-end samples, strict data-generation suite,
+deterministic fuzzer, and focused backend regression tests in sequence. It
+uses the current Python executable and does not start Docker or external
+database services:
+
+```bash
+python data_construct_test/scripts/run_phase1_full_flow_gate.py
+```
+
+The gate stops at the first failed command or report invariant and returns a
+non-zero exit code.
+
 Run the IR structure capability benchmark:
 
 ```bash
@@ -51,18 +64,29 @@ The script writes reports and evidence to:
 
 ## Current Result
 
-The current IR benchmark covers 76 CFG production-alternative cases:
+The current IR benchmark covers 77 CFG production-alternative cases:
 
-- 68 structures are captured by first-class typed IR fields.
+- 77/77 structures are captured by first-class typed IR fields.
 - 0 structures are retained as weak textual evidence.
-- 4 in-scope or near-scope structures are recorded as known gaps.
-- 4 dialect boundary cases are recorded as known boundaries.
+- 0 in-scope or near-scope structures are recorded as known gaps.
 - 0 unexpected failures.
+- Separately, 6 cases are marked as SQLite execution boundaries:
+  `GROUPING SETS`, `LATERAL`, `ROLLUP`, `CUBE`, `INTERSECT ALL`, and
+  `EXCEPT ALL`. These remain part of the 77/77 typed structure result.
 
-The current AST diff-from-IR benchmark covers all 76 IR cases with linked standard/student SQL pairs:
+The independent AST Diff benchmark contains 53 targeted standard/student
+pairs:
 
-- 68 structural-difference pairs are supported.
-- 4 cases are recorded as known gaps.
-- 4 cases are inherited as known boundaries.
+- 53/53 structural differences are supported.
+- 0 cases are recorded as known gaps and 0 are unexpected failures.
+- The same 6 SQLite execution boundaries are tracked independently from AST
+  Diff support.
+
+The current AST diff-from-IR benchmark covers all 77 IR cases with linked standard/student SQL pairs:
+
+- 77/77 structural-difference pairs are supported.
+- 0 cases are recorded as known gaps.
 - 0 unexpected failures.
+- The same 6 SQLite execution boundaries are carried as execution metadata;
+  they do not reduce AST Diff support.
 - The AST diff report includes an `IR To AST Diff Continuity` matrix showing how IR-recognized categories are carried forward into standard/student difference tests.

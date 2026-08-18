@@ -14,11 +14,22 @@ import io
 import json
 import re
 import tarfile
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+try:
+    from spider_schema_catalog import compact_schema, load_spider_catalog
+except ModuleNotFoundError:  # Imported by tests from the repository root.
+    import sys
+
+    _SCRIPT_DIR = Path(__file__).resolve().parent
+    if str(_SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCRIPT_DIR))
+    from spider_schema_catalog import compact_schema, load_spider_catalog
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -44,6 +55,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-file", action="append", type=Path, default=[])
     parser.add_argument("--offline-cache-only", action="store_true")
     parser.add_argument("--include-reference-only", action="store_true")
+    parser.add_argument(
+        "--spider-tables-json",
+        type=Path,
+        help="official Spider tables.json; required for Spider sources",
+    )
     return parser.parse_args()
 
 
@@ -68,6 +84,41 @@ def _normalize_sql(sql: str) -> str:
     sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
     sql = re.sub(r"\s+", " ", sql.strip())
     return sql.rstrip(";")
+
+
+def _is_read_only_query(sql: str) -> bool:
+    """Keep the equivalence corpus query-only and side-effect free."""
+
+    normalized = _normalize_sql(sql)
+    if not re.match(r"^(?:WITH|SELECT)\b", normalized, flags=re.IGNORECASE):
+        return False
+    if re.search(r"\b(?:INSERT|UPDATE|DELETE|MERGE|REPLACE|CREATE|ALTER|DROP|TRUNCATE)\b", normalized, re.IGNORECASE):
+        return False
+    if re.search(r"\bSELECT\s+.+?\bINTO\b", normalized, re.IGNORECASE | re.DOTALL):
+        return False
+    # A second WITH in the normalized text is a strong signal that a mined
+    # corpus concatenated independent semicolon-free CTE examples. Nested CTEs
+    # still use one leading WITH with comma-separated definitions.
+    if len(re.findall(r"\bWITH\b", normalized, re.IGNORECASE)) > 1:
+        return False
+    return True
+
+
+def _split_tutorial_sql(text: str) -> list[str]:
+    """Split semicolon-free tutorial files at top-level CTE boundaries.
+
+    Many teaching repositories put several independent ``WITH`` examples in a
+    single file without semicolons. Treating the whole file as one statement
+    can feed UPDATE/DELETE examples and multiple queries into the data
+    generator, causing unbounded work. A line-start WITH is a reliable boundary
+    for these files because nested SELECTs remain inside the current CTE.
+    """
+
+    starts = [match.start() for match in re.finditer(r"(?im)^WITH\b", text)]
+    if len(starts) <= 1:
+        return [text]
+    starts.append(len(text))
+    return [text[starts[index]:starts[index + 1]] for index in range(len(starts) - 1)]
 
 
 def _labels(sql: str) -> list[str]:
@@ -179,6 +230,23 @@ def _download(source: dict[str, Any], cache_dir: Path, timeout: int, offline: bo
     return path
 
 
+def _download_url(url: str, path: Path, timeout: int, offline: bool) -> Path | None:
+    """Download one explicitly addressed page into the auditable cache."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.stat().st_size:
+        return path
+    if offline:
+        return None
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "sql-edu-corpus-collector/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        path.write_bytes(response.read())
+    return path
+
+
 def _extract_sql_text(text: str) -> Iterable[dict[str, Any]]:
     stripped = text.strip()
     if not stripped:
@@ -190,28 +258,37 @@ def _extract_sql_text(text: str) -> Iterable[dict[str, Any]]:
     if payload is not None:
         yield from _extract_from_json(payload)
         return
+    parsed_json_lines = False
     for line in stripped.splitlines():
         line = line.strip()
         if not line:
             continue
         try:
             yield from _extract_from_json(json.loads(line))
+            parsed_json_lines = True
         except json.JSONDecodeError:
             pass
-    for match in re.finditer(r"\b(?:WITH|SELECT)\b.+?(?:;|$)", text, flags=re.IGNORECASE | re.DOTALL):
-        sql = _normalize_sql(match.group(0))
-        if sql:
-            yield {"sql": sql}
+    # JSONL documents have already been fully traversed.  Falling through to
+    # the broad SELECT/semicolon regex would double every row (and could
+    # silently hit max_items before the source's tail was seen).
+    if parsed_json_lines:
+        return
+    for document in _split_tutorial_sql(text):
+        for match in re.finditer(r"\b(?:WITH|SELECT)\b.+?(?:;|$)", document, flags=re.IGNORECASE | re.DOTALL):
+            sql = _normalize_sql(match.group(0))
+            if sql and _is_read_only_query(sql):
+                yield {"sql": sql}
 
 
 def _extract_from_json(payload: Any) -> Iterable[dict[str, Any]]:
     if isinstance(payload, dict):
         for key in ("query", "SQL", "sql", "gold", "ans_sql", "answer_sql"):
             value = payload.get(key)
-            if isinstance(value, str) and re.search(r"\b(?:select|with)\b", value, flags=re.IGNORECASE):
+            if isinstance(value, str) and _is_read_only_query(value):
                 yield {
                     "sql": _normalize_sql(value),
                     "schema": payload.get("schema") or payload.get("db_schema") or "",
+                    "schema_catalog": payload.get("schema_catalog"),
                     "db_id": payload.get("db_id") or payload.get("database_id") or payload.get("table_id"),
                 }
         for value in payload.values():
@@ -301,7 +378,15 @@ def _collect_wikisql(path: Path, source: dict[str, Any], max_items: int) -> list
     return records
 
 
-def _record(source: dict[str, Any], sql: str, schema: str, member_name: str, method: str) -> dict[str, Any]:
+def _record(
+    source: dict[str, Any],
+    sql: str,
+    schema: str,
+    member_name: str,
+    method: str,
+    *,
+    schema_catalog: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     sql = _normalize_sql(sql)
     schema = schema or _infer_schema(sql)
     digest = hashlib.sha256(f"{source['id']}\0{member_name}\0{sql}".encode("utf-8")).hexdigest()
@@ -316,12 +401,18 @@ def _record(source: dict[str, Any], sql: str, schema: str, member_name: str, met
         "dialect": source.get("dialect") or "generic",
         "sql": sql,
         "schema": schema,
+        "schema_catalog": schema_catalog,
         "cfg_labels": _labels(sql),
         "provenance_hash": digest,
     }
 
 
-def _collect_generic(path: Path, source: dict[str, Any], max_items: int) -> list[dict[str, Any]]:
+def _collect_generic(
+    path: Path,
+    source: dict[str, Any],
+    max_items: int,
+    spider_catalog: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for member_name, raw in _iter_raw_documents(path):
         text = raw.decode("utf-8", errors="replace")
@@ -329,13 +420,111 @@ def _collect_generic(path: Path, source: dict[str, Any], max_items: int) -> list
             sql = item.get("sql")
             if not isinstance(sql, str):
                 continue
-            records.append(_record(source, sql, str(item.get("schema") or ""), member_name, "generic_recursive"))
+            db_id = str(item.get("db_id") or "").strip()
+            catalog_entry = item.get("schema_catalog")
+            if source["id"].startswith("spider_"):
+                if spider_catalog is None:
+                    raise ValueError(
+                        "Spider source requires --spider-tables-json; query-text schema inference is disabled"
+                    )
+                catalog_entry = spider_catalog.get(db_id.lower())
+                if catalog_entry is None:
+                    raise ValueError(f"Spider db_id is missing from tables.json: {db_id!r}")
+                schema = compact_schema(catalog_entry)
+            else:
+                schema = str(item.get("schema") or "")
+            records.append(_record(
+                source,
+                sql,
+                schema,
+                member_name,
+                "generic_recursive",
+                schema_catalog=catalog_entry,
+            ))
             if len(records) >= max_items:
                 return records
     return records
 
 
-def collect_source(source: dict[str, Any], cache_dir: Path, timeout: int, offline: bool, max_items: int) -> list[dict[str, Any]]:
+def _collect_hf_rows_api(
+    source: dict[str, Any],
+    cache_dir: Path,
+    timeout: int,
+    offline: bool,
+    max_items: int,
+    spider_catalog: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Collect Hugging Face datasets-server rows without requiring `datasets`.
+
+    The endpoint returns a bounded page of JSON rows.  We page deterministically
+    and cache each page separately, which makes offline replay possible after a
+    successful online collection.
+    """
+
+    parsed = urlsplit(str(source["url"]))
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    page_size = max(1, min(int(source.get("page_size", 100)), 100))
+    offset = int(query.get("offset", "0") or 0)
+    records: list[dict[str, Any]] = []
+    while len(records) < max_items:
+        page_query = dict(query)
+        page_query["offset"] = str(offset)
+        page_query["length"] = str(min(page_size, max_items - len(records)))
+        page_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(page_query), parsed.fragment))
+        digest = hashlib.sha256(page_url.encode("utf-8")).hexdigest()[:16]
+        page_path = cache_dir / f"{source['id']}__page_{offset:08d}_{digest}.json"
+        cached = _download_url(page_url, page_path, timeout, offline)
+        if cached is None:
+            break
+        try:
+            payload = json.loads(cached.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            break
+        rows = payload.get("rows") if isinstance(payload, dict) else None
+        if not isinstance(rows, list) or not rows:
+            break
+        for wrapper in rows:
+            item = wrapper.get("row") if isinstance(wrapper, dict) else None
+            if not isinstance(item, dict):
+                continue
+            sql = item.get("query") or item.get("SQL") or item.get("sql")
+            if not isinstance(sql, str) or not _is_read_only_query(sql):
+                continue
+            db_id = str(item.get("db_id") or "")
+            if spider_catalog is None:
+                raise ValueError(
+                    "Spider source requires --spider-tables-json; query-text schema inference is disabled"
+                )
+            catalog_entry = spider_catalog.get(db_id.lower())
+            if catalog_entry is None:
+                raise ValueError(f"Spider db_id is missing from tables.json: {db_id!r}")
+            records.append(_record(
+                source,
+                sql,
+                compact_schema(catalog_entry),
+                f"{query.get('split', 'split')}:{offset}",
+                "hf_rows_api",
+                schema_catalog=catalog_entry,
+            ))
+            if len(records) >= max_items:
+                break
+        offset += len(rows)
+        if len(rows) < page_size:
+            break
+    return records
+
+
+def collect_source(
+    source: dict[str, Any],
+    cache_dir: Path,
+    timeout: int,
+    offline: bool,
+    max_items: int,
+    spider_catalog: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    mode = (source.get("extraction") or {}).get("mode")
+    if mode == "hf_rows_api":
+        return _collect_hf_rows_api(source, cache_dir, timeout, offline, max_items, spider_catalog)
     path = source.get("local_path")
     if path:
         raw_path = Path(path)
@@ -346,18 +535,22 @@ def collect_source(source: dict[str, Any], cache_dir: Path, timeout: int, offlin
         if downloaded is None:
             return []
         raw_path = downloaded
-    mode = (source.get("extraction") or {}).get("mode")
     if mode == "wikisql_structured":
         return _collect_wikisql(raw_path, source, max_items)
     if mode == "reference_only":
         return []
-    return _collect_generic(raw_path, source, max_items)
+    return _collect_generic(raw_path, source, max_items, spider_catalog)
 
 
 def main() -> None:
     args = parse_args()
     if args.max_per_source <= 0:
         raise SystemExit("--max-per-source must be > 0")
+    spider_catalog = (
+        load_spider_catalog(args.spider_tables_json)
+        if args.spider_tables_json is not None
+        else None
+    )
     sources = _read_manifest(args.manifest)
     selected = set(args.source_id)
     if args.local_file:
@@ -385,7 +578,14 @@ def main() -> None:
             source_stats[source["id"]] = {"status": "reference_only_skipped", "records": 0}
             continue
         try:
-            records = collect_source(source, args.cache_dir, args.timeout, args.offline_cache_only, args.max_per_source)
+            records = collect_source(
+                source,
+                args.cache_dir,
+                args.timeout,
+                args.offline_cache_only,
+                args.max_per_source,
+                spider_catalog,
+            )
         except Exception as exc:  # noqa: BLE001 - report source-level failures without losing other corpora.
             source_stats[source["id"]] = {"status": "error", "records": 0, "error": str(exc)}
             continue

@@ -2,7 +2,7 @@ import argparse
 import json
 import random
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -32,6 +32,8 @@ def _case(
     *,
     expect_equiv: bool = False,
     note: str = "",
+    sql_dialect: str | None = None,
+    execution_backend: str = "sqlite",
 ) -> dict[str, Any]:
     return {
         "operator": operator,
@@ -42,6 +44,9 @@ def _case(
         "expected_kps": expected_kps,
         "expect_equiv": expect_equiv,
         "note": note,
+        "declared_sql_dialect": sql_dialect,
+        "execution_backend": execution_backend,
+        "validation_mode": "sqlite_compatibility" if execution_backend == "sqlite" else "native",
     }
 
 
@@ -92,12 +97,13 @@ def select_case(rng: random.Random, idx: int) -> dict[str, Any]:
         ("credits * 2", "credits"),
     ]
     std_cols, stu_cols = rng.choice(variants)
+    threshold = rng.randint(1, 5)
     return _case(
         "SELECT",
         "projection_shape_check",
         "course(course_id, title, dept_name, credits)",
-        f"SELECT {std_cols} FROM course WHERE credits > {rng.randint(1, 5)};",
-        f"SELECT {stu_cols} FROM course WHERE credits > {rng.randint(1, 5)};",
+        f"SELECT {std_cols} FROM course WHERE credits > {threshold};",
+        f"SELECT {stu_cols} FROM course WHERE credits > {threshold};",
         ["select-basic"],
         note="投影列数、顺序或表达式不一致",
     )
@@ -460,13 +466,23 @@ def classify_result(case: dict[str, Any], run: Any, kp_ids: list[str]) -> tuple[
         return "ATTRIBUTION_MISS", f"expected={case['expected_kps']} actual={kp_ids}"
     if not run.data_evidence.get("generation_tactics"):
         return "TACTIC_MISS", "no generation tactic was recorded"
-    if not run.mutation_evidence.get("summary", {}).get("executed", 0):
+    mutation_summary = run.mutation_evidence.get("summary", {})
+    if not mutation_summary.get("executed", 0):
         return "MUTATION_GAP", "no mutation test executed after counterexample"
-    return "PASS", "counterexample, attribution and mutation evidence all present"
+    if not mutation_summary.get("fixed_by_replacement", 0):
+        return "MUTATION_UNFIXED", "replacement mutant did not restore the standard result"
+    return "PASS", "counterexample, attribution and repairing mutation evidence all present"
 
 
 def run_case(case: dict[str, Any]) -> dict[str, Any]:
-    run = generate_and_compare(case["schema"], case["standard"], case["student"], max_rows_per_table=10)
+    run = generate_and_compare(
+        case["schema"],
+        case["standard"],
+        case["student"],
+        max_rows_per_table=10,
+        sql_dialect=case.get("declared_sql_dialect"),
+        execution_backend=case.get("execution_backend", "sqlite"),
+    )
     attr = evidence_weights_from_observation(
         student_sql=case["student"],
         answer_sql=case["standard"],
@@ -489,9 +505,14 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         "ast_diff_types": _diff_types(run.data_evidence.get("ast_diffs", [])),
         "generation_tactics": _tactics(run.data_evidence.get("generation_tactics", [])),
         "mutation_summary": run.mutation_evidence.get("summary"),
+        "mutation_tests": run.mutation_evidence.get("tests", []),
         "standard_rows_sample": run.standard_rows[:5],
         "student_rows_sample": run.student_rows[:5],
         "generated_rows": run.test_database,
+        "resolved_sql_dialect": run.data_evidence.get("sql_dialect"),
+        "actual_execution_backend": run.data_evidence.get("execution_backend"),
+        "executable_standard_sql": run.standard_sqlite,
+        "executable_student_sql": run.student_sqlite,
         "error": run.error or run.data_evidence.get("student_exec_error"),
     }
 
@@ -579,6 +600,17 @@ def main() -> None:
         "operator_counts": {key: dict(value) for key, value in operator_counts.items()},
         "tactic_counts": {key: dict(value) for key, value in tactic_counts.items()},
         "pass_rate": pass_count / total * 100 if total else 0.0,
+        "validation_mode": "sqlite_compatibility",
+        "native_semantics_verified": False,
+        "declared_dialect_counts": dict(
+            Counter(str(item.get("declared_sql_dialect") or "auto") for item in results)
+        ),
+        "resolved_dialect_counts": dict(
+            Counter(str(item.get("resolved_sql_dialect") or "unresolved") for item in results)
+        ),
+        "execution_backend_counts": dict(
+            Counter(str(item.get("actual_execution_backend") or "unknown") for item in results)
+        ),
     }
     payload = {"summary": summary, "results": results}
     json_path = OUTPUT_DIR / "e2e_robustness_fuzzer_report.json"

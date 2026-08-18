@@ -151,6 +151,93 @@ TEMPLATES = {
 }
 
 
+CASE_TEMPLATES = {
+    "distinct_on": {
+        "standard": "SELECT DISTINCT ON (dept) dept, name FROM student ORDER BY dept, name",
+        "student": "SELECT DISTINCT dept, name FROM student ORDER BY dept, name",
+        "expected_clauses": ["DISTINCT ON"],
+        "expected_diff_types": ["distinct_on_changed"],
+        "dialect": "postgres",
+    },
+    "grouping_sets": {
+        "standard": "SELECT region, product, SUM(amount) FROM sales "
+        "GROUP BY GROUPING SETS ((region), (product), ())",
+        "student": "SELECT region, product, SUM(amount) FROM sales "
+        "GROUP BY region, product",
+        "expected_clauses": ["GROUPING SETS"],
+        "expected_diff_types": ["grouping_sets_changed"],
+    },
+    "aggregate_filter": {
+        "standard": "SELECT COUNT(*) FILTER (WHERE score > 0) FROM exam",
+        "student": "SELECT COUNT(*) FROM exam",
+        "expected_clauses": ["AGGREGATE FILTER"],
+        "expected_diff_types": ["aggregate_filter_changed"],
+    },
+    "recursive_search": {
+        "standard": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL "
+        "SELECT n + 1 FROM t WHERE n < 3) "
+        "SEARCH DEPTH FIRST BY n SET ord SELECT n FROM t",
+        "student": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL "
+        "SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t",
+        "expected_clauses": ["SEARCH"],
+        "expected_diff_types": ["recursive_search_changed"],
+        "dialect": "postgres",
+    },
+    "recursive_cycle": {
+        "standard": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL "
+        "SELECT n + 1 FROM t WHERE n < 3) "
+        "CYCLE n SET is_cycle USING path SELECT n FROM t",
+        "student": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL "
+        "SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t",
+        "expected_clauses": ["CYCLE"],
+        "expected_diff_types": ["recursive_cycle_changed"],
+        "dialect": "postgres",
+    },
+    "qualify": {
+        "standard": "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn "
+        "FROM exam QUALIFY rn = 1",
+        "student": "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn "
+        "FROM exam QUALIFY rn <= 1",
+        "expected_clauses": ["QUALIFY"],
+        "expected_diff_types": ["qualify_changed"],
+    },
+    "set_operation_intersect_all": {
+        "standard": "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
+        "student": "SELECT id FROM a INTERSECT SELECT id FROM b",
+        "expected_clauses": ["INTERSECT"],
+        "expected_diff_types": ["set_modifier_changed"],
+    },
+    "set_operation_except_all": {
+        "standard": "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
+        "student": "SELECT id FROM a EXCEPT SELECT id FROM b",
+        "expected_clauses": ["EXCEPT"],
+        "expected_diff_types": ["set_modifier_changed"],
+    },
+    "boundary_lateral": {
+        "standard": "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL "
+        "(SELECT s.id + 1 AS value) x",
+        "student": "SELECT s.name FROM student s",
+        "expected_clauses": ["LATERAL"],
+        "expected_diff_types": ["lateral_changed"],
+        "dialect": "postgres",
+    },
+    "boundary_rollup": {
+        "standard": "SELECT region, SUM(amount) FROM sales GROUP BY ROLLUP(region)",
+        "student": "SELECT region, SUM(amount) FROM sales GROUP BY region",
+        "expected_clauses": ["ROLLUP"],
+        "expected_diff_types": ["rollup_changed"],
+    },
+    "boundary_cube": {
+        "standard": "SELECT region, product, SUM(amount) FROM sales "
+        "GROUP BY CUBE(region, product)",
+        "student": "SELECT region, product, SUM(amount) FROM sales "
+        "GROUP BY region, product",
+        "expected_clauses": ["CUBE"],
+        "expected_diff_types": ["cube_changed"],
+    },
+}
+
+
 def load_ir_cases() -> list[dict]:
     return [json.loads(line) for line in IR_CASES.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -160,19 +247,30 @@ def build_ast_cases() -> list[dict]:
     for ir_case in load_ir_cases():
         category = ir_case["category"]
         representation = ir_case.get("representation", "first_class")
-        if representation in {"known_gap", "known_boundary"}:
+        if ir_case["id"] in CASE_TEMPLATES:
+            template = dict(CASE_TEMPLATES[ir_case["id"]])
             ast_case = {
                 "id": f"from_ir__{ir_case['id']}",
                 "source_ir_case_id": ir_case["id"],
                 "category": category,
-                "standard": ir_case["sql"],
-                "student": ir_case["sql"],
-                "expected_clauses": [],
-                "expected_diff_types": [],
+                "standard": template.pop("standard"),
+                "student": template.pop("student"),
+                "expected_clauses": template.pop("expected_clauses"),
+                "expected_diff_types": template.pop("expected_diff_types"),
                 "expected_kps": [],
                 "representation": representation,
-                "note": f"Inherited from IR {representation}: {ir_case.get('note') or ''}",
+                "execution_boundary": ir_case.get("execution_boundary"),
+                "dialect": template.pop("dialect", None),
+                "note": template.pop(
+                    "note",
+                    f"Case-specific AST diff pair for IR case {ir_case['id']}. "
+                    f"{ir_case.get('note') or ''}",
+                ),
             }
+        elif representation in {"known_gap", "known_boundary"}:
+            raise RuntimeError(
+                f"Missing real AST diff template for {representation} case {ir_case['id']}"
+            )
         else:
             template = dict(TEMPLATES[category])
             ast_case = {
@@ -185,6 +283,8 @@ def build_ast_cases() -> list[dict]:
                 "expected_diff_types": template.pop("expected_diff_types"),
                 "expected_kps": [],
                 "representation": template.pop("representation", "supported"),
+                "execution_boundary": ir_case.get("execution_boundary"),
+                "dialect": template.pop("dialect", None),
                 "note": template.pop("note", f"Category-level AST diff pair generated from IR case {ir_case['id']}."),
             }
         ast_cases.append(ast_case)

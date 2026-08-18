@@ -1,18 +1,15 @@
 {
   "summary": {
-    "generated_at": "2026-07-23T13:36:59.946723+00:00",
-    "total": 76,
-    "parse_success": 76,
-    "ir_build_success": 76,
+    "generated_at": "2026-08-18T16:33:50.130385+00:00",
+    "total": 77,
+    "parse_success": 77,
+    "ir_build_success": 77,
     "buckets": {
-      "first_class": 68,
-      "known_gap": 4,
-      "known_boundary": 4
+      "first_class": 77
     },
     "category_buckets": {
       "Aggregate": {
-        "first_class": 2,
-        "known_gap": 1
+        "first_class": 3
       },
       "CASE": {
         "first_class": 3
@@ -27,15 +24,13 @@
         "first_class": 2
       },
       "DISTINCT": {
-        "first_class": 2,
-        "known_gap": 1
+        "first_class": 3
       },
       "Dialect Boundary": {
-        "known_boundary": 4
+        "first_class": 3
       },
       "GROUP BY": {
-        "first_class": 3,
-        "known_gap": 1
+        "first_class": 4
       },
       "HAVING": {
         "first_class": 3
@@ -62,8 +57,7 @@
         "first_class": 3
       },
       "Recursive CTE": {
-        "first_class": 1,
-        "known_gap": 1
+        "first_class": 3
       },
       "SELECT": {
         "first_class": 6
@@ -78,10 +72,26 @@
         "first_class": 2
       },
       "Window": {
-        "first_class": 4
+        "first_class": 5
       }
     },
-    "case_support_rate": 0.9444444444444444
+    "category_execution_boundaries": {
+      "Dialect Boundary": 3,
+      "GROUP BY": 1,
+      "Set Operation": 2
+    },
+    "structure_support_rate": 1.0,
+    "non_boundary_support_rate": 1.0,
+    "case_support_rate": 1.0,
+    "execution_boundary_count": 6,
+    "execution_boundary_ids": [
+      "grouping_sets",
+      "boundary_lateral",
+      "boundary_rollup",
+      "boundary_cube",
+      "set_operation_intersect_all",
+      "set_operation_except_all"
+    ]
   },
   "results": [
     {
@@ -105,6 +115,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -175,8 +186,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -227,6 +251,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -308,8 +333,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -368,6 +406,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -481,8 +520,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -542,6 +594,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -833,8 +886,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -887,6 +953,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -1050,8 +1117,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -1104,6 +1184,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -1313,8 +1394,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -1360,6 +1454,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -1523,8 +1618,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -1564,6 +1672,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -1753,8 +1862,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -1804,6 +1926,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -1900,8 +2023,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -1948,6 +2084,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -2069,8 +2206,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -2117,6 +2267,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -2226,8 +2377,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -2285,6 +2449,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -2399,8 +2564,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -2475,6 +2653,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -2570,8 +2749,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -2638,6 +2830,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -2653,7 +2846,7 @@
           "MAX(salary)",
           "COUNT(DISTINCT dept)"
         ],
-        "distinct": true,
+        "distinct": false,
         "where_predicates": [],
         "joins": [],
         "group_by": [],
@@ -2785,8 +2978,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -2844,6 +3050,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -2968,8 +3175,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -3031,6 +3251,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -3103,8 +3324,24 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {
+          "percent": false,
+          "with_ties": false
+        },
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -3155,6 +3392,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": "mysql",
       "note": "",
       "parse_ok": true,
@@ -3211,8 +3449,24 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {
+          "percent": false,
+          "with_ties": false
+        },
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -3261,6 +3515,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": "tsql",
       "note": "",
       "parse_ok": true,
@@ -3316,8 +3571,24 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {
+          "percent": false,
+          "with_ties": false
+        },
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -3365,6 +3636,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -3377,8 +3649,7 @@
         ],
         "distinct": false,
         "where_predicates": [
-          "WHERE s.id IN (SELECT t.id FROM takes AS t) AND s.age > (SELECT AVG(age) FROM student) AND EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
-          "WHERE a.s_id = s.id"
+          "WHERE s.id IN (SELECT t.id FROM takes AS t) AND s.age > (SELECT AVG(age) FROM student) AND EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)"
         ],
         "joins": [],
         "group_by": [],
@@ -3449,16 +3720,6 @@
             "kind": "raw",
             "sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
             "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "a.s_id",
-            "right": "s.id",
-            "right_sql": "s.id",
-            "sql": "a.s_id = s.id",
-            "negated": false
           }
         ],
         "logic_trees": [
@@ -3504,16 +3765,6 @@
                 "negated": false
               }
             ],
-            "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "a.s_id",
-            "right": "s.id",
-            "right_sql": "s.id",
-            "sql": "a.s_id = s.id",
             "negated": false
           }
         ],
@@ -3592,8 +3843,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -3632,6 +3896,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -3644,8 +3909,7 @@
         ],
         "distinct": false,
         "where_predicates": [
-          "WHERE EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
-          "WHERE a.s_id = s.id"
+          "WHERE EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)"
         ],
         "joins": [],
         "group_by": [],
@@ -3670,16 +3934,6 @@
             "kind": "raw",
             "sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
             "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "a.s_id",
-            "right": "s.id",
-            "right_sql": "s.id",
-            "sql": "a.s_id = s.id",
-            "negated": false
           }
         ],
         "logic_trees": [
@@ -3687,16 +3941,6 @@
             "context": "WHERE",
             "kind": "raw",
             "sql": "EXISTS(SELECT 1 FROM advisor AS a WHERE a.s_id = s.id)",
-            "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "a.s_id",
-            "right": "s.id",
-            "right_sql": "s.id",
-            "sql": "a.s_id = s.id",
             "negated": false
           }
         ],
@@ -3741,8 +3985,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -3777,6 +4034,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -3788,9 +4046,7 @@
           "id"
         ],
         "distinct": false,
-        "where_predicates": [
-          "WHERE dept = 'CS'"
-        ],
+        "where_predicates": [],
         "joins": [],
         "group_by": [],
         "having_predicates": [],
@@ -3814,30 +4070,8 @@
         "set_operations": [],
         "case_branches": [],
         "window_functions": [],
-        "predicate_ir": [
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "dept",
-            "right": "CS",
-            "right_sql": "'CS'",
-            "sql": "dept = 'CS'",
-            "negated": false
-          }
-        ],
-        "logic_trees": [
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "dept",
-            "right": "CS",
-            "right_sql": "'CS'",
-            "sql": "dept = 'CS'",
-            "negated": false
-          }
-        ],
+        "predicate_ir": [],
+        "logic_trees": [],
         "aggregate_functions": [],
         "expression_ir": [
           {
@@ -3891,8 +4125,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -3938,6 +4185,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -3949,9 +4197,7 @@
           "n"
         ],
         "distinct": false,
-        "where_predicates": [
-          "WHERE n < 5"
-        ],
+        "where_predicates": [],
         "joins": [],
         "group_by": [],
         "having_predicates": [],
@@ -3971,30 +4217,8 @@
         ],
         "case_branches": [],
         "window_functions": [],
-        "predicate_ir": [
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "<",
-            "left": "n",
-            "right": 5,
-            "right_sql": "5",
-            "sql": "n < 5",
-            "negated": false
-          }
-        ],
-        "logic_trees": [
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "<",
-            "left": "n",
-            "right": 5,
-            "right_sql": "5",
-            "sql": "n < 5",
-            "negated": false
-          }
-        ],
+        "predicate_ir": [],
+        "logic_trees": [],
         "aggregate_functions": [],
         "expression_ir": [
           {
@@ -4045,8 +4269,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -4086,6 +4323,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -4204,8 +4442,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -4243,6 +4494,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -4346,8 +4598,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -4397,6 +4662,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -4415,15 +4681,7 @@
         "joins": [],
         "group_by": [],
         "having_predicates": [],
-        "order_by": [
-          {
-            "column": "salary",
-            "direction": "DESC",
-            "nulls": "LAST",
-            "collation": null,
-            "node": "salary DESC"
-          }
-        ],
+        "order_by": [],
         "limit_offset": {},
         "subqueries": [],
         "ctes": [],
@@ -4498,14 +4756,6 @@
             "kind": "window",
             "sql": "SUM(salary) OVER (PARTITION BY dept ORDER BY salary ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rolling_sum",
             "alias": "rolling_sum"
-          },
-          {
-            "context": "ORDER BY",
-            "kind": "column",
-            "sql": "salary",
-            "alias": null,
-            "table": "",
-            "column": "salary"
           }
         ],
         "set_operation_details": [],
@@ -4603,8 +4853,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -4656,6 +4919,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -4709,8 +4973,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -4762,6 +5039,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -4822,8 +5100,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -4871,6 +5162,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -4960,8 +5252,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -5006,6 +5311,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -5068,8 +5374,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -5116,6 +5435,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -5227,8 +5547,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -5278,6 +5611,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -5338,8 +5672,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -5388,6 +5735,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -5485,8 +5833,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -5530,6 +5891,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -5626,8 +5988,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -5671,6 +6046,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -5766,8 +6142,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -5813,6 +6202,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -5892,8 +6282,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -5940,6 +6343,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -6067,8 +6471,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -6116,6 +6533,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -6205,8 +6623,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -6253,6 +6684,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -6316,8 +6748,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -6354,8 +6799,7 @@
           "value": 1
         },
         {
-          "type": "field_contains",
-          "field": "joins",
+          "type": "join_conditions_contain",
           "needles": [
             "USING",
             "id"
@@ -6363,6 +6807,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -6379,8 +6824,11 @@
           {
             "type": "INNER",
             "table": "takes",
-            "condition": "",
-            "node": "JOIN takes USING (id)"
+            "condition": "USING (id)",
+            "node": "JOIN takes USING (id)",
+            "using": [
+              "id"
+            ]
           }
         ],
         "group_by": [],
@@ -6426,8 +6874,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -6441,15 +6902,14 @@
         },
         {
           "check": {
-            "type": "field_contains",
-            "field": "joins",
+            "type": "join_conditions_contain",
             "needles": [
               "USING",
               "id"
             ]
           },
           "passed": true,
-          "detail": "joins contains expected text"
+          "detail": "join conditions contain expected text"
         }
       ],
       "capability_bucket": "first_class"
@@ -6465,8 +6925,7 @@
           "value": 1
         },
         {
-          "type": "field_contains",
-          "field": "joins",
+          "type": "join_conditions_contain",
           "needles": [
             "USING",
             "student_id",
@@ -6475,6 +6934,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -6491,8 +6951,12 @@
           {
             "type": "INNER",
             "table": "grades",
-            "condition": "",
-            "node": "JOIN grades USING (student_id, course_id)"
+            "condition": "USING (student_id, course_id)",
+            "node": "JOIN grades USING (student_id, course_id)",
+            "using": [
+              "student_id",
+              "course_id"
+            ]
           }
         ],
         "group_by": [],
@@ -6538,8 +7002,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -6553,8 +7030,7 @@
         },
         {
           "check": {
-            "type": "field_contains",
-            "field": "joins",
+            "type": "join_conditions_contain",
             "needles": [
               "USING",
               "student_id",
@@ -6562,7 +7038,7 @@
             ]
           },
           "passed": true,
-          "detail": "joins contains expected text"
+          "detail": "join conditions contain expected text"
         }
       ],
       "capability_bucket": "first_class"
@@ -6587,6 +7063,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -6714,8 +7191,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -6762,6 +7252,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -6851,8 +7342,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -6907,6 +7411,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -7103,8 +7608,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -7164,6 +7682,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -7175,7 +7694,7 @@
           "SUM(DISTINCT salary)",
           "AVG(DISTINCT salary)"
         ],
-        "distinct": true,
+        "distinct": false,
         "where_predicates": [],
         "joins": [],
         "group_by": [],
@@ -7243,8 +7762,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -7291,6 +7823,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -7375,8 +7908,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -7422,6 +7968,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -7477,8 +8024,24 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {
+          "percent": false,
+          "with_ties": false
+        },
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -7524,6 +8087,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -7535,9 +8099,7 @@
           "x.dept"
         ],
         "distinct": false,
-        "where_predicates": [
-          "WHERE age > 18"
-        ],
+        "where_predicates": [],
         "joins": [],
         "group_by": [],
         "having_predicates": [],
@@ -7555,30 +8117,8 @@
         "set_operations": [],
         "case_branches": [],
         "window_functions": [],
-        "predicate_ir": [
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": ">",
-            "left": "age",
-            "right": 18,
-            "right_sql": "18",
-            "sql": "age > 18",
-            "negated": false
-          }
-        ],
-        "logic_trees": [
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": ">",
-            "left": "age",
-            "right": 18,
-            "right_sql": "18",
-            "sql": "age > 18",
-            "negated": false
-          }
-        ],
+        "predicate_ir": [],
+        "logic_trees": [],
         "aggregate_functions": [],
         "expression_ir": [
           {
@@ -7615,8 +8155,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -7660,6 +8213,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -7672,8 +8226,7 @@
         ],
         "distinct": false,
         "where_predicates": [
-          "WHERE NOT EXISTS(SELECT 1 FROM takes AS t WHERE t.s_id = s.id)",
-          "WHERE t.s_id = s.id"
+          "WHERE NOT EXISTS(SELECT 1 FROM takes AS t WHERE t.s_id = s.id)"
         ],
         "joins": [],
         "group_by": [],
@@ -7705,16 +8258,6 @@
             "kind": "raw",
             "sql": "EXISTS(SELECT 1 FROM takes AS t WHERE t.s_id = s.id)",
             "negated": true
-          },
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "t.s_id",
-            "right": "s.id",
-            "right_sql": "s.id",
-            "sql": "t.s_id = s.id",
-            "negated": false
           }
         ],
         "logic_trees": [
@@ -7731,16 +8274,6 @@
                 "negated": true
               }
             ],
-            "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "t.s_id",
-            "right": "s.id",
-            "right_sql": "s.id",
-            "sql": "t.s_id = s.id",
             "negated": false
           }
         ],
@@ -7785,8 +8318,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -7843,6 +8389,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -8003,8 +8550,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -8072,6 +8632,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -8144,8 +8705,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -8194,6 +8768,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -8302,8 +8877,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -8350,6 +8938,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -8453,8 +9042,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -8503,6 +9105,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -8522,15 +9125,7 @@
         "joins": [],
         "group_by": [],
         "having_predicates": [],
-        "order_by": [
-          {
-            "column": "exam_date",
-            "direction": "ASC",
-            "nulls": "FIRST",
-            "collation": null,
-            "node": "exam_date"
-          }
-        ],
+        "order_by": [],
         "limit_offset": {},
         "subqueries": [],
         "ctes": [],
@@ -8637,14 +9232,6 @@
             "kind": "window",
             "sql": "LAST_VALUE(score) OVER (ORDER BY exam_date)",
             "alias": null
-          },
-          {
-            "context": "ORDER BY",
-            "kind": "column",
-            "sql": "exam_date",
-            "alias": null,
-            "table": "",
-            "column": "exam_date"
           }
         ],
         "set_operation_details": [],
@@ -8758,8 +9345,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -8819,6 +9419,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -8834,15 +9435,7 @@
         "joins": [],
         "group_by": [],
         "having_predicates": [],
-        "order_by": [
-          {
-            "column": "salary",
-            "direction": "DESC",
-            "nulls": "LAST",
-            "collation": null,
-            "node": "salary DESC"
-          }
-        ],
+        "order_by": [],
         "limit_offset": {},
         "subqueries": [],
         "ctes": [],
@@ -8867,14 +9460,6 @@
             "kind": "window",
             "sql": "ROW_NUMBER() OVER w",
             "alias": null
-          },
-          {
-            "context": "ORDER BY",
-            "kind": "column",
-            "sql": "salary",
-            "alias": null,
-            "table": "",
-            "column": "salary"
           }
         ],
         "set_operation_details": [],
@@ -8947,8 +9532,21 @@
             "frame": "",
             "sql": "w OVER (PARTITION BY dept ORDER BY salary DESC)"
           }
-        ]
+        ],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -9012,6 +9610,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -9065,8 +9664,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -9119,6 +9731,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -9170,8 +9783,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -9226,6 +9852,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -9337,8 +9964,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -9401,6 +10041,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -9476,8 +10117,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -9539,6 +10193,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -9624,8 +10279,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -9685,6 +10353,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -9764,8 +10433,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -9826,6 +10508,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -9894,8 +10577,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -9949,6 +10645,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -9961,8 +10658,7 @@
         ],
         "distinct": false,
         "where_predicates": [
-          "WHERE id IN (SELECT s_id FROM advisor WHERE i_id IN (SELECT id FROM instructor))",
-          "WHERE i_id IN (SELECT id FROM instructor)"
+          "WHERE id IN (SELECT s_id FROM advisor WHERE i_id IN (SELECT id FROM instructor))"
         ],
         "joins": [],
         "group_by": [],
@@ -9997,16 +10693,6 @@
             "query": "(SELECT s_id FROM advisor WHERE i_id IN (SELECT id FROM instructor))",
             "sql": "id IN (SELECT s_id FROM advisor WHERE i_id IN (SELECT id FROM instructor))",
             "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "in_subquery",
-            "operator": "IN",
-            "left": "i_id",
-            "values": [],
-            "query": "(SELECT id FROM instructor)",
-            "sql": "i_id IN (SELECT id FROM instructor)",
-            "negated": false
           }
         ],
         "logic_trees": [
@@ -10018,16 +10704,6 @@
             "values": [],
             "query": "(SELECT s_id FROM advisor WHERE i_id IN (SELECT id FROM instructor))",
             "sql": "id IN (SELECT s_id FROM advisor WHERE i_id IN (SELECT id FROM instructor))",
-            "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "in_subquery",
-            "operator": "IN",
-            "left": "i_id",
-            "values": [],
-            "query": "(SELECT id FROM instructor)",
-            "sql": "i_id IN (SELECT id FROM instructor)",
             "negated": false
           }
         ],
@@ -10084,8 +10760,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -10127,6 +10816,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -10139,8 +10829,7 @@
         ],
         "distinct": false,
         "where_predicates": [
-          "WHERE s.age > (SELECT AVG(s2.age) FROM student AS s2 WHERE s2.dept = s.dept)",
-          "WHERE s2.dept = s.dept"
+          "WHERE s.age > (SELECT AVG(s2.age) FROM student AS s2 WHERE s2.dept = s.dept)"
         ],
         "joins": [],
         "group_by": [],
@@ -10169,16 +10858,6 @@
             "right_sql": "(SELECT AVG(s2.age) FROM student AS s2 WHERE s2.dept = s.dept)",
             "sql": "s.age > (SELECT AVG(s2.age) FROM student AS s2 WHERE s2.dept = s.dept)",
             "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "s2.dept",
-            "right": "s.dept",
-            "right_sql": "s.dept",
-            "sql": "s2.dept = s.dept",
-            "negated": false
           }
         ],
         "logic_trees": [
@@ -10190,16 +10869,6 @@
             "right": "(SELECT AVG(s2.age) FROM student AS s2 WHERE s2.dept = s.dept)",
             "right_sql": "(SELECT AVG(s2.age) FROM student AS s2 WHERE s2.dept = s.dept)",
             "sql": "s.age > (SELECT AVG(s2.age) FROM student AS s2 WHERE s2.dept = s.dept)",
-            "negated": false
-          },
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "=",
-            "left": "s2.dept",
-            "right": "s.dept",
-            "right_sql": "s.dept",
-            "sql": "s2.dept = s.dept",
             "negated": false
           }
         ],
@@ -10254,8 +10923,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -10293,6 +10975,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -10397,8 +11080,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -10435,6 +11131,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -10518,8 +11215,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -10566,6 +11276,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
       "note": "",
       "parse_ok": true,
@@ -10581,15 +11292,7 @@
         "joins": [],
         "group_by": [],
         "having_predicates": [],
-        "order_by": [
-          {
-            "column": "day",
-            "direction": "ASC",
-            "nulls": "FIRST",
-            "collation": null,
-            "node": "day"
-          }
-        ],
+        "order_by": [],
         "limit_offset": {},
         "subqueries": [],
         "ctes": [],
@@ -10620,14 +11323,6 @@
             "kind": "window",
             "sql": "SUM(amount) OVER (ORDER BY day RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)",
             "alias": null
-          },
-          {
-            "context": "ORDER BY",
-            "kind": "column",
-            "sql": "day",
-            "alias": null,
-            "table": "",
-            "column": "day"
           }
         ],
         "set_operation_details": [],
@@ -10667,8 +11362,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -10696,13 +11404,27 @@
       "capability_bucket": "first_class"
     },
     {
-      "id": "gap_distinct_on",
+      "id": "distinct_on",
       "category": "DISTINCT",
       "sql": "SELECT DISTINCT ON (dept) dept, name FROM student ORDER BY dept, name",
-      "checks": [],
-      "representation": "known_gap",
+      "checks": [
+        {
+          "type": "field_equals",
+          "field": "distinct",
+          "value": true
+        },
+        {
+          "type": "field_contains",
+          "field": "distinct_on",
+          "needles": [
+            "dept"
+          ]
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": "postgres",
-      "note": "PostgreSQL DISTINCT ON is outside current typed DISTINCT IR.",
+      "note": "",
       "parse_ok": true,
       "dialect": "postgres",
       "parse_error": null,
@@ -10794,20 +11516,72 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [
+          "dept"
+        ],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
-      "check_results": [],
-      "capability_bucket": "known_gap"
+      "check_results": [
+        {
+          "check": {
+            "type": "field_equals",
+            "field": "distinct",
+            "value": true
+          },
+          "passed": true,
+          "detail": "distinct expected True, got True"
+        },
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "distinct_on",
+            "needles": [
+              "dept"
+            ]
+          },
+          "passed": true,
+          "detail": "distinct_on contains expected text"
+        }
+      ],
+      "capability_bucket": "first_class"
     },
     {
-      "id": "gap_grouping_sets",
+      "id": "grouping_sets",
       "category": "GROUP BY",
-      "sql": "SELECT region, product, SUM(amount) FROM sales GROUP BY GROUPING SETS ((region), (product))",
-      "checks": [],
-      "representation": "known_gap",
+      "sql": "SELECT region, product, SUM(amount) FROM sales GROUP BY GROUPING SETS ((region), (product), ())",
+      "checks": [
+        {
+          "type": "field_count_at_least",
+          "field": "grouping_sets",
+          "value": 1
+        },
+        {
+          "type": "field_contains",
+          "field": "grouping_sets",
+          "needles": [
+            "region",
+            "product",
+            "empty"
+          ]
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
       "dialect_hint": null,
-      "note": "GROUPING SETS is not first-class typed in current GROUP BY IR.",
+      "note": "Typed by the IR; SQLite execution remains unsupported.",
       "parse_ok": true,
       "dialect": "sqlite",
       "parse_error": null,
@@ -10886,20 +11660,110 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [
+          {
+            "kind": "grouping_sets",
+            "items": [
+              {
+                "kind": "parenthesized",
+                "items": [
+                  {
+                    "kind": "expression",
+                    "sql": "region"
+                  }
+                ],
+                "sql": "(region)"
+              },
+              {
+                "kind": "parenthesized",
+                "items": [
+                  {
+                    "kind": "expression",
+                    "sql": "product"
+                  }
+                ],
+                "sql": "(product)"
+              },
+              {
+                "kind": "grouping_set",
+                "items": [],
+                "empty": true,
+                "sql": "()"
+              }
+            ],
+            "sql": "GROUPING SETS ((region), (product), ())"
+          }
+        ],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
-      "check_results": [],
-      "capability_bucket": "known_gap"
+      "check_results": [
+        {
+          "check": {
+            "type": "field_count_at_least",
+            "field": "grouping_sets",
+            "value": 1
+          },
+          "passed": true,
+          "detail": "grouping_sets count 1 >= 1"
+        },
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "grouping_sets",
+            "needles": [
+              "region",
+              "product",
+              "empty"
+            ]
+          },
+          "passed": true,
+          "detail": "grouping_sets contains expected text"
+        }
+      ],
+      "capability_bucket": "first_class"
     },
     {
-      "id": "gap_aggregate_filter",
+      "id": "aggregate_filter",
       "category": "Aggregate",
       "sql": "SELECT COUNT(*) FILTER (WHERE score > 0) FROM exam",
-      "checks": [],
-      "representation": "known_gap",
+      "checks": [
+        {
+          "type": "field_contains",
+          "field": "aggregate_functions",
+          "needles": [
+            "filter_predicate",
+            "score > 0"
+          ]
+        },
+        {
+          "type": "predicate_contexts_include",
+          "values": [
+            "AGGREGATE FILTER"
+          ]
+        },
+        {
+          "type": "field_equals",
+          "field": "where_predicates",
+          "value": []
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
-      "note": "Aggregate FILTER predicate is not first-class typed in current aggregate IR.",
+      "note": "",
       "parse_ok": true,
       "dialect": "sqlite",
       "parse_error": null,
@@ -10909,9 +11773,7 @@
           "COUNT(*) FILTER(WHERE score > 0)"
         ],
         "distinct": false,
-        "where_predicates": [
-          "WHERE score > 0"
-        ],
+        "where_predicates": [],
         "joins": [],
         "group_by": [],
         "having_predicates": [],
@@ -10924,7 +11786,7 @@
         "window_functions": [],
         "predicate_ir": [
           {
-            "context": "WHERE",
+            "context": "AGGREGATE FILTER",
             "kind": "comparison",
             "operator": ">",
             "left": "score",
@@ -10936,7 +11798,7 @@
         ],
         "logic_trees": [
           {
-            "context": "WHERE",
+            "context": "AGGREGATE FILTER",
             "kind": "comparison",
             "operator": ">",
             "left": "score",
@@ -10954,7 +11816,8 @@
             "args": [
               "*"
             ],
-            "sql": "COUNT(*)"
+            "sql": "COUNT(*)",
+            "filter_predicate": "score > 0"
           }
         ],
         "expression_ir": [
@@ -10983,22 +11846,78 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
-      "check_results": [],
-      "capability_bucket": "known_gap"
+      "check_results": [
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "aggregate_functions",
+            "needles": [
+              "filter_predicate",
+              "score > 0"
+            ]
+          },
+          "passed": true,
+          "detail": "aggregate_functions contains expected text"
+        },
+        {
+          "check": {
+            "type": "predicate_contexts_include",
+            "values": [
+              "AGGREGATE FILTER"
+            ]
+          },
+          "passed": true,
+          "detail": "predicate contexts missing [], actual ['AGGREGATE FILTER']"
+        },
+        {
+          "check": {
+            "type": "field_equals",
+            "field": "where_predicates",
+            "value": []
+          },
+          "passed": true,
+          "detail": "where_predicates expected [], got []"
+        }
+      ],
+      "capability_bucket": "first_class"
     },
     {
-      "id": "gap_recursive_search_cycle",
+      "id": "recursive_search",
       "category": "Recursive CTE",
       "sql": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SEARCH DEPTH FIRST BY n SET ord SELECT n FROM t",
-      "checks": [],
-      "representation": "known_gap",
-      "dialect_hint": null,
-      "note": "Recursive SEARCH/CYCLE clauses are outside current typed recursive CTE IR.",
+      "checks": [
+        {
+          "type": "field_contains",
+          "field": "recursive_decorations",
+          "needles": [
+            "DEPTH",
+            "n",
+            "ord"
+          ]
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": null,
+      "dialect_hint": "postgres",
+      "note": "",
       "parse_ok": true,
-      "dialect": "sqlite",
+      "dialect": "postgres",
       "parse_error": null,
       "ir_build_ok": true,
       "ir": {
@@ -11006,9 +11925,7 @@
           "n"
         ],
         "distinct": false,
-        "where_predicates": [
-          "WHERE n < 3"
-        ],
+        "where_predicates": [],
         "joins": [],
         "group_by": [],
         "having_predicates": [],
@@ -11028,30 +11945,8 @@
         ],
         "case_branches": [],
         "window_functions": [],
-        "predicate_ir": [
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "<",
-            "left": "n",
-            "right": 3,
-            "right_sql": "3",
-            "sql": "n < 3",
-            "negated": false
-          }
-        ],
-        "logic_trees": [
-          {
-            "context": "WHERE",
-            "kind": "comparison",
-            "operator": "<",
-            "left": "n",
-            "right": 3,
-            "right_sql": "3",
-            "sql": "n < 3",
-            "negated": false
-          }
-        ],
+        "predicate_ir": [],
+        "logic_trees": [],
         "aggregate_functions": [],
         "expression_ir": [
           {
@@ -11102,22 +11997,215 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [
+          {
+            "kind": "DEPTH",
+            "by": "n",
+            "set": "ord",
+            "using": null,
+            "sql": "SEARCH DEPTH FIRST BY n SET ord"
+          }
+        ],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
-      "check_results": [],
-      "capability_bucket": "known_gap"
+      "check_results": [
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "recursive_decorations",
+            "needles": [
+              "DEPTH",
+              "n",
+              "ord"
+            ]
+          },
+          "passed": true,
+          "detail": "recursive_decorations contains expected text"
+        }
+      ],
+      "capability_bucket": "first_class"
+    },
+    {
+      "id": "recursive_cycle",
+      "category": "Recursive CTE",
+      "sql": "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) CYCLE n SET is_cycle USING path SELECT n FROM t",
+      "checks": [
+        {
+          "type": "field_contains",
+          "field": "recursive_decorations",
+          "needles": [
+            "CYCLE",
+            "n",
+            "is_cycle",
+            "path"
+          ]
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": null,
+      "dialect_hint": "postgres",
+      "note": "",
+      "parse_ok": true,
+      "dialect": "postgres",
+      "parse_error": null,
+      "ir_build_ok": true,
+      "ir": {
+        "projection": [
+          "n"
+        ],
+        "distinct": false,
+        "where_predicates": [],
+        "joins": [],
+        "group_by": [],
+        "having_predicates": [],
+        "order_by": [],
+        "limit_offset": {},
+        "subqueries": [],
+        "ctes": [
+          {
+            "name": "t",
+            "recursive": true,
+            "node": "t AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3)",
+            "sql": "t AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3)"
+          }
+        ],
+        "set_operations": [
+          "UNION"
+        ],
+        "case_branches": [],
+        "window_functions": [],
+        "predicate_ir": [],
+        "logic_trees": [],
+        "aggregate_functions": [],
+        "expression_ir": [
+          {
+            "context": "SELECT",
+            "kind": "column",
+            "sql": "n",
+            "alias": null,
+            "table": "",
+            "column": "n"
+          }
+        ],
+        "set_operation_details": [
+          {
+            "operator": "UNION",
+            "distinct": false,
+            "all": true,
+            "left_sql": "SELECT 1",
+            "right_sql": "SELECT n + 1 FROM t WHERE n < 3",
+            "sql": "SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3"
+          }
+        ],
+        "window_function_details": [],
+        "table_references": [
+          {
+            "name": "t",
+            "alias": "t",
+            "sql": "t"
+          },
+          {
+            "name": "t",
+            "alias": "t",
+            "sql": "t"
+          }
+        ],
+        "from_sources": [
+          {
+            "kind": "table",
+            "sql": "t",
+            "tables": [
+              "t"
+            ]
+          },
+          {
+            "kind": "table",
+            "sql": "t",
+            "tables": [
+              "t"
+            ]
+          }
+        ],
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [
+          {
+            "kind": "CYCLE",
+            "by": "n",
+            "set": "is_cycle",
+            "using": "path",
+            "sql": "CYCLE n SET is_cycle USING path"
+          }
+        ],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
+      },
+      "checks_configured": true,
+      "checks_passed": true,
+      "check_results": [
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "recursive_decorations",
+            "needles": [
+              "CYCLE",
+              "n",
+              "is_cycle",
+              "path"
+            ]
+          },
+          "passed": true,
+          "detail": "recursive_decorations contains expected text"
+        }
+      ],
+      "capability_bucket": "first_class"
     },
     {
       "id": "boundary_lateral",
       "category": "Dialect Boundary",
       "sql": "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL (SELECT s.id + 1 AS value) x",
-      "checks": [],
-      "representation": "known_boundary",
-      "dialect_hint": null,
-      "note": "Known execution/transpilation boundary.",
+      "checks": [
+        {
+          "type": "field_count_at_least",
+          "field": "lateral_sources",
+          "value": 1
+        },
+        {
+          "type": "field_contains",
+          "field": "lateral_sources",
+          "needles": [
+            "x",
+            "LATERAL"
+          ]
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
+      "dialect_hint": "postgres",
+      "note": "Typed by the IR; native execution remains dialect-scoped.",
       "parse_ok": true,
-      "dialect": "sqlite",
+      "dialect": "postgres",
       "parse_error": null,
       "ir_build_ok": true,
       "ir": {
@@ -11190,20 +12278,82 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [
+          {
+            "alias": "x",
+            "outer": false,
+            "source_sql": "(SELECT s.id + 1 AS value)",
+            "sql": "LATERAL (SELECT s.id + 1 AS value) AS x"
+          }
+        ],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
-      "check_results": [],
-      "capability_bucket": "known_boundary"
+      "check_results": [
+        {
+          "check": {
+            "type": "field_count_at_least",
+            "field": "lateral_sources",
+            "value": 1
+          },
+          "passed": true,
+          "detail": "lateral_sources count 1 >= 1"
+        },
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "lateral_sources",
+            "needles": [
+              "x",
+              "LATERAL"
+            ]
+          },
+          "passed": true,
+          "detail": "lateral_sources contains expected text"
+        }
+      ],
+      "capability_bucket": "first_class"
     },
     {
-      "id": "boundary_qualify",
-      "category": "Dialect Boundary",
+      "id": "qualify",
+      "category": "Window",
       "sql": "SELECT name, ROW_NUMBER() OVER (ORDER BY score DESC) AS rn FROM exam QUALIFY rn = 1",
-      "checks": [],
-      "representation": "known_boundary",
+      "checks": [
+        {
+          "type": "field_contains",
+          "field": "qualify_predicates",
+          "needles": [
+            "rn = 1"
+          ]
+        },
+        {
+          "type": "predicate_contexts_include",
+          "values": [
+            "QUALIFY"
+          ]
+        },
+        {
+          "type": "field_equals",
+          "field": "order_by",
+          "value": []
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": null,
       "dialect_hint": null,
-      "note": "QUALIFY is treated as a dialect boundary for Phase 1.",
+      "note": "",
       "parse_ok": true,
       "dialect": "sqlite",
       "parse_error": null,
@@ -11218,15 +12368,7 @@
         "joins": [],
         "group_by": [],
         "having_predicates": [],
-        "order_by": [
-          {
-            "column": "score",
-            "direction": "DESC",
-            "nulls": "LAST",
-            "collation": null,
-            "node": "score DESC"
-          }
-        ],
+        "order_by": [],
         "limit_offset": {},
         "subqueries": [],
         "ctes": [],
@@ -11238,8 +12380,30 @@
             "sql": "ROW_NUMBER() OVER (ORDER BY score DESC)"
           }
         ],
-        "predicate_ir": [],
-        "logic_trees": [],
+        "predicate_ir": [
+          {
+            "context": "QUALIFY",
+            "kind": "comparison",
+            "operator": "=",
+            "left": "rn",
+            "right": 1,
+            "right_sql": "1",
+            "sql": "rn = 1",
+            "negated": false
+          }
+        ],
+        "logic_trees": [
+          {
+            "context": "QUALIFY",
+            "kind": "comparison",
+            "operator": "=",
+            "left": "rn",
+            "right": 1,
+            "right_sql": "1",
+            "sql": "rn = 1",
+            "negated": false
+          }
+        ],
         "aggregate_functions": [],
         "expression_ir": [
           {
@@ -11255,14 +12419,6 @@
             "kind": "window",
             "sql": "ROW_NUMBER() OVER (ORDER BY score DESC) AS rn",
             "alias": "rn"
-          },
-          {
-            "context": "ORDER BY",
-            "kind": "column",
-            "sql": "score",
-            "alias": null,
-            "table": "",
-            "column": "score"
           }
         ],
         "set_operation_details": [],
@@ -11302,20 +12458,80 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [
+          "QUALIFY rn = 1"
+        ],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
-      "check_results": [],
-      "capability_bucket": "known_boundary"
+      "check_results": [
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "qualify_predicates",
+            "needles": [
+              "rn = 1"
+            ]
+          },
+          "passed": true,
+          "detail": "qualify_predicates contains expected text"
+        },
+        {
+          "check": {
+            "type": "predicate_contexts_include",
+            "values": [
+              "QUALIFY"
+            ]
+          },
+          "passed": true,
+          "detail": "predicate contexts missing [], actual ['QUALIFY']"
+        },
+        {
+          "check": {
+            "type": "field_equals",
+            "field": "order_by",
+            "value": []
+          },
+          "passed": true,
+          "detail": "order_by expected [], got []"
+        }
+      ],
+      "capability_bucket": "first_class"
     },
     {
       "id": "boundary_rollup",
       "category": "Dialect Boundary",
       "sql": "SELECT region, SUM(amount) FROM sales GROUP BY ROLLUP(region)",
-      "checks": [],
-      "representation": "known_boundary",
+      "checks": [
+        {
+          "type": "field_count_at_least",
+          "field": "rollup",
+          "value": 1
+        },
+        {
+          "type": "field_contains",
+          "field": "rollup",
+          "needles": [
+            "region"
+          ]
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
       "dialect_hint": null,
-      "note": "Known execution/transpilation boundary.",
+      "note": "Typed by the IR; SQLite execution remains unsupported.",
       "parse_ok": true,
       "dialect": "sqlite",
       "parse_error": null,
@@ -11385,20 +12601,80 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [
+          {
+            "kind": "rollup",
+            "items": [
+              {
+                "kind": "expression",
+                "sql": "region"
+              }
+            ],
+            "sql": "ROLLUP (region)"
+          }
+        ],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
-      "check_results": [],
-      "capability_bucket": "known_boundary"
+      "check_results": [
+        {
+          "check": {
+            "type": "field_count_at_least",
+            "field": "rollup",
+            "value": 1
+          },
+          "passed": true,
+          "detail": "rollup count 1 >= 1"
+        },
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "rollup",
+            "needles": [
+              "region"
+            ]
+          },
+          "passed": true,
+          "detail": "rollup contains expected text"
+        }
+      ],
+      "capability_bucket": "first_class"
     },
     {
       "id": "boundary_cube",
       "category": "Dialect Boundary",
       "sql": "SELECT region, product, SUM(amount) FROM sales GROUP BY CUBE(region, product)",
-      "checks": [],
-      "representation": "known_boundary",
+      "checks": [
+        {
+          "type": "field_count_at_least",
+          "field": "cube",
+          "value": 1
+        },
+        {
+          "type": "field_contains",
+          "field": "cube",
+          "needles": [
+            "region",
+            "product"
+          ]
+        }
+      ],
+      "representation": "first_class",
+      "execution_boundary": "sqlite",
       "dialect_hint": null,
-      "note": "Known execution/transpilation boundary.",
+      "note": "Typed by the IR; SQLite execution remains unsupported.",
       "parse_ok": true,
       "dialect": "sqlite",
       "parse_error": null,
@@ -11477,11 +12753,61 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [
+          {
+            "kind": "cube",
+            "items": [
+              {
+                "kind": "expression",
+                "sql": "region"
+              },
+              {
+                "kind": "expression",
+                "sql": "product"
+              }
+            ],
+            "sql": "CUBE (region, product)"
+          }
+        ],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
-      "check_results": [],
-      "capability_bucket": "known_boundary"
+      "check_results": [
+        {
+          "check": {
+            "type": "field_count_at_least",
+            "field": "cube",
+            "value": 1
+          },
+          "passed": true,
+          "detail": "cube count 1 >= 1"
+        },
+        {
+          "check": {
+            "type": "field_contains",
+            "field": "cube",
+            "needles": [
+              "region",
+              "product"
+            ]
+          },
+          "passed": true,
+          "detail": "cube contains expected text"
+        }
+      ],
+      "capability_bucket": "first_class"
     },
     {
       "id": "set_operation_intersect_all",
@@ -11501,6 +12827,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": "sqlite",
       "dialect_hint": null,
       "note": "IR supports the ALL flag; execution support is evaluated in the sandbox stage.",
       "parse_ok": true,
@@ -11577,8 +12904,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
@@ -11621,6 +12961,7 @@
         }
       ],
       "representation": "first_class",
+      "execution_boundary": "sqlite",
       "dialect_hint": null,
       "note": "IR supports the ALL flag; execution support is evaluated in the sandbox stage.",
       "parse_ok": true,
@@ -11697,8 +13038,21 @@
             ]
           }
         ],
-        "named_windows": []
+        "named_windows": [],
+        "distinct_on": [],
+        "qualify_predicates": [],
+        "grouping_sets": [],
+        "rollup": [],
+        "cube": [],
+        "recursive_decorations": [],
+        "lateral_sources": [],
+        "limit_options": {},
+        "hierarchical_queries": [],
+        "pivot_details": [],
+        "table_samples": [],
+        "table_only": []
       },
+      "checks_configured": true,
       "checks_passed": true,
       "check_results": [
         {
