@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends, Query,HTTPException,status 
+from fastapi import APIRouter, Depends, Query,HTTPException,status,Request
 from pydantic import EmailStr
 from typing import Annotated
 from dependencies import get_mail, get_session
 from fastapi_mail import FastMail, MessageSchema, MessageType
 from sqlalchemy.ext.asyncio import AsyncSession
-import string
-import random
+import secrets
 from repository.user_repo import EmailCodeRepository, UserRepository
 from schemas import ResponseOut
 from schemas.user import (
@@ -43,20 +42,27 @@ def resolve_registration_role(invite_code: str | None) -> tuple[str | None, str 
 @router.get("/code", response_model=ResponseOut)
 async def get_email_captcha(
     email: Annotated[EmailStr, Query(description="收件人邮箱")],
+    request: Request,
     mail: FastMail = Depends(get_mail),
     session: AsyncSession = Depends(get_session)
 ):
-    # 1. 生成验证码
-    code = "".join(random.sample(string.digits * 6, 6))
-    
+    client_ip = request.client.host if request.client else "unknown"
     email_repo = EmailCodeRepository(session)
-    
-    # 2. 先存库
+    allowed, retry_after, _limit_reason = await email_repo.send_limit_status(str(email), client_ip)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="验证码请求过于频繁，请稍后再试",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
     try:
-        await email_repo.add_email_captcha(email, code)
-        await session.commit() # 确保验证码入库
+        captcha = await email_repo.add_email_captcha(str(email), code, client_ip)
+        await session.commit()
     except Exception as e:
         print(f"验证码入库失败: {e}")
+        await session.rollback()
         return ResponseOut(result="failure", detail="系统错误")
 
     # 3. 发送邮件
@@ -77,7 +83,7 @@ async def get_email_captcha(
         else:
             print(f"邮件发送失败: {error_str}")
             # 发送失败，回滚数据库（删除刚才存的码）
-            await email_repo.delete_captcha_record(email, code)
+            await email_repo.delete_captcha_by_id(captcha.id)
             await session.commit()
             return ResponseOut(result="failure", detail="邮件发送失败")
 
@@ -95,18 +101,28 @@ async def register_user(
 
     email_repo = EmailCodeRepository(session)
     user_repo = UserRepository(session)
-    
-    # 1. 校验验证码
-    if not await email_repo.check_email_captcha(data.email, data.captcha):
-        return ResponseOut(result="failure", detail="验证码无效或已过期")
-    
-    # 2. 校验密码
-    if data.password != data.confirm_password:
-        return ResponseOut(result="failure", detail="两次密码不一致")
-    
-    # 3. 校验邮箱是否已存在
+
+    # 1. Reject duplicate accounts before consuming a valid captcha.
     if await user_repo.email_is_exist(data.email):
         return ResponseOut(result="failure", detail="该邮箱已被注册")
+
+    # 2. 校验密码格式后再消费验证码，避免用户输入错误白白消耗验证码。
+    if data.password != data.confirm_password:
+        return ResponseOut(result="failure", detail="两次密码不一致")
+
+    # 3. 校验验证码；失败次数/封禁状态必须提交，不能随请求回滚。
+    verification = await email_repo.verify_email_captcha(data.email, data.captcha)
+    if verification != "ok":
+        await session.commit()
+        detail = {
+            "attempts_exceeded": "验证码错误次数过多，请重新获取验证码",
+            "expired": "验证码无效或已过期",
+        }.get(verification, "验证码无效或已过期")
+        return ResponseOut(result="failure", detail=detail)
+
+    # Commit consumption independently so a later registration error cannot
+    # roll the one-time-use marker back.
+    await session.commit()
     
     try:
         # 4. 执行注册逻辑。角色已在进入数据库操作前由服务端配置决定。
@@ -118,9 +134,6 @@ async def register_user(
             role=role,
         )
         await user_repo.create_user(user_schema)
-        
-        # 标记验证码已使用
-        await email_repo.mark_captcha_used(data.email, data.captcha)
         
         # 提交事务（这一步最重要，没有它数据库里是空的）
         await session.commit()

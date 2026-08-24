@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     ENABLE_MAIL_TEST: bool = False
     # Optional teacher registration secret. Empty means teacher invite registration is disabled.
     TEACHER_INVITE_CODE: str = ""
+    # Email captcha abuse controls. Values are deliberately conservative defaults.
+    CAPTCHA_EXPIRE_MINUTES: int = 10
+    CAPTCHA_SEND_INTERVAL_SECONDS: int = 60
+    CAPTCHA_DAILY_EMAIL_LIMIT: int = 5
+    CAPTCHA_DAILY_IP_LIMIT: int = 20
+    CAPTCHA_MAX_VERIFY_ATTEMPTS: int = 5
 
     #7.配置JWT密钥和时间 (Settings) - 必须通过 .env 设置，勿写死在代码中
     JWT_SECRET_KEY: str = ""  # 请在 .env 中设置，例如：openssl rand -hex 32 

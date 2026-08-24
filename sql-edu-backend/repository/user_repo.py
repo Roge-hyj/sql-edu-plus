@@ -1,7 +1,10 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.auth import EmailCaptcha
-from sqlalchemy import select,delete,exists,update,desc
-from datetime import datetime,timedelta
+from sqlalchemy import select,delete,exists,update,desc,func
+from datetime import datetime,timedelta,time
+import hmac
+
+from settings.config import settings
 
 from models.user import User
 from schemas.user import UserCreateSchema
@@ -58,11 +61,10 @@ class UserRepository:
         :return: 如果删除成功返回 True，否则返回 False
         """
         from models.submission import Submission
-        
+
         user = await self.get_by_id(user_id)
         if not user:
             return False
-        
         # 手动删除关联的提交记录（确保级联删除生效）
         # 即使数据库有 CASCADE 约束，手动删除更可靠
         await self.session.execute(
@@ -79,25 +81,111 @@ class EmailCodeRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
     
-    async def add_email_captcha(self, email: str, captcha: str)->EmailCaptcha:
-            await self.session.execute(delete(EmailCaptcha).where(EmailCaptcha.email == email))
-            email_captcha = EmailCaptcha(email=email, captcha=captcha)
-            self.session.add(email_captcha)
-            await self.session.flush() # 预写入，但不锁死事务
-            return email_captcha
+    @staticmethod
+    def _email_key(email: str) -> str:
+        return str(email).strip().lower()
+
+    @staticmethod
+    def _day_start(now: datetime) -> datetime:
+        return datetime.combine(now.date(), time.min)
+
+    async def send_limit_status(
+        self, email: str, ip_address: str, *, now: datetime | None = None
+    ) -> tuple[bool, int, str | None]:
+        """Return ``(allowed, retry_after, reason)`` for a new captcha send."""
+        now = now or datetime.utcnow()
+        email_key = self._email_key(email)
+        latest = await self.session.scalar(
+            select(EmailCaptcha)
+            .where(EmailCaptcha.email == email_key)
+            .order_by(EmailCaptcha.created_at.desc(), EmailCaptcha.id.desc())
+            .limit(1)
+        )
+        interval = timedelta(seconds=settings.CAPTCHA_SEND_INTERVAL_SECONDS)
+        if latest is not None and now - latest.created_at < interval:
+            retry_after = max(1, int((interval - (now - latest.created_at)).total_seconds() + 0.999))
+            return False, retry_after, "email_interval"
+
+        day_start = self._day_start(now)
+        email_count = await self.session.scalar(
+            select(func.count(EmailCaptcha.id)).where(
+                EmailCaptcha.email == email_key,
+                EmailCaptcha.created_at >= day_start,
+            )
+        )
+        if int(email_count or 0) >= settings.CAPTCHA_DAILY_EMAIL_LIMIT:
+            return False, 86400, "email_daily_limit"
+
+        ip_count = await self.session.scalar(
+            select(func.count(EmailCaptcha.id)).where(
+                EmailCaptcha.ip_address == ip_address,
+                EmailCaptcha.created_at >= day_start,
+            )
+        )
+        if int(ip_count or 0) >= settings.CAPTCHA_DAILY_IP_LIMIT:
+            return False, 86400, "ip_daily_limit"
+        return True, 0, None
+
+    async def add_email_captcha(
+        self,
+        email: str,
+        captcha: str,
+        ip_address: str,
+        *,
+        now: datetime | None = None,
+    ) -> EmailCaptcha:
+        """Persist a new captcha without deleting history used for rate limits."""
+        email_captcha = EmailCaptcha(
+            email=self._email_key(email),
+            captcha=captcha,
+            ip_address=ip_address,
+            created_at=now or datetime.utcnow(),
+        )
+        self.session.add(email_captcha)
+        await self.session.flush()
+        return email_captcha
+
+    async def verify_email_captcha(
+        self, email: str, captcha: str, *, now: datetime | None = None
+    ) -> str:
+        """Validate and consume the latest captcha.
+
+        Returns ``ok``, ``invalid``, ``expired`` or ``attempts_exceeded``. The
+        successful path marks the row used before returning, so callers cannot
+        accidentally validate the same code twice.
+        """
+        now = now or datetime.utcnow()
+        email_captcha: EmailCaptcha | None = await self.session.scalar(
+            select(EmailCaptcha)
+            .where(EmailCaptcha.email == self._email_key(email))
+            .order_by(EmailCaptcha.created_at.desc(), EmailCaptcha.id.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if email_captcha is None or email_captcha.used:
+            return "invalid"
+        if now - email_captcha.created_at > timedelta(minutes=settings.CAPTCHA_EXPIRE_MINUTES):
+            return "expired"
+        if email_captcha.failed_attempts >= settings.CAPTCHA_MAX_VERIFY_ATTEMPTS:
+            return "attempts_exceeded"
+        if not hmac.compare_digest(email_captcha.captcha, captcha.strip()):
+            email_captcha.failed_attempts += 1
+            if email_captcha.failed_attempts >= settings.CAPTCHA_MAX_VERIFY_ATTEMPTS:
+                email_captcha.used = True
+                email_captcha.used_at = now
+                await self.session.flush()
+                return "attempts_exceeded"
+            await self.session.flush()
+            return "invalid"
+
+        email_captcha.used = True
+        email_captcha.used_at = now
+        await self.session.flush()
+        return "ok"
 
     async def check_email_captcha(self, email: str, captcha: str) -> bool:
-            stmt =select(EmailCaptcha).where(EmailCaptcha.email == email, 
-                                             EmailCaptcha.captcha == captcha.strip(), 
-                                             EmailCaptcha.used == False
-                                             ).order_by(desc(EmailCaptcha.created_at)).limit(1)
-
-            email_captcha:EmailCaptcha|None= await self.session.scalar(stmt)
-            if email_captcha is None:
-                return False
-            if(datetime.utcnow() - email_captcha.created_at)>timedelta(minutes=10):
-                return False
-            return True
+        """Compatibility wrapper for callers that only need a boolean result."""
+        return (await self.verify_email_captcha(email, captcha)) == "ok"
     
     
     async def mark_captcha_used(self, email: str, captcha: str):
@@ -113,4 +201,6 @@ class EmailCodeRepository:
             )
         await self.session.execute(stmt)   
 
-        
+    async def delete_captcha_by_id(self, captcha_id: int) -> None:
+        """Delete exactly one unsent captcha during SMTP compensation."""
+        await self.session.execute(delete(EmailCaptcha).where(EmailCaptcha.id == captcha_id))

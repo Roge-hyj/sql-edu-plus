@@ -12,9 +12,13 @@ class EmailCaptcha(Base):
     __tablename__ = "email_captchas"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True,autoincrement=True)
-    email: Mapped[str] = mapped_column(String(100), index=True, nullable=False,unique=True)
+    # Historical rows are retained for rate-limit accounting; this must not be unique.
+    email: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
     captcha: Mapped[str] = mapped_column(String(10), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )
