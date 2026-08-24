@@ -21,6 +21,11 @@ def test_database_echo_is_opt_in_and_current_engine_uses_configured_value() -> N
     assert engine.echo is settings.DB_ECHO
 
 
+def test_mail_test_endpoint_is_disabled_by_default() -> None:
+    assert Settings.model_fields["ENABLE_MAIL_TEST"].default is False
+    assert not any(route.path == "/mail/test" for route in app.routes)
+
+
 def test_cors_uses_explicit_origins_and_restricted_request_surface() -> None:
     options = _cors_options()
     origins = options["allow_origins"]

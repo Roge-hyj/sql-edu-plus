@@ -21,7 +21,6 @@ app = FastAPI(title="SQL 智能教学系统后端")
 
 app.include_router(auth_router)
 
-@app.get("/mail/test")
 async def mail_test(
     email: str,
     mail:FastMail=Depends(get_mail)
@@ -38,6 +37,10 @@ async def mail_test(
     except SMTPException as e:
         return {"message":"邮件发送失败","error":str(e)}
     return {"message":"邮件发送成功"}
+
+
+if settings.ENABLE_MAIL_TEST:
+    app.add_api_route("/mail/test", mail_test, methods=["GET"])
 
 
 
