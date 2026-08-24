@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List
+from typing import List, Literal
 from pydantic_settings import BaseSettings,SettingsConfigDict
 from datetime import timedelta
 
@@ -14,8 +14,11 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # --- 2. 数据库连接 ---
-    # 你的数据库连接字符串
+    # 业务持久化层固定使用 MySQL 8.4；判题层的 PARSEVAL_* 才是多方言连接。
     DB_URL: str
+    BUSINESS_DB_DIALECT: Literal["mysql"] = "mysql"
+    BUSINESS_DB_VERSION: str = "8.4"
+    BUSINESS_DB_CHARSET: str = "utf8mb4"
     # SQLAlchemy SQL/parameter logging is opt-in and must stay disabled in production.
     DB_ECHO: bool = False
 
@@ -101,6 +104,23 @@ from sys import exit as _exit
 # 实例化对象并做关键配置校验
 settings = Settings()
 
+def validate_business_db_url(db_url: str, *, debug: bool) -> None:
+    """Enforce the single business-database contract.
+
+    SQLite remains available for unit tests; every deployed environment must
+    use the async MySQL driver.
+    """
+    if debug and db_url.startswith("sqlite"):
+        return
+    if not db_url.startswith("mysql+aiomysql://"):
+        raise RuntimeError(
+            "业务数据库配置不受支持：生产/预发布必须使用 "
+            "mysql+aiomysql:// 连接 MySQL 8.4；SQLite 仅允许 DEBUG 本地测试。"
+        )
+
+
+validate_business_db_url(settings.DB_URL, debug=settings.DEBUG)
+
 # 启动时强制校验安全关键配置，避免使用空密钥
 missing_secrets: list[str] = []
 if not settings.SECRET_KEY:
@@ -121,4 +141,4 @@ def get_settings() -> Settings:
     return Settings()
 
 
-__all__ = ["Settings", "get_settings"]
+__all__ = ["Settings", "get_settings", "validate_business_db_url"]

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from main import app
 from models import engine
 from routers.auth import resolve_registration_role
-from settings.config import Settings, settings
+from settings.config import Settings, settings, validate_business_db_url
 
 
 def _cors_options() -> dict[str, object]:
@@ -21,6 +21,29 @@ def _cors_options() -> dict[str, object]:
 def test_database_echo_is_opt_in_and_current_engine_uses_configured_value() -> None:
     assert Settings.model_fields["DB_ECHO"].default is False
     assert engine.echo is settings.DB_ECHO
+
+
+def test_business_database_contract_is_single_mysql_runtime() -> None:
+    assert Settings.model_fields["BUSINESS_DB_DIALECT"].default == "mysql"
+    assert Settings.model_fields["BUSINESS_DB_VERSION"].default == "8.4"
+    assert Settings.model_fields["BUSINESS_DB_CHARSET"].default == "utf8mb4"
+
+
+@pytest.mark.parametrize(
+    ("db_url", "debug", "valid"),
+    [
+        ("mysql+aiomysql://user:pass@db/sql_edu", False, True),
+        ("sqlite+aiosqlite:///:memory:", True, True),
+        ("sqlite+aiosqlite:///:memory:", False, False),
+        ("postgresql+asyncpg://user:pass@db/sql_edu", False, False),
+    ],
+)
+def test_business_database_url_validation(db_url: str, debug: bool, valid: bool) -> None:
+    if valid:
+        validate_business_db_url(db_url, debug=debug)
+    else:
+        with pytest.raises(RuntimeError, match="业务数据库配置不受支持"):
+            validate_business_db_url(db_url, debug=debug)
 
 
 def test_mail_test_endpoint_is_disabled_by_default() -> None:
