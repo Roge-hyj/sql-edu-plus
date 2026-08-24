@@ -1,8 +1,8 @@
-# 业务数据库发布流程（MySQL 8.4）
+# 业务数据库发布流程（MySQL 8.0.46）
 
 ## 范围
 
-业务持久化数据库固定为 **MySQL 8.4**，使用 `mysql+aiomysql` 连接。它保存用户、题目、提交、学习状态、聊天和教学审计数据。
+业务持久化数据库固定为 **MySQL 8.0.46**，使用 `mysql+aiomysql` 连接。它保存用户、题目、提交、学习状态、聊天和教学审计数据。
 
 判题层仍可连接 MySQL、PostgreSQL、SQL Server 和 Oracle 等多种方言执行器。判题执行器的 schema、临时数据库和账号不属于业务数据库 Alembic 迁移。
 
@@ -13,7 +13,7 @@ SQLite 只允许用于本地测试，不得承载预发布或生产数据。
 ```env
 DB_URL=mysql+aiomysql://user:password@host:3306/sql_edu?charset=utf8mb4
 BUSINESS_DB_DIALECT=mysql
-BUSINESS_DB_VERSION=8.4
+BUSINESS_DB_VERSION=8.0.46
 BUSINESS_DB_CHARSET=utf8mb4
 DB_ECHO=false
 ```
@@ -28,7 +28,7 @@ SHOW VARIABLES LIKE 'collation_server';
 
 ## 迁移门禁
 
-在临时 MySQL 8.4 数据库执行，不连接生产库：
+在临时 MySQL 8.0.46 数据库执行，不连接生产库：
 
 ```bash
 alembic heads
@@ -67,4 +67,4 @@ alembic current
 - 备份文件标识及恢复验证结果；
 - 迁移失败时采用的恢复或前向修复方案。
 
-最近一次演练记录见 `docs/33-业务数据库迁移演练记录-2026-08-24.md`。该演练使用 MySQL 8.0.46，仅作为兼容性证据，不能替代 MySQL 8.4 验收。
+最近一次演练记录见 `docs/33-业务数据库迁移演练记录-2026-08-24.md`，已作为 MySQL 8.0.46 业务数据库验收依据。判题层 Docker 的 MySQL 8.4 不属于本迁移流程。

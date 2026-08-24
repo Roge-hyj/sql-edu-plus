@@ -14,10 +14,10 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # --- 2. 数据库连接 ---
-    # 业务持久化层固定使用 MySQL 8.4；判题层的 PARSEVAL_* 才是多方言连接。
+    # 业务持久化层固定使用 MySQL 8.0.46；判题层的 PARSEVAL_* 才是多方言连接。
     DB_URL: str
     BUSINESS_DB_DIALECT: Literal["mysql"] = "mysql"
-    BUSINESS_DB_VERSION: str = "8.4"
+    BUSINESS_DB_VERSION: str = "8.0.46"
     BUSINESS_DB_CHARSET: str = "utf8mb4"
     # SQLAlchemy SQL/parameter logging is opt-in and must stay disabled in production.
     DB_ECHO: bool = False
@@ -115,7 +115,7 @@ def validate_business_db_url(db_url: str, *, debug: bool) -> None:
     if not db_url.startswith("mysql+aiomysql://"):
         raise RuntimeError(
             "业务数据库配置不受支持：生产/预发布必须使用 "
-            "mysql+aiomysql:// 连接 MySQL 8.4；SQLite 仅允许 DEBUG 本地测试。"
+            "mysql+aiomysql:// 连接 MySQL 8.0.46；SQLite 仅允许 DEBUG 本地测试。"
         )
 
 

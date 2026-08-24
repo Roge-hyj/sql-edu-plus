@@ -25,7 +25,7 @@ def test_database_echo_is_opt_in_and_current_engine_uses_configured_value() -> N
 
 def test_business_database_contract_is_single_mysql_runtime() -> None:
     assert Settings.model_fields["BUSINESS_DB_DIALECT"].default == "mysql"
-    assert Settings.model_fields["BUSINESS_DB_VERSION"].default == "8.4"
+    assert Settings.model_fields["BUSINESS_DB_VERSION"].default == "8.0.46"
     assert Settings.model_fields["BUSINESS_DB_CHARSET"].default == "utf8mb4"
 
 
