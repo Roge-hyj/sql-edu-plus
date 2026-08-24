@@ -50,7 +50,7 @@ alembic upgrade head
 ## 备份恢复门禁
 
 ```bash
-mysqldump --single-transaction --routines --events sql_edu > sql_edu.sql
+mysqldump --single-transaction --routines --events --no-tablespaces sql_edu > sql_edu.sql
 mysql sql_edu_restore < sql_edu.sql
 alembic current
 ```
@@ -66,3 +66,5 @@ alembic current
 - `alembic heads` 和升级前后的 `alembic current`；
 - 备份文件标识及恢复验证结果；
 - 迁移失败时采用的恢复或前向修复方案。
+
+最近一次演练记录见 `docs/33-业务数据库迁移演练记录-2026-08-24.md`。该演练使用 MySQL 8.0.46，仅作为兼容性证据，不能替代 MySQL 8.4 验收。
