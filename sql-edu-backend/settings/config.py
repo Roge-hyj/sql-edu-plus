@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     VALIDATE_CERTS: bool = True
     # The diagnostic mail endpoint is never enabled implicitly in production.
     ENABLE_MAIL_TEST: bool = False
+    # Optional teacher registration secret. Empty means teacher invite registration is disabled.
+    TEACHER_INVITE_CODE: str = ""
 
     #7.配置JWT密钥和时间 (Settings) - 必须通过 .env 设置，勿写死在代码中
     JWT_SECRET_KEY: str = ""  # 请在 .env 中设置，例如：openssl rand -hex 32 

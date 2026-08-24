@@ -16,9 +16,29 @@ from pydantic import BaseModel
 from models.user import User
 from core.auth import AuthHandler
 from core.experience_service import get_level_from_total
+from settings.config import settings
+import hmac
 
 router = APIRouter(prefix="/auth", tags=["user"])
 auth_handler=AuthHandler()
+
+
+def resolve_registration_role(invite_code: str | None) -> tuple[str | None, str | None]:
+    """Resolve a registration role without ever falling back from a bad invite.
+
+    Teacher registration is opt-in. An omitted/blank invite creates a student;
+    a supplied invite must match the configured secret exactly.
+    """
+    supplied_code = (invite_code or "").strip()
+    if not supplied_code:
+        return "student", None
+
+    configured_code = (settings.TEACHER_INVITE_CODE or "").strip()
+    if not configured_code or not hmac.compare_digest(supplied_code, configured_code):
+        return None, "教师邀请码无效或当前未启用"
+    return "teacher", None
+
+
 #发送验证码
 @router.get("/code", response_model=ResponseOut)
 async def get_email_captcha(
@@ -69,6 +89,10 @@ async def register_user(
     data: RegisterIn,
     session: AsyncSession = Depends(get_session),
 ):
+    role, invite_error = resolve_registration_role(data.invite_code)
+    if invite_error:
+        return ResponseOut(result="failure", detail=invite_error)
+
     email_repo = EmailCodeRepository(session)
     user_repo = UserRepository(session)
     
@@ -85,9 +109,7 @@ async def register_user(
         return ResponseOut(result="failure", detail="该邮箱已被注册")
     
     try:
-        # 4. 执行注册逻辑
-        # 根据邀请码决定角色
-        role = "teacher" if (data.invite_code and data.invite_code == "ILOVESQL") else "student"
+        # 4. 执行注册逻辑。角色已在进入数据库操作前由服务端配置决定。
         # 创建用户对象
         user_schema = UserCreateSchema(
             email=data.email, 
