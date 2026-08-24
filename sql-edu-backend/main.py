@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import ai as ai_router
 from routers import question as question_router
 from routers.auth import router as auth_router
+from settings.config import settings
 
 app = FastAPI(title="SQL 智能教学系统后端")
 
@@ -43,10 +44,10 @@ async def mail_test(
 # CORS 配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 如需限制可改为具体前端地址
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 

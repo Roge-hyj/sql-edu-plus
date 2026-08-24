@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     # --- 2. 数据库连接 ---
     # 你的数据库连接字符串
     DB_URL: str
+    # SQLAlchemy SQL/parameter logging is opt-in and must stay disabled in production.
+    DB_ECHO: bool = False
 
     # --- 2.1 ParSEval 判题执行器 ---
     # auto/native: 按最终解析出的方言选择原生引擎；连接缺失时返回 ENGINE_ERROR
@@ -46,7 +48,7 @@ class Settings(BaseSettings):
         "http://localhost",
         "http://localhost:3000",  # React/Next.js 默认端口
         "http://localhost:5173",  # Vite/Vue 默认端口
-        "http://127.0.0.1:5173"
+        "http://127.0.0.1:5173",
     ]
     # --- 5. AI 大模型配置 ---
     AI_API_KEY: str = ""
@@ -110,5 +112,4 @@ def get_settings() -> Settings:
 
 
 __all__ = ["Settings", "get_settings"]
-
 

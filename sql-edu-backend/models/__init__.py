@@ -1,7 +1,24 @@
 from .base import Base
 from .user import User
 from .question import Question
+from .question_skill import (
+    QuestionSkill,
+    QuestionSkillProvenance,
+    QuestionSkillRole,
+)
+from .phase3_learning import (
+    SkillObservationEvent,
+    SkillObservationResult,
+    SkillObservationSource,
+    StudentSkillState,
+)
 from .submission import Submission
+from .submission_teaching_audit import (
+    SUBMISSION_TEACHING_AUDIT_SCHEMA_VERSION,
+    SubmissionTeachingAudit,
+    SupportRecommendationStatus,
+    TeachingFeedbackStatus,
+)
 from .auth import EmailCaptcha
 from .chat import ChatMessage
 from .question_feedback import QuestionDifficultyFeedback
@@ -11,7 +28,7 @@ from settings.config import settings
 # 1. 创建异步引擎对象
 # 它负责管理连接池、翻译 SQL 语句
 engine_kwargs = {
-    "echo": True,
+    "echo": settings.DB_ECHO,
     "pool_recycle": 3600,
     "pool_pre_ping": True,
 }
@@ -37,7 +54,23 @@ AsyncSessionFactory = async_sessionmaker(
 )
 
 
-__all__ = ["Base", "User", "Question", "Submission", "EmailCaptcha", "ChatMessage", "QuestionDifficultyFeedback"]
-
-
-
+__all__ = [
+    "Base",
+    "User",
+    "Question",
+    "QuestionSkill",
+    "QuestionSkillProvenance",
+    "QuestionSkillRole",
+    "SkillObservationEvent",
+    "SkillObservationResult",
+    "SkillObservationSource",
+    "StudentSkillState",
+    "Submission",
+    "SUBMISSION_TEACHING_AUDIT_SCHEMA_VERSION",
+    "SubmissionTeachingAudit",
+    "SupportRecommendationStatus",
+    "TeachingFeedbackStatus",
+    "EmailCaptcha",
+    "ChatMessage",
+    "QuestionDifficultyFeedback",
+]
