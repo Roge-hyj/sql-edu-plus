@@ -370,6 +370,7 @@ _STRATEGY_BY_KIND = {
     "cte_base_paths": "cte_base_paths",
     "cte_base_recursive_orphan_paths": "cte_recursive_paths",
     "null_and_non_null_rows": "null_tristate",
+    "null_predicate_paths": "null_tristate",
     "duplicate_projected_tuple": "duplicate_projection",
     "distinct_on_competing_payload": "distinct_on_competing_payload",
 }
@@ -539,7 +540,12 @@ def _semantic_cell_constraints(obligation: DistinguishingObligation) -> list[Cel
             continue
         if not table or not column:
             continue
-        if spec.kind == "boundary_tristate" and spec.value is not None:
+        if (
+            spec.kind == "boundary_tristate"
+            and spec.value is not None
+            and str(dict(spec.metadata).get("standard_value_kind") or "").lower()
+            != "expression"
+        ):
             result.append(
                 CellConstraint(
                     table=table,
@@ -987,7 +993,13 @@ def apply_bounded_feedback(
 
         for spec in obligation.hard_constraints:
             before = [row.get(column) for row in rows]
-            if spec.kind == "boundary_tristate" and spec.value is not None and len(rows) >= 3:
+            if (
+                spec.kind == "boundary_tristate"
+                and spec.value is not None
+                and len(rows) >= 3
+                and str(dict(spec.metadata).get("standard_value_kind") or "").lower()
+                != "expression"
+            ):
                 value = spec.value
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     distance = max(1, attempt)

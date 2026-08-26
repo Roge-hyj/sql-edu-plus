@@ -45,6 +45,9 @@ _URL_SCHEMES = {
     "tsql": frozenset({"mssql", "sqlserver", "tsql"}),
     "oracle": frozenset({"oracle"}),
 }
+_MYSQL_TARGET_VERSION = "8.0.46"
+_MYSQL_REQUIRED_LOWER_CASE_TABLE_NAMES = 0
+_MYSQL_FIXTURE_IDENTIFIER_POLICY = "preserve_source_spelling"
 _STATEMENT_TIMEOUT_MS = 3_000
 _MAX_RESULT_ROWS = 10_000
 _MAX_RESULT_BYTES = 8 * 1024 * 1024
@@ -415,6 +418,7 @@ def _mysql_session(
     primary: BaseException | None = None
     try:
         admin_cursor = admin_conn.cursor()
+        _validate_mysql_target_profile(admin_cursor)
         admin_cursor.execute(
             f"CREATE DATABASE {_quote_ident(database, 'mysql')} "
             "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
@@ -491,6 +495,52 @@ def _mysql_connection_params(connection_url: str) -> dict[str, Any]:
         "user": unquote(parsed.username or ""),
         "password": unquote(parsed.password or ""),
     }
+
+
+def _validate_mysql_target_profile(cursor: Any) -> None:
+    """Require the exact Phase 1 MySQL identifier and version profile.
+
+    The fixture loader deliberately preserves source table spelling.  That is
+    only equivalent to the declared target when MySQL uses the Linux
+    ``lower_case_table_names=0`` mode; silently accepting another mode would
+    turn a schema/query name-resolution mismatch into a false semantic pass.
+    """
+    try:
+        cursor.execute("SELECT VERSION(), @@lower_case_table_names")
+        row = cursor.fetchone()
+    except Exception as exc:
+        raise NativeConfigurationError(
+            "NATIVE_MYSQL_PROFILE_UNAVAILABLE",
+            "mysql",
+            "target version and identifier mode could not be probed",
+        ) from exc
+    if not row or len(row) < 2:
+        raise NativeConfigurationError(
+            "NATIVE_MYSQL_PROFILE_UNAVAILABLE",
+            "mysql",
+            "target version and identifier mode probe returned no row",
+        )
+    version = str(row[0] or "").strip()
+    try:
+        lower_case_table_names = int(row[1])
+    except (TypeError, ValueError) as exc:
+        raise NativeConfigurationError(
+            "NATIVE_MYSQL_PROFILE_UNAVAILABLE",
+            "mysql",
+            "identifier mode probe was not numeric",
+        ) from exc
+    if not re.fullmatch(r"8\.0\.46(?:[- ].*)?", version):
+        raise NativeConfigurationError(
+            "NATIVE_MYSQL_VERSION_UNSUPPORTED",
+            "mysql",
+            f"Phase 1 requires MySQL {_MYSQL_TARGET_VERSION}",
+        )
+    if lower_case_table_names != _MYSQL_REQUIRED_LOWER_CASE_TABLE_NAMES:
+        raise NativeConfigurationError(
+            "NATIVE_MYSQL_IDENTIFIER_MODE_UNSUPPORTED",
+            "mysql",
+            "Phase 1 requires lower_case_table_names=0 with source-spelled fixtures",
+        )
 
 
 def _quote_mysql_string(value: str) -> str:
@@ -963,6 +1013,9 @@ def _fold_fixture_identifier(name: str, backend: str) -> str:
         return name.lower()
     if backend == "oracle":
         return name.upper()
+    # MySQL 8.0.46 is pinned to the Linux lower_case_table_names=0 profile.
+    # Quoted fixture identifiers therefore retain the authoritative source
+    # spelling; submitted SQL is never rewritten to compensate for a mismatch.
     return name
 
 
@@ -1248,6 +1301,54 @@ def _execute_submitted_query(
             backend,
             str(exc) or type(exc).__name__,
         ) from exc
+
+
+def native_schema_resolution_kind(backend: str, exc: BaseException) -> str | None:
+    """Return a stable schema-resolution kind for a native query error.
+
+    This is intentionally narrower than generic driver-error handling.  A
+    missing physical table/column means the pair cannot be replayed under the
+    supplied schema and is therefore an input gap; connection, permission,
+    syntax, and unsupported-feature failures remain engine boundaries.
+    """
+    normalized = _normalize_backend(backend)
+    current: BaseException | None = exc
+    code_values: set[str] = set()
+    text_parts: list[str] = []
+    while current is not None:
+        text_parts.append(str(current).lower())
+        for attribute in ("errno", "sqlstate", "pgcode", "code"):
+            value = getattr(current, attribute, None)
+            if isinstance(value, (int, str)) and str(value).strip():
+                code_values.add(str(value).strip().upper())
+        for argument in getattr(current, "args", ()):
+            if isinstance(argument, (int, str)) and str(argument).strip():
+                code_values.add(str(argument).strip().upper())
+        current = current.__cause__
+    text = " ".join(text_parts)
+    if normalized == "mysql":
+        if code_values & {"1146", "1051"} or re.search(
+            r"table .*doesn.?t exist|unknown table", text
+        ):
+            return "mysql.table_not_found"
+        if "1054" in code_values or "unknown column" in text:
+            return "mysql.column_not_found"
+    if normalized == "postgres":
+        if "42P01" in code_values or re.search(r"relation .*does not exist", text):
+            return "postgres.table_not_found"
+        if "42703" in code_values or re.search(r"column .*does not exist", text):
+            return "postgres.column_not_found"
+    if normalized == "tsql":
+        if "208" in code_values or "invalid object name" in text:
+            return "tsql.table_not_found"
+        if "207" in code_values or "invalid column name" in text:
+            return "tsql.column_not_found"
+    if normalized == "oracle":
+        if code_values & {"942", "ORA-00942"} or "ora-00942" in text:
+            return "oracle.table_not_found"
+        if code_values & {"904", "ORA-00904"} or "ora-00904" in text:
+            return "oracle.column_not_found"
+    return None
 
 
 def _is_connection_failure(exc: BaseException) -> bool:

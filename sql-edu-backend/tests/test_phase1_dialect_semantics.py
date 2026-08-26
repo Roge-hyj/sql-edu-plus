@@ -3,6 +3,7 @@ from sqlglot import parse_one
 
 from core.parseval_data_generator import (
     _prepare_executable_sql_pair,
+    _has_schema_quoted_identifier,
     extract_ast_diffs,
     generate_and_compare,
 )
@@ -69,6 +70,7 @@ def test_dialect_semantics_that_sqlite_cannot_preserve_are_explicit_boundaries(
     assert run.executed is False
     assert run.is_equivalent is None
     assert run.judge_status == "UNSUPPORTED"
+    assert run.status == "KNOWN_GAP"
     assert expected_feature in run.data_evidence["unsupported_features"]
 
 
@@ -101,6 +103,7 @@ def test_standard_sql_defaulting_to_mysql_rejects_unavailable_engine_features(
 
     assert run.executed is False
     assert run.judge_status == "UNSUPPORTED"
+    assert run.status == "KNOWN_GAP"
     assert expected_feature in run.data_evidence["unsupported_features"]
 
 
@@ -199,3 +202,23 @@ def test_default_mysql_double_quoted_strings_keep_literal_semantics_in_sqlite():
     assert run.is_equivalent is False
     assert "'Sales'" in (run.standard_sqlite or "")
     assert "'Marketing'" in (run.standard_sqlite or "")
+
+
+def test_generic_schema_double_quoted_column_uses_identifier_semantics():
+    run = generate_and_compare(
+        "teams(position, for, difference);",
+        'SELECT MAX("for") FROM teams WHERE difference = 11',
+        'SELECT MIN("for") FROM teams WHERE difference = 11',
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is False
+    assert 'MAX("for")' in (run.standard_sqlite or "")
+    assert "'for'" not in (run.standard_sqlite or "")
+
+
+def test_quoted_schema_name_inside_string_literal_does_not_change_dialect():
+    assert _has_schema_quoted_identifier(
+        ('SELECT value FROM t WHERE label = \'the word "for"\'',),
+        {"t": ["label", "value", "for"]},
+    ) is False

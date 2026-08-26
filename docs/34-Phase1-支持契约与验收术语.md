@@ -23,11 +23,13 @@ Phase 1 的任务不是声称“任意 SQL 都能证明等价”，而是对一�
 
 系统有两套完全不同的数据库，不能把其中一套的版本写成另一套的版本。
 
-| 用途 | 固定环境 | 作用 |
-|---|---|---|
-| 业务数据库 | 宿主机或业务环境 MySQL **8.0.46** | 保存用户、题目、提交、学习状态、审计和其他应用数据；SQLAlchemy/Alembic 的唯一业务数据库方言是 MySQL。 |
-| 判题执行器 | Docker 中按方言启动的隔离引擎：MySQL `8.4.6`、PostgreSQL `16.10`、SQL Server `2022-CU20-ubuntu-22.04`、Oracle Free `23.7`（Oracle 23ai 系列） | 为 Gold Oracle、witness 和原生方言验证提供临时数据世界；不保存业务数据。 |
-| 通用 bounded 执行器 | 运行 Phase 1 脚本的 Python `sqlite3`/SQLite 运行时 | 对 generic/standard/SQLite 兼容样本做有界的本地执行比较；具体 SQLite 版本写入每次冻结报告。 |
+
+| 用途             | 固定环境                                                                                                                       | 作用                                                              |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 业务数据库          | 宿主机或业务环境 MySQL **8.0.46**                                                                                                  | 保存用户、题目、提交、学习状态、审计和其他应用数据；SQLAlchemy/Alembic 的唯一业务数据库方言是 MySQL。 |
+| 判题执行器          | Docker 中按方言启动的隔离引擎：MySQL `8.0.46`、PostgreSQL `16.10`、SQL Server `2022-CU20-ubuntu-22.04`、Oracle Free `23.7`（Oracle 23ai 系列） | 为 Gold Oracle、witness 和原生方言验证提供临时数据世界；不保存业务数据。                  |
+| 通用 bounded 执行器 | 运行 Phase 1 脚本的 Python `sqlite3`/SQLite 运行时                                                                                 | 对 generic/standard/SQLite 兼容样本做有界的本地执行比较；具体 SQLite 版本写入每次冻结报告。  |
+
 
 业务库固定为 8.0.46 不妨碍判题器支持多个方言。判题器连接哪个 Docker 引擎由题目声明的 dialect 和 `PARSEVAL_*_URL` 决定；没有可达的对应原生引擎时必须返回 `ENGINE_GAP`，不得悄悄改用 SQLite 并称为原生验证。
 
@@ -57,6 +59,8 @@ AST 被转换为项目的 `SQLStructureIR`，再比较标准答案和学生答�
 
 ## 4. 当前方言契约
 
+
+
 ### 4.1 Generic / Standard SQL
 
 这是教学 SQL 的主路径。允许使用本契约第 5 节列出的结构；能在 bounded SQLite 语义下重放的样本可以执行验证。若 SQL 明确依赖 vendor 语义，则必须按实际方言重新路由，不能因为写法“看起来通用”就强行使用 SQLite。
@@ -67,7 +71,9 @@ AST 被转换为项目的 `SQLStructureIR`，再比较标准答案和学生答�
 
 ### 4.3 MySQL
 
-支持 MySQL 方言的识别、解析、部分结构转换和原生执行路由。判题 Docker 的目标镜像固定为 `mysql:8.4.6`（契约版本为 MySQL 8.4）；题目若声明 `engine_version`，必须与该 runner 兼容。业务库 MySQL 8.0.46 只用于应用持久化，不作为判题器的隐含替代。
+支持 MySQL 方言的识别、解析、部分结构转换和原生执行路由。判题 Docker 的目标镜像固定为 `mysql:8.0.46`（契约版本为 MySQL 8.0.46）；题目若声明 `engine_version`，必须与该 runner 兼容。业务库也固定为 MySQL 8.0.46，但业务实例与判题实例必须隔离，不能互相替代。
+
+Phase 1 的 MySQL 标识符 profile 也属于能力范围：目标必须是 Linux `lower_case_table_names=0`，fixture 表/列标识符保留权威 schema 的 source spelling，带反引号的 fixture 名称按精确拼写创建；提交 SQL 原样交给 MySQL，不能为了适配 fixture 静默改成小写或大写。因此，权威 schema 为 `Products` 而 SQL 只引用未加引号的 `products` 时，Linux runner 的“表不存在”是 `INPUT_GAP`（schema/query 无法按声明 profile replay），不是 `ENGINE_GAP`；若连接到版本或 `lower_case_table_names` 不匹配的 MySQL，则是 `ENGINE_GAP`。
 
 ### 4.4 PostgreSQL
 
@@ -85,19 +91,23 @@ Oracle 主要作为识别、解析和边界目标；判题 Docker 目标为 `gve
 
 以下是当前允许进入结构分析的教学 SQL 结构。每一项仍须通过 schema、IR、witness 和执行器门禁，表中“允许”不等于“所有方言都能原生执行。
 
-| 结构 | 允许内容 | 已知边界 |
-|---|---|---|
-| SELECT/projection | 列、限定列、`*`、别名、表达式、算术、字面量、CAST | 类型转换和列类型必须能在目标执行器重放 |
-| WHERE/三值逻辑 | `AND`、`OR`、`NOT`、比较、括号、`IS NULL`、`IS NOT NULL` | NULL、空结果和 UNKNOWN 必须有专门 witness |
-| IN/BETWEEN/LIKE | 值列表、子查询、`NOT IN`、`BETWEEN`、`LIKE`、`ESCAPE` | `NOT IN` 的 NULL trap 需要额外证据 |
-| JOIN | comma/cross、inner、left、right、full、natural、using、on、自连接、多表 | 外连接需要 dangling-row world；各方言实现可能不同 |
-| GROUP/HAVING/聚合 | `COUNT`、`SUM`、`AVG`、`MIN`、`MAX`、`GROUP BY`、`HAVING`、部分 `FILTER` | `ROLLUP`、`CUBE`、`GROUPING SETS` 通常停在执行边界 |
-| DISTINCT/ORDER/LIMIT | `DISTINCT`、部分 `DISTINCT ON`、升降序、NULLS、ordinal、alias、`LIMIT/OFFSET`、`FETCH`、`TOP` | vendor 写法需要匹配原生 runner；排序必须明确 tie 语义 |
-| 集合运算 | `UNION`、`UNION ALL`、`INTERSECT`、`EXCEPT`、三分支链 | `INTERSECT ALL`、`EXCEPT ALL` 是已知 SQLite/执行缺口 |
-| 子查询 | scalar、`IN`、`EXISTS`、相关/嵌套子查询、`ANY/ALL/SOME` | 相关列、空结果和 NULL world 可能导致 UNDECIDED |
-| CTE | 单/多 CTE、依赖链、递归 `UNION/UNION ALL` | `SEARCH/CYCLE` 主要是方言/结构边界 |
-| CASE | simple/searched CASE、`WHEN/THEN`、`ELSE` | 分支覆盖需要构造可区分 witness |
-| 窗口 | `ROW_NUMBER`、`RANK`、`DENSE_RANK`、`NTILE`、`LAG`、`LEAD`、`FIRST_VALUE`、`LAST_VALUE`、聚合窗口、partition/order/frame、named window | tie、frame 和排序稳定性必须显式约束 |
+
+| 结构                   | 允许内容                                                                                                                     | 已知边界                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| SELECT/projection    | 列、限定列、`*`、别名、表达式、算术、字面量、CAST                                                                                             | 类型转换和列类型必须能在目标执行器重放                          |
+| WHERE/三值逻辑           | `AND`、`OR`、`NOT`、比较、括号、`IS NULL`、`IS NOT NULL`                                                                           | NULL、空结果和 UNKNOWN 必须有专门 witness              |
+| IN/BETWEEN/LIKE      | 值列表、子查询、`NOT IN`、`BETWEEN`、`LIKE`、`ESCAPE`                                                                               | `NOT IN` 的 NULL trap 需要额外证据                  |
+| JOIN                 | comma/cross、inner、left、right、full、natural、using、on、自连接、多表                                                                | 外连接需要 dangling-row world；各方言实现可能不同           |
+| GROUP/HAVING/聚合      | `COUNT`、`SUM`、`AVG`、`MIN`、`MAX`、`GROUP BY`、`HAVING`、部分 `FILTER`                                                          | `ROLLUP`、`CUBE`、`GROUPING SETS` 通常停在执行边界     |
+| DISTINCT/ORDER/LIMIT | `DISTINCT`、部分 `DISTINCT ON`、升降序、NULLS、ordinal、alias、`LIMIT/OFFSET`、`FETCH`、`TOP`                                         | vendor 写法需要匹配原生 runner；排序必须明确 tie 语义         |
+| 集合运算                 | `UNION`、`UNION ALL`、`INTERSECT`、`EXCEPT`、三分支链                                                                            | `INTERSECT ALL`、`EXCEPT ALL` 是已知 SQLite/执行缺口 |
+| 子查询                  | scalar、`IN`、`EXISTS`、相关/嵌套子查询、`ANY/ALL/SOME`                                                                             | 相关列、空结果和 NULL world 可能导致 UNDECIDED           |
+| CTE                  | 单/多 CTE、依赖链、递归 `UNION/UNION ALL`                                                                                         | `SEARCH/CYCLE` 主要是方言/结构边界                    |
+| CASE                 | simple/searched CASE、`WHEN/THEN`、`ELSE`                                                                                  | 分支覆盖需要构造可区分 witness                          |
+| 窗口                   | `ROW_NUMBER`、`RANK`、`DENSE_RANK`、`NTILE`、`LAG`、`LEAD`、`FIRST_VALUE`、`LAST_VALUE`、聚合窗口、partition/order/frame、named window | tie、frame 和排序稳定性必须显式约束                       |
+
+
+
 
 ## 6. 明确 out-of-scope 或需要单独扩展的特性
 
@@ -114,6 +124,8 @@ Oracle 主要作为识别、解析和边界目标；判题 Docker 目标为 `gve
 这些输入可以被记录为 parser/input gap、ENGINE_GAP 或明确 out-of-scope，但不能进入正确性分母。
 
 ## 7. 四种主要 verdict，用通俗话说
+
+
 
 ### `NOT_EQUIVALENT`
 
@@ -132,6 +144,8 @@ Oracle 主要作为识别、解析和边界目标；判题 Docker 目标为 `gve
 需要某个方言的原生执行器，但对应 runner 未配置、不可达、版本不兼容或不支持该结构。它表示“验证条件缺失”，不是“SQL 等价”，也不是“SQL 不等价”。禁止静默回退到另一种数据库。
 
 ## 8. 其他常见术语
+
+
 
 ### `INPUT_GAP` 与 generation failure
 
@@ -194,22 +208,26 @@ repeat_run_stable == true
 - 新 freeze 必须至少独立运行两次，行数、分层 verdict 和 digest 稳定；
 - 支持范围、方言版本或 out-of-scope 清单发生变化时，必须更新本契约、提高版本号并重新生成报告，不能在旧报告上“解释性通过”。
 
+
+
 ## 12. 当前 v16 基线（仅作未通过的起点）
 
 报告：`data_construct_test/outputs/phase1_corpus_universe_dev_v8/final_hidden_freeze_verification_v16.json`
 
-| 指标 | 当前值 |
-|---|---:|
-| hidden families | 5,846 |
-| declared supported families | 5,839 |
-| scope coverage | 99.8803% |
-| generated pair rows | 11,678 |
-| generation failures | 7 |
-| determinate label mismatches | 22 |
-| `UNDECIDED` | 680 |
-| `ENGINE_GAP` | 431 |
-| repeat run stable | true |
-| `acceptance.pass` | **false** |
+
+| 指标                           | 当前值       |
+| ---------------------------- | --------- |
+| hidden families              | 5,846     |
+| declared supported families  | 5,839     |
+| scope coverage               | 99.8803%  |
+| generated pair rows          | 11,678    |
+| generation failures          | 7         |
+| determinate label mismatches | 22        |
+| `UNDECIDED`                  | 680       |
+| `ENGINE_GAP`                 | 431       |
+| repeat run stable            | true      |
+| `acceptance.pass`            | **false** |
+
 
 这组数据说明当前运行具有重复稳定性，但仍有 7 个生成缺口和 22 个确定性标签 mismatch。因此它是后续修复的基线，不是 Phase 1 已完成的证明。
 
@@ -253,6 +271,8 @@ repeat_run_stable == true
 - **Alembic**：与 SQLAlchemy 配套的数据库迁移工具，用来按版本升级或回退业务数据库结构。
 - **Docker container（容器）**：由 Docker 启动的隔离进程环境；判题容器销毁后其中的临时数据也应被销毁。
 - **host（宿主机）**：运行业务服务或 Docker 的操作系统环境。宿主机上的业务 MySQL 与容器内判题 MySQL 是两个实例。
+
+
 
 ### 14.2 SQL 语言基础
 
@@ -302,11 +322,11 @@ repeat_run_stable == true
 - **UNION ALL**：合并结果但保留重复行。
 - **INTERSECT**：只保留同时出现在两边的结果，通常去重。
 - **EXCEPT**：保留左边有、右边没有的结果，通常去重。
-- **`INTERSECT ALL` / `EXCEPT ALL`**：保留重复计数的集合运算变体，当前执行边界未完整支持。
+- `INTERSECT ALL` **/** `EXCEPT ALL`：保留重复计数的集合运算变体，当前执行边界未完整支持。
 - **subquery（子查询）**：嵌套在另一条 SQL 中的查询。
 - **scalar subquery（标量子查询）**：预期返回一个值的子查询。
-- **`IN` subquery**：返回一列值、供 `IN` 判断成员关系的子查询。
-- **`EXISTS` subquery**：只判断子查询是否至少返回一行。
+- `IN` **subquery**：返回一列值、供 `IN` 判断成员关系的子查询。
+- `EXISTS` **subquery**：只判断子查询是否至少返回一行。
 - **correlated subquery（相关子查询）**：子查询引用外层查询的列，因此会随外层行变化执行逻辑。
 - **ANY / ALL / SOME**：把一个值与子查询返回的多个值比较的量词写法；`SOME` 通常与 `ANY` 同义。
 - **CTE（Common Table Expression，公用表表达式）**：用 `WITH` 定义、只在当前语句中使用的临时命名查询。
@@ -321,15 +341,17 @@ repeat_run_stable == true
 - **LAG / LEAD**：读取当前行前后某个位置的值。
 - **FIRST_VALUE / LAST_VALUE**：读取窗口框架中的第一值或最后值。
 
+
+
 ### 14.3 方言和高级边界语法
 
-- **MySQL**：一种数据库产品及其 SQL 方言；本业务库使用 8.0.46，判题 Docker 使用 8.4.6。
+- **MySQL**：一种数据库产品及其 SQL 方言；本业务库和当前判题 Docker/native runner 均固定使用 8.0.46，实例、权限和数据用途仍然分离。
 - **PostgreSQL**：一种数据库产品及其 SQL 方言；本判题 Docker 使用 16.10。
 - **T-SQL**：Microsoft SQL Server 使用的 SQL 方言；本判题 Docker 使用 2022 CU20。
 - **Oracle**：Oracle Database 使用的 SQL 方言；当前仅把 Oracle Free 23.7 作为边界目标，不能据此宣称完整 Oracle 生产支持。
 - **SQLite**：嵌入式数据库；本地 bounded oracle 使用 Python `sqlite3` 调用它。
 - **generic / standard**：没有明确厂商专属语法、按教学标准 SQL 处理的方言标签。
-- **`::`**：PostgreSQL 常见的类型转换写法，例如 `score::integer`。
+- `::`：PostgreSQL 常见的类型转换写法，例如 `score::integer`。
 - **ILIKE**：PostgreSQL 提供的不区分大小写的 LIKE 匹配。
 - **LATERAL**：允许一个 FROM 项引用同一 FROM 列表中它左侧项目的相关表表达式。
 - **QUALIFY**：部分数据库提供的窗口函数结果过滤子句，作用位置类似窗口计算之后的 WHERE。
@@ -341,6 +363,8 @@ repeat_run_stable == true
 - **DML（Data Manipulation Language）**：修改数据的语句，例如 `INSERT`、`UPDATE`、`DELETE`。
 - **事务控制**：`BEGIN`、`COMMIT`、`ROLLBACK` 等控制一组数据库操作原子性的语句。
 - **存储过程 / 触发器**：保存在数据库中、可被调用或在事件发生时自动执行的程序逻辑。
+
+
 
 ### 14.4 判题管线和证据
 
@@ -374,6 +398,8 @@ repeat_run_stable == true
 - **replay（重放）**：使用同一输入、配置和执行器重新运行，以检查结果是否稳定。
 - **silent fallback（静默降级）**：原本应使用某个引擎却无提示地改用另一个引擎。这在 Phase 1 中禁止，因为不同引擎的语义可能不同。
 
+
+
 ### 14.5 生成、执行和资源限制
 
 - **parse failure / parser gap**：SQL 无法被当前解析器解析，或解析器没有覆盖该语法；它不是非等价结论。
@@ -390,9 +416,11 @@ repeat_run_stable == true
 - **timeout（超时）**：任务超过规定时间后停止等待并返回边界结果。线程超时不一定能杀死底层数据库进程，因此生产环境仍需要 worker 隔离。
 - **worker（任务进程）**：专门执行判题任务的独立进程或服务。它可以设置硬超时、CPU/内存限制，并在卡死或崩溃后被终止和重建。
 - **Docker**：用于以隔离容器运行数据库引擎的工具。判题容器是临时执行环境，不是业务数据库。
-- **image tag（镜像标签）**：Docker 镜像的可读版本名称，例如 `mysql:8.4.6`。
+- **image tag（镜像标签）**：Docker 镜像的可读版本名称，例如 `mysql:8.0.46`。
 - **image digest（镜像摘要）**：Docker 镜像内容的不可变哈希；它比标签更适合证明实际运行的镜像没有变化。
-- **`PARSEVAL_*_URL`**：判题器连接各方言 native runner 的配置项，例如 `PARSEVAL_MYSQL_URL`；为空或不可达时应产生 `ENGINE_GAP`。
+- `PARSEVAL_*_URL`：判题器连接各方言 native runner 的配置项，例如 `PARSEVAL_MYSQL_URL`；为空或不可达时应产生 `ENGINE_GAP`。
+
+
 
 ### 14.6 Verdict、报告和验收
 
@@ -418,6 +446,8 @@ repeat_run_stable == true
 - **MVP（Minimum Viable Product，最小可运行产品）**：能运行主链路的最小版本，不代表功能完整、参数校准或生产就绪。
 - **out-of-scope**：契约明确不承诺的范围。它必须在测试前声明，不能在看到失败后临时添加。
 
+
+
 ### 14.7 常见结果如何解读
 
 - **解析成功但不能执行**：通常只能说明结构层有证据；若缺少原生引擎，结果应是 ENGINE_GAP，而不是 EQUIVALENT。
@@ -425,6 +455,8 @@ repeat_run_stable == true
 - **执行一次出现不同**：如果输入、schema 和执行结果都有效，通常足以输出 NOT_EQUIVALENT，因为一个反例就能证明“不保证等价”。
 - **生成失败但没有运行结果**：属于 generation failure，不属于 UNDECIDED，也不能从分母中悄悄删除。
 - **解析器读不懂**：属于 parser/input 边界或 out-of-scope，不代表学生 SQL 一定错误。
+
+
 
 ### 14.8 工程和报告用语
 

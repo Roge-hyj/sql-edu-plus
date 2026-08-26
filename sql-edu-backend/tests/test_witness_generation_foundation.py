@@ -55,6 +55,51 @@ def test_schema_qualification_separates_cte_and_derived_relations_from_physical_
     assert qualification.missing_columns == set()
 
 
+def test_schema_qualification_allows_outer_derived_relation_in_scalar_subquery():
+    sql = (
+        "SELECT dategen.date, ("
+        "SELECT SUM(b.slots) FROM bookings b "
+        "WHERE b.starttime < dategen.date + INTERVAL '1 day'"
+        ") AS revenue FROM ("
+        "SELECT CAST('2012-08-01' AS DATE) AS date"
+        ") AS dategen ORDER BY dategen.date"
+    )
+
+    qualification = analyze_schema_qualification(
+        sql,
+        {"bookings": ["starttime", "slots"]},
+        dialect="postgres",
+    )
+
+    assert qualification.executable is True
+    assert qualification.physical_tables == {"bookings"}
+    assert qualification.missing_tables == set()
+    assert qualification.missing_columns == set()
+
+
+def test_schema_qualification_still_rejects_unknown_correlated_alias():
+    sql = (
+        "SELECT dategen.date, ("
+        "SELECT SUM(b.slots) FROM bookings b "
+        "WHERE b.starttime < missing_scope.date"
+        ") AS revenue FROM ("
+        "SELECT CAST('2012-08-01' AS DATE) AS date"
+        ") AS dategen"
+    )
+
+    qualification = analyze_schema_qualification(
+        sql,
+        {"bookings": ["starttime", "slots"]},
+        dialect="postgres",
+    )
+
+    assert qualification.executable is False
+    assert {
+        (item.relation, item.column)
+        for item in qualification.missing_columns
+    } == {("missing_scope", "date")}
+
+
 def test_schema_catalog_preserves_types_nullability_and_explicit_constraints():
     catalog = SchemaCatalog.from_legacy(
         {
@@ -368,6 +413,20 @@ def test_sqlite_schema_qualification_accepts_unresolved_double_quoted_literal():
 
     assert qualification.executable is True
     assert qualification.missing_columns == set()
+
+
+def test_schema_qualification_registers_lateral_alias_as_derived_relation():
+    qualification = analyze_schema_qualification(
+        "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL "
+        "(SELECT s.id + 1 AS value) x",
+        {"student": ["id", "name"]},
+        dialect="mysql",
+    )
+
+    assert qualification.executable is True
+    assert qualification.physical_tables == {"student"}
+    assert qualification.missing_columns == set()
+    assert any("x" in scope.derived_relations for scope in qualification.scopes)
     assert all(
         reference.column != "orange"
         for scope in qualification.scopes
@@ -637,6 +696,29 @@ def test_having_summary_whitespace_maps_to_atomic_boundary_obligation():
     assert obligations[0].hard_constraints[0].value == 100
 
 
+def test_having_count_column_rewrite_drops_derived_predicate_summaries():
+    standard = (
+        "SELECT 1 AS bucket FROM gap_group_duplicate "
+        "GROUP BY score HAVING COUNT(*) >= 1"
+    )
+    student = standard.replace("COUNT(*)", "COUNT(gap_group_duplicate.score)")
+    diffs = extract_ast_diffs(standard, student, dialect="sqlite")
+    obligations = compile_obligations(
+        diffs,
+        schema={"gap_group_duplicate": ["id", "score", "marker"]},
+    )
+
+    assert {item.diff_type for item in diffs} >= {
+        "having_changed",
+        "aggregate_argument_changed",
+        "predicate_missing",
+        "predicate_added",
+    }
+    assert {item.diff_type for item in obligations} == {
+        "aggregate_argument_changed",
+    }
+
+
 def test_scalar_aggregate_comparison_has_dedicated_obligation_kind():
     standard = (
         "SELECT t2.MakeId FROM cars_data t1 JOIN car_names t2 "
@@ -851,8 +933,8 @@ def test_generate_and_compare_stops_before_generation_when_standard_schema_is_in
     )
 
     assert run.executed is False
-    assert run.judge_status == "ENGINE_ERROR"
-    assert run.status == "ENGINE_GAP"
+    assert run.judge_status == "INPUT_ERROR"
+    assert run.status == "INPUT_GAP"
     assert run.equivalence_conclusion == "UNDECIDED"
     assert run.error_code == "STANDARD_SCHEMA_QUALIFICATION_FAILED"
     assert "missing_tables=missing_table" in str(run.error)
@@ -1196,7 +1278,8 @@ def test_unqualified_missing_column_is_rejected_before_database_generation():
     )
 
     assert run.executed is False
-    assert run.judge_status == "ENGINE_ERROR"
+    assert run.judge_status == "INPUT_ERROR"
+    assert run.status == "INPUT_GAP"
     assert run.error_code == "STANDARD_SCHEMA_QUALIFICATION_FAILED"
     assert "missing_physical_columns" in str(run.error)
 
@@ -1232,6 +1315,56 @@ def test_inline_recursive_cte_obligation_is_validated_from_execution_result():
     )
     assert recursive["constraints_satisfied"] is True
     assert recursive["causal_attribution_verified"] is True
+
+
+def test_recursive_cte_summary_and_generic_null_comparison_are_deduplicated():
+    schema = (
+        "employees(recursive, emp_id, emp_name, manager_id, salary); "
+        "cte(recursive, emp_id, emp_name, manager_id, salary);"
+    )
+    standard = (
+        "WITH RECURSIVE cte AS ("
+        "SELECT emp_id, emp_name, manager_id, salary FROM employees "
+        "WHERE manager_id IS NULL UNION ALL "
+        "SELECT e.emp_id, e.emp_name, e.manager_id, e.salary FROM employees AS e "
+        "JOIN cte AS c ON e.manager_id = c.emp_id) "
+        "SELECT emp_id FROM cte"
+    )
+    student = standard.replace("manager_id IS NULL", "manager_id = NULL")
+
+    diffs = extract_ast_diffs(standard, student, dialect="sqlite")
+    assert [item.diff_type for item in diffs] == [
+        "comparison_operator_changed",
+        "null_equality_changed",
+        "recursive_cte_changed",
+    ]
+
+    obligations = compile_obligations(
+        diffs,
+        schema={
+            "employees": ["recursive", "emp_id", "emp_name", "manager_id", "salary"],
+            "cte": ["recursive", "emp_id", "emp_name", "manager_id", "salary"],
+        },
+    )
+    assert [item.diff_type for item in obligations] == ["null_equality_changed"]
+
+
+def test_unqualified_null_equality_validator_resolves_unique_physical_column():
+    run = generate_and_compare(
+        "employees(id, manager_id, salary);",
+        "SELECT id FROM employees WHERE manager_id IS NULL",
+        "SELECT id FROM employees WHERE manager_id = NULL",
+        sql_dialect="sqlite",
+    )
+
+    assert run.status == "SUPPORTED"
+    effectiveness = run.data_evidence["obligation_effectiveness"]
+    assert [item["probe"] for item in effectiveness] == ["null_tristate"]
+    assert effectiveness[0]["constraints_satisfied"] is True
+    assert effectiveness[0]["semantic_validation"]["evidence"] == {
+        "null_count": 1,
+        "non_null_count": 7,
+    }
 
 
 def test_core_teaching_diffs_close_semantic_and_atomic_evidence_chain():
@@ -1300,6 +1433,32 @@ def test_added_group_by_has_rewritable_atomic_variant_without_feedback_loop():
     assert item["attempt_count"] == 1
     assert item["atomic_validation"][0]["supported"] is True
     assert "GROUP BY" in item["atomic_validation"][0]["variant_sql"].upper()
+
+
+def test_not_like_polarity_uses_complete_student_query_for_atomic_validation():
+    run = generate_and_compare(
+        "course(id INTEGER, title TEXT, credits INTEGER);",
+        "SELECT title FROM course WHERE title NOT LIKE 'Data%'",
+        "SELECT title FROM course WHERE title LIKE 'Data%'",
+        max_rows_per_table=6,
+        sql_dialect="sqlite",
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is False
+    effectiveness = run.data_evidence["obligation_effectiveness"]
+    assert effectiveness
+    assert all(item["constraints_satisfied"] is True for item in effectiveness)
+    assert all(item["distinguished"] is True for item in effectiveness)
+    assert all(item["causal_attribution_verified"] is True for item in effectiveness)
+    variants = [
+        test["variant_sql"]
+        for item in effectiveness
+        for test in item["atomic_validation"]
+        if test.get("supported")
+    ]
+    assert any("NOT LIKE" not in sql.upper() and " LIKE " in sql.upper() for sql in variants)
 
 
 def test_phase1_predicate_presence_uses_query_context_for_compound_where():
@@ -1389,6 +1548,10 @@ def test_phase1_not_in_null_trap_has_null_sensitive_causal_witness():
     assert null_evidence["constraints_satisfied"] is True
     assert null_evidence["causal_attribution_verified"] is True
     assert null_evidence["semantic_validation"]["evidence"]["inner_null_count"] >= 1
+    assert null_evidence["mutation_validation"]["relevant_test_count"] == 1
+    assert null_evidence["mutation_validation"]["relevant_fixed_by_replacement"] is True
+    mutation_test = null_evidence["mutation_validation"]["tests"][0]
+    assert mutation_test["diff_ids"] == [null_evidence["diff_id"]]
     assert run.mutation_evidence["summary"]["fixed_by_replacement"] >= 1
 
 

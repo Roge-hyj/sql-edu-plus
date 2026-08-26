@@ -216,6 +216,11 @@ def _parse(sql: str, dialect: str | None = None) -> exp.Expression | None:
         'DROP', 'ALTER', 'INDEX', 'WITH', 'RECURSIVE', 'ASC', 'DESC', 'TRUE',
         'FALSE', 'CAST', 'INTERSECT', 'EXCEPT', 'IF', 'THEN', 'TOP',
         'NULLS', 'FIRST', 'LAST', 'QUALIFY', 'WINDOW', 'ROWS', 'RANGE',
+        'INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'DECIMAL', 'NUMERIC', 'REAL',
+        'FLOAT', 'DOUBLE', 'TEXT', 'CHAR', 'VARCHAR', 'BOOLEAN', 'DATE',
+        'TIME', 'TIMESTAMP', 'INTERVAL', 'YEAR', 'MONTH', 'DAY', 'HOUR',
+        'MINUTE', 'SECOND', 'UNBOUNDED', 'PRECEDING', 'FOLLOWING', 'CURRENT',
+        'ROW',
     }
     dialects = (dialect,) if dialect else (("mysql", "sqlite", "postgres", "tsql", "oracle") if "`" in sql else ("sqlite", "mysql", "postgres", "tsql", "oracle"))
     for candidate in dialects:
@@ -230,11 +235,23 @@ def _parse(sql: str, dialect: str | None = None) -> exp.Expression | None:
                 parsed = parsed_statements[0]
                 # Roundtrip check: ensure meaningful identifiers survive
                 token_sql = _re.sub(r"--[^\r\n]*|/\*.*?\*/", " ", sql, flags=_re.DOTALL)
+                token_sql = _re.sub(r"'(?:''|[^'])*'", " ", token_sql)
                 raw_tokens = set(_re.findall(r'\b[A-Za-z_]\w*\b', token_sql))
-                meaningful = {t for t in raw_tokens if t.upper() not in _KW}
+                function_tokens = {
+                    token.lower()
+                    for token in _re.findall(r'\b([A-Za-z_]\w*)\s*\(', token_sql)
+                }
+                meaningful = {
+                    token.lower()
+                    for token in raw_tokens
+                    if token.upper() not in _KW and token.lower() not in function_tokens
+                }
                 if meaningful:
                     roundtrip = parsed.sql(dialect=read_dialect)
-                    rt_tokens = set(_re.findall(r'\b[A-Za-z_]\w*\b', roundtrip))
+                    rt_tokens = {
+                        token.lower()
+                        for token in _re.findall(r'\b[A-Za-z_]\w*\b', roundtrip)
+                    }
                     lost = meaningful - rt_tokens
                     if lost:
                         continue

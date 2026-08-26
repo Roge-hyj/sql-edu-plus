@@ -798,6 +798,7 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
             judge_detail=run.data_evidence,
             mutation_detail=run.mutation_evidence,
             ast_diffs=[diff.to_dict() for diff in run.ast_diffs],
+            sql_dialect=parse_dialect,
         )
         kp_ids = [item.knowledge_point_id for item in attr.attributions]
         kp_hit = _hit_expected_kp(kp_ids, case["expected_kps"])
@@ -815,17 +816,30 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         high_risk_attributions = []
         exception = f"{type(exc).__name__}: {exc}"
 
+    supported_statuses = {"SUPPORTED", "SUPPORTED_WITH_LIMITS"}
     if case["expectation"] == "equivalent":
         parse_stage_met = std_parse_ok and stu_parse_ok and std_ir_ok and stu_ir_ok
         structure_stage_met = True
-        data_stage_met = bool(run and run.executed and run.is_equivalent is True)
+        data_stage_met = bool(
+            run
+            and run.executed
+            and run.is_equivalent is True
+            and run.status in supported_statuses
+            and run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+        )
         attribution_stage_met = bool(attr is not None and not high_risk_attributions)
         mutation_stage_met = True
         expectation_met = data_stage_met and attribution_stage_met
     elif case["expectation"] == "not_equivalent":
         parse_stage_met = std_parse_ok and stu_parse_ok and std_ir_ok and stu_ir_ok
         structure_stage_met = bool(raw_diffs)
-        data_stage_met = bool(run and run.executed and run.is_equivalent is False)
+        data_stage_met = bool(
+            run
+            and run.executed
+            and run.is_equivalent is False
+            and run.status in supported_statuses
+            and run.equivalence_conclusion == "NOT_EQUIVALENT"
+        )
         attribution_stage_met = kp_hit
         mutation_stage_met = bool(
             run
@@ -851,12 +865,19 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         if item.get("fixed_by_replacement")
     ]
 
-    capability_bucket = "supported" if expectation_met else {
+    status_bucket = {
         "SUPPORTED_WITH_LIMITS": "supported_with_limits",
         "SEMANTIC_BOUNDARY": "semantic_boundary",
         "ENGINE_GAP": "engine_gap",
         "KNOWN_GAP": "known_gap",
-    }.get(run.status if run else "", "known_gap")
+    }.get(run.status if run else "")
+    capability_bucket = (
+        status_bucket
+        if status_bucket is not None
+        else "supported"
+        if expectation_met
+        else "known_gap"
+    )
 
     return {
         **case,

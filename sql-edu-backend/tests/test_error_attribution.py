@@ -74,6 +74,40 @@ def test_correct_submission_has_no_error_attributions():
 
 
 @pytest.mark.parametrize(
+    ("sql", "dialect"),
+    [
+        ("select Name, sum(Budget) from Departments group by Name", "mysql"),
+        ("select timestamp '2012-08-31 01:00:00'", "postgres"),
+        ("select substr(mems.surname, 1, 1) from cd.members mems", "postgres"),
+        ("select cast(amount as numeric) from payments", "postgres"),
+        ("SELECT CAST(score AS DECIMAL(5, 2)) FROM Results", "tsql"),
+    ],
+)
+def test_identity_roundtrip_is_case_insensitive_and_dialect_aware(sql, dialect):
+    result = evidence_weights_from_observation(
+        student_sql=sql,
+        answer_sql=sql,
+        is_correct=True,
+        sql_dialect=dialect,
+    )
+
+    assert result.observation["E_AST"]["student_parse_ok"] is True
+    assert result.observation["E_AST"]["normalized_ast_equal"] is True
+    assert result.attributions == []
+
+
+def test_roundtrip_guard_still_rejects_silently_recovered_form_typo():
+    result = evidence_weights_from_observation(
+        student_sql="SELECT * FORM orders",
+        answer_sql="SELECT * FROM orders",
+        is_correct=False,
+    )
+
+    assert result.observation["E_AST"]["student_parse_ok"] is False
+    assert result.attributions[0].error_type == "syntax_fatal"
+
+
+@pytest.mark.parametrize(
     "sql",
     [
         (

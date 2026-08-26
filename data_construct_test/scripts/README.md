@@ -33,7 +33,7 @@
   - **作用**：第一阶段单命令严格门禁。依次重建 IR、独立 AST Diff 和 IR→AST 报告，再验证精选全流程、195 条造数边界、固定种子 430 条 fuzzer 以及后端核心回归；任一命令或报告不变量失败即返回非零。对非等价案例，仅有 `fixed_by_replacement` 汇总值不够；必须从完整变异明细中找到同时命中预期 KP 与允许 clause 的单子句修复，复合结构恢复不计为单点定位。
   - **运行**：在已激活项目 Python 环境的仓库根目录执行 `python data_construct_test/scripts/run_phase1_full_flow_gate.py`。该门禁不启动 Docker 或外部数据库服务。
 * **`run_native_engine_live_gate.py`**
-  - **作用**：严格运行 MySQL 8.4、PostgreSQL 16、SQL Server 2022 和 Oracle 23ai 的 Phase 1 真实原生判题回归；四引擎分别验证方言路由、正误判定、结构差异、行值反例、预期 clause 变异修复，以及重复运行和临时命名空间清理。任一引擎缺失或不可达时非零退出。2026-08-14 实际执行结果为 `28/28 PASS`。
+  - **作用**：严格运行当前 MySQL 8.0.46、PostgreSQL 16、SQL Server 2022 和 Oracle 23ai 的 Phase 1 真实原生判题回归；四引擎分别验证方言路由、正误判定、结构差异、行值反例、预期 clause 变异修复，以及重复运行和临时命名空间清理。任一引擎缺失或不可达时非零退出。历史 2026-08-14 的 8.4 runner 实际结果为 `28/28 PASS`；MySQL runner 版本变更后必须重新执行，不能复用该历史结果。
   - **运行**：先确保 `.env` 中 `PARSEVAL_MYSQL_URL`、`PARSEVAL_POSTGRES_URL`、`PARSEVAL_TSQL_URL`、`PARSEVAL_ORACLE_URL` 均可达，然后从仓库根目录执行 `/home/roge/miniconda3/envs/my_new_env/bin/python data_construct_test/scripts/run_native_engine_live_gate.py`。
   - **SQL Server 客户端依赖**：Ubuntu 需要 `unixodbc` 与 Microsoft `msodbcsql18`；可用 `python -c "import pyodbc; print(pyodbc.drivers())"` 确认存在 `ODBC Driver 18 for SQL Server`。
   - **边界**：脚本不调用 Docker Compose，不会启动、停止或重建数据库容器。

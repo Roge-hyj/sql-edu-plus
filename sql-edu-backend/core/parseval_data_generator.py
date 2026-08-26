@@ -15,12 +15,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+import calendar
 from decimal import Decimal
 from typing import Any, Iterable
 from collections import Counter, defaultdict
 from contextvars import ContextVar
 from itertools import product
+import hashlib
 import math
+import json
 import re
 import sqlite3
 import time
@@ -33,6 +36,7 @@ from core.native_engine_runner import (
     NativeQueryExecutionError,
     NativeQuerySession,
     execute_native_query,
+    native_schema_resolution_kind,
     native_query_session,
 )
 from core.native_query_safety import (
@@ -83,12 +87,15 @@ from core.witness_generation.regex_support import (
     RegexEvaluationError,
     first_regex_non_match,
     glob_separating_values,
+    like_candidate_domain,
+    like_matches,
     like_separating_values,
     regex_matches,
     regex_separating_values,
     similar_separating_values,
     similar_to_matches,
 )
+from core.phase1_verdict import project_failure
 SQLite.Generator.SUPPORTS_TABLE_ALIAS_COLUMNS = True
 
 _MUTATION_RENDER_DIALECT: ContextVar[str] = ContextVar(
@@ -99,6 +106,10 @@ _MUTATION_ORIGINAL_EQUIVALENT: ContextVar[bool] = ContextVar(
     "parseval_mutation_original_equivalent",
     default=False,
 )
+_MUTATION_SCHEMA_CATALOG: ContextVar[SchemaCatalog | None] = ContextVar(
+    "parseval_mutation_schema_catalog",
+    default=None,
+)
 _STRUCTURE_PARSE_DIALECT: ContextVar[str] = ContextVar(
     "parseval_structure_parse_dialect",
     default="",
@@ -107,9 +118,25 @@ _STRUCTURE_PARSE_DIALECT: ContextVar[str] = ContextVar(
 _MAX_WITNESS_WORLDS = 8
 _MAX_WITNESS_ATTEMPTS = 8
 _MAX_WITNESS_ROWS_PER_TABLE = 32
+# Execution evidence needs enough rows to compare duplicate/set semantics,
+# but recursive or Cartesian teaching queries must never be copied without a
+# hard cap.  This is deliberately independent of the physical-table limit.
+_MAX_RECORDED_RESULT_ROWS = 256
+_MAX_SQLITE_GENERATE_SERIES_ROWS = 366
 _SQLITE_PROGRESS_GRANULARITY = 10_000
 _SQLITE_VM_INSTRUCTION_BUDGET = 1_000_000
 _SQLITE_EXECUTION_TIME_BUDGET_SECONDS = 0.5
+
+# Phase 1 -> Phase 2 query-scope contract.  These limits are deliberately
+# independent of the SQL execution limits: scope metadata is diagnostic
+# evidence and must never become an unbounded copy of the parsed AST.
+_SCOPE_METADATA_VERSION = "phase1.scope-metadata.v1"
+_MAX_SCOPE_AST_NODES_SCANNED = 8_192
+_MAX_SCOPE_NODES = 128
+_MAX_SCOPE_EDGES = 256
+_MAX_SCOPE_DIFFS = 256
+_MAX_SCOPE_DIFF_BINDINGS = 512
+_MAX_SCOPE_PATH_DEPTH = 48
 
 
 # Public Phase 1 verdicts.  ``is_equivalent`` remains as a compatibility
@@ -207,6 +234,131 @@ def parse_schema_text(schema: str) -> dict[str, list[str]]:
     return tables
 
 
+def _has_schema_quoted_identifier(
+    queries: tuple[str, ...],
+    schema: dict[str, list[str]],
+) -> bool:
+    """Detect standard quoted identifiers without changing quoted literals.
+
+    Generic/WikiSQL inputs sometimes use double quotes for physical column
+    names even though the compatibility backend defaults to MySQL semantics.
+    Switching the parser/executor for every double-quoted token would corrupt
+    valid MySQL string predicates such as ``department = "Sales"``.  Only a
+    quoted token that resolves to a declared table or column is evidence of
+    identifier intent; unknown quoted tokens retain MySQL's string-literal
+    behavior.
+    """
+    declared = {_norm_name(table) for table in schema}
+    declared.update(
+        _norm_name(column)
+        for columns in schema.values()
+        for column in columns
+    )
+    if not declared:
+        return False
+    for query in queries:
+        # Remove single-quoted SQL literals from the scan.  A prose value
+        # such as ``'the word "for"'`` must not switch the execution dialect
+        # merely because it contains a schema identifier.
+        segments = re.split(r"('(?:''|[^'])*')", query or "")
+        for segment in segments[::2]:
+            for match in re.finditer(r'"((?:""|[^"])*)"', segment):
+                value = match.group(1).replace('""', '"')
+                if _norm_name(value) in declared:
+                    return True
+    return False
+
+
+def _quote_numeric_schema_identifiers(
+    sql: str,
+    schema: dict[str, list[str]],
+) -> str:
+    """Quote schema-owned identifiers whose source spelling starts with a digit.
+
+    WikiSQL headers such as ``2007`` are identifiers in the source corpus, but
+    a generic SQL parser (and SQLite) otherwise reads the same token as a
+    numeric literal.  This is a lexical, schema-aware repair: only declared
+    numeric-leading table/column names are changed, and strings, comments, and
+    already quoted identifiers are copied byte-for-byte.
+    """
+    names = {
+        str(identifier).casefold()
+        for table, columns in schema.items()
+        for identifier in (table, *columns)
+        if identifier and str(identifier)[0].isdigit()
+    }
+    if not names:
+        return sql
+
+    output: list[str] = []
+    index = 0
+    quote: str | None = None
+    line_comment = False
+    block_comment = False
+    while index < len(sql):
+        char = sql[index]
+        next_char = sql[index + 1] if index + 1 < len(sql) else ""
+        if line_comment:
+            output.append(char)
+            if char in "\r\n":
+                line_comment = False
+            index += 1
+            continue
+        if block_comment:
+            output.append(char)
+            if char == "*" and next_char == "/":
+                output.append(next_char)
+                index += 2
+                block_comment = False
+            else:
+                index += 1
+            continue
+        if quote:
+            output.append(char)
+            if char == quote:
+                if index + 1 < len(sql) and sql[index + 1] == quote:
+                    output.append(sql[index + 1])
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char == "-" and next_char == "-":
+            output.extend((char, next_char))
+            index += 2
+            line_comment = True
+            continue
+        if char == "/" and next_char == "*":
+            output.extend((char, next_char))
+            index += 2
+            block_comment = True
+            continue
+        if char in "'\"`[":
+            quote = "]" if char == "[" else char
+            output.append(char)
+            index += 1
+            continue
+        if char.isdigit() and (
+            index == 0
+            or not (sql[index - 1].isalnum() or sql[index - 1] in "_$")
+        ):
+            end = index + 1
+            while end < len(sql) and (
+                sql[end].isalnum() or sql[end] in "_$"
+            ):
+                end += 1
+            token = sql[index:end]
+            if token.casefold() in names:
+                output.append('"' + token.replace('"', '""') + '"')
+            else:
+                output.append(token)
+            index = end
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output)
+
+
 def parse_schema_column_types(schema: str) -> dict[str, dict[str, str]]:
     """Parse optional compact column type hints from schema text.
 
@@ -287,12 +439,37 @@ def generate_and_compare(
 ) -> SandboxRun:
     schema = parse_schema_text(schema_text)
     schema_types = parse_schema_column_types(schema_text)
+    # Generic teaching-corpus SQL may use bare numeric-leading headers such as
+    # ``2007``.  Repair that source spelling before dialect resolution so the
+    # parser, witness planner, validator, and SQLite compatibility executor
+    # all observe the same schema-owned identifier.  Explicit vendor dialects
+    # retain their source SQL and native identifier rules.
+    dialect_hint = str(sql_dialect or "").strip().lower()
+    if not dialect_hint or dialect_hint in {"generic", "standard", "sqlite"}:
+        standard_sql = _quote_numeric_schema_identifiers(standard_sql, schema)
+        student_sql = _quote_numeric_schema_identifiers(student_sql, schema)
+    # MySQL treats double-quoted text as a string unless ANSI_QUOTES is
+    # enabled, while the teaching corpus uses standard quoted identifiers for
+    # WikiSQL headers such as ``"1st_leg"``.  With no explicit dialect, prefer
+    # SQLite's standard identifier interpretation for this narrow shape so the
+    # AST and the executable query retain the column reference.  Explicit
+    # MySQL rows remain untouched and keep their declared dialect semantics.
+    effective_default_dialect = default_sql_dialect
+    if sql_dialect is None and default_sql_dialect.lower() == "mysql":
+        if any(
+            re.search(r'"[0-9][A-Za-z0-9_$]*"', query or "")
+            for query in (standard_sql, student_sql)
+        ) or _has_schema_quoted_identifier(
+            (standard_sql, student_sql),
+            schema,
+        ):
+            effective_default_dialect = "sqlite"
     try:
         resolution = dialect_resolution or resolve_sql_dialect_or_raise(
             declared_dialect=sql_dialect,
             standard_sql=standard_sql,
             student_sql=student_sql,
-            default_dialect=default_sql_dialect,
+            default_dialect=effective_default_dialect,
         )
     except DialectResolutionError as exc:
         status = {
@@ -331,7 +508,31 @@ def generate_and_compare(
         target_dialect=target_dialect,
         execution_backend=execution_backend,
         native_executor_url=native_executor_url,
+        declared_vendor_dialect=resolution.requested_dialect
+        if resolution.requested_dialect in {"mysql", "postgres", "tsql", "oracle"}
+        else None,
     )
+    if backend == "implicit_vendor_backend":
+        return _failed(
+            "EXECUTION_BACKEND_REQUIRED_FOR_DECLARED_DIALECT",
+            None,
+            None,
+            {},
+            [],
+            [],
+            status="ENGINE_GAP",
+            error_code="EXECUTION_BACKEND_REQUIRED",
+            boundary_evidence={
+                "reason": "declared_vendor_dialect_without_execution_backend",
+                "declared_dialect": resolution.requested_dialect,
+                "required_action": (
+                    "set execution_backend to 'auto' for the configured native "
+                    "runner or explicitly select 'sqlite' for compatibility-only evidence"
+                ),
+            },
+            execution_backend=None,
+            sql_dialect=target_dialect,
+        )
     if backend == "invalid_backend":
         return _failed(
             f"UNSUPPORTED_EXECUTION_BACKEND: {execution_backend}",
@@ -379,7 +580,22 @@ def generate_and_compare(
                 columns={"name": ColumnSchema(name="Name")},
             )
     if not schema and (_extract_table_names(standard_sql) or _extract_table_names(student_sql)):
-        return _failed("schema_parse_failed", None, None, {}, [], [], status="ENGINE_ERROR")
+        return _failed(
+            "schema_parse_failed",
+            None,
+            None,
+            {},
+            [],
+            [],
+            status="INPUT_ERROR",
+            error_code="SCHEMA_PARSE_FAILED",
+            execution_backend=backend,
+            sql_dialect=target_dialect,
+            boundary_evidence={
+                "reason": "schema_unreplayable",
+                "required": "schema_for_referenced_physical_tables",
+            },
+        )
 
     unsupported_features = _detect_unsupported_features(
         backend,
@@ -450,7 +666,7 @@ def generate_and_compare(
             {},
             [],
             [],
-            status="ENGINE_ERROR",
+            status="INPUT_ERROR",
             error_code="STANDARD_SCHEMA_QUALIFICATION_FAILED",
             execution_backend=backend,
             sql_dialect=target_dialect,
@@ -501,6 +717,7 @@ def generate_and_compare(
         student_sql,
         dialect=parse_dialect,
         schema_catalog=catalog,
+        semantic_dialect=target_dialect,
     )
     structure_token = _STRUCTURE_PARSE_DIALECT.set(parse_dialect)
     try:
@@ -527,6 +744,7 @@ def generate_and_compare(
             if resolution.source == DialectResolutionSource.DEFAULT
             else resolution.parse_dialect
         ),
+        schema_catalog=catalog,
         preserve_source_sql=(
             resolution.source == DialectResolutionSource.DECLARED
             and resolution.requested_dialect != STANDARD_SQL_DIALECT
@@ -571,26 +789,30 @@ def generate_and_compare(
                     sql_dialect=target_dialect,
                 )
 
-    run = _complete_comparison(
-        backend=backend,
-        schema=schema,
-        schema_types=schema_types,
-        rows=rows,
-        standard_sql=standard_sql,
-        student_sql=student_sql,
-        standard_executable=standard_executable,
-        student_executable=student_executable,
-        standard_ast=standard_ast,
-        student_ast=student_ast,
-        ast_diffs=ast_diffs,
-        resolution=resolution,
-        target_dialect=target_dialect,
-        structure_dialect=parse_dialect,
-        native_executor_url=native_executor_url,
-        execution_session=None,
-        witness_suite=witness_suite,
-        schema_catalog=catalog,
-    )
+    mutation_catalog_token = _MUTATION_SCHEMA_CATALOG.set(catalog)
+    try:
+        run = _complete_comparison(
+            backend=backend,
+            schema=schema,
+            schema_types=schema_types,
+            rows=rows,
+            standard_sql=standard_sql,
+            student_sql=student_sql,
+            standard_executable=standard_executable,
+            student_executable=student_executable,
+            standard_ast=standard_ast,
+            student_ast=student_ast,
+            ast_diffs=ast_diffs,
+            resolution=resolution,
+            target_dialect=target_dialect,
+            structure_dialect=parse_dialect,
+            native_executor_url=native_executor_url,
+            execution_session=None,
+            witness_suite=witness_suite,
+            schema_catalog=catalog,
+        )
+    finally:
+        _MUTATION_SCHEMA_CATALOG.reset(mutation_catalog_token)
     run.data_evidence["schema_catalog"] = {
         "source": catalog.source,
         "database_id": catalog.database_id,
@@ -603,6 +825,39 @@ def generate_and_compare(
         ),
         "authoritative": schema_catalog is not None,
     }
+    # Phase 2 consumes explicit scope identities and AST-proven composition
+    # edges.  Keep this outside ``ASTDiffNode.extra``: that mapping is part of
+    # ``stable_diff_id`` and enriching it here would silently invalidate the
+    # frozen Phase 1 evidence identities.
+    try:
+        run.data_evidence["scope_metadata"] = _build_phase1_scope_metadata(
+            standard_ast,
+            student_ast,
+            ast_diffs,
+        )
+    except Exception as exc:  # pragma: no cover - last-resort evidence guard
+        # Scope enrichment must never change the Phase 1 verdict.  Expose only
+        # the exception class, not SQL text or engine details.
+        run.data_evidence["scope_metadata"] = {
+            "schema_version": _SCOPE_METADATA_VERSION,
+            "status": "PARTIAL",
+            "scopes": [],
+            "conceptual_scopes": [],
+            "parent_edges": [],
+            "composition_edges": [],
+            "diff_bindings": [],
+            "limitations": [
+                f"scope metadata construction failed: {type(exc).__name__}"
+            ],
+            "counts": {
+                "scopes": 0,
+                "conceptual_scopes": 0,
+                "parent_edges": 0,
+                "composition_edges": 0,
+                "diff_bindings": 0,
+            },
+            "truncated": False,
+        }
     return run
 
 
@@ -755,6 +1010,7 @@ def _complete_comparison(
                     world=world,
                     run=trial,
                     ast_diffs=ast_diffs,
+                    student_sql=student_sql,
                     backend=backend,
                     schema=schema,
                     schema_types=schema_types,
@@ -970,6 +1226,13 @@ def _run_witness_world(
     world.execution.setdefault("validation_context", {}).update({
         "standard_sql": standard_executable,
         "student_sql": student_executable,
+        # Validators normally inspect the executable SQL.  A bounded
+        # compatibility lowering can remove the operator being validated
+        # (INTERSECT/EXCEPT ALL becomes ranked joins), so retain the original
+        # pair as a second, read-only diagnostic source.
+        "standard_source_sql": standard_sql,
+        "student_source_sql": student_sql,
+        "sql_dialect": target_dialect,
         "execution_backend": backend,
     })
 
@@ -1094,6 +1357,7 @@ def _validate_world_atomic_diffs(
     world: WitnessWorld,
     run: SandboxRun,
     ast_diffs: list[ASTDiffNode],
+    student_sql: str,
     backend: str,
     schema: dict[str, list[str]],
     schema_types: dict[str, dict[str, str]],
@@ -1126,6 +1390,17 @@ def _validate_world_atomic_diffs(
     try:
         for diff_id, diff in indexed:
             variant_sql = _atomic_student_variant(diff)
+            if not variant_sql and diff.diff_type in {
+                # These clause-level nodes intentionally keep compact source
+                # fragments in ASTDiffNode. When the planner isolates that
+                # one obligation, the original student query is the exact
+                # atomic variant and preserves NOT LIKE/ORDER expression
+                # polarity that cannot be rebuilt from the fragment alone.
+                "where_changed",
+                "order_by_changed",
+                "projection_changed",
+            }:
+                variant_sql = student_sql
             if not variant_sql:
                 tests.append(
                     {
@@ -1173,12 +1448,27 @@ def _validate_world_atomic_diffs(
                     }
                 )
             except Exception as exc:
+                error_text = str(exc)
+                execution_error_distinguished = (
+                    run.is_equivalent is False
+                    and any(
+                        marker in error_text.lower()
+                        for marker in (
+                            "no such column",
+                            "no such table",
+                            "syntax error",
+                            "ambiguous column",
+                            "unknown column",
+                        )
+                    )
+                )
                 tests.append(
                     {
                         "diff_id": diff_id,
                         "supported": False,
-                        "distinguished": False,
-                        "reason": str(exc),
+                        "distinguished": execution_error_distinguished,
+                        "execution_error": execution_error_distinguished,
+                        "reason": error_text,
                     }
                 )
     finally:
@@ -1202,6 +1492,31 @@ def _atomic_student_variant(diff: ASTDiffNode) -> str | None:
             or diff.extra.get("student_sql")
             or ""
         ) or None
+    if diff.diff_type == "correlated_predicate_changed":
+        # The correlated detector compares the Exists nodes themselves.  A
+        # NOT EXISTS mutation stores the polarity on the student's parent, so
+        # replacing only the Exists node would silently produce the standard
+        # query again and invalidate atomic attribution.
+        if isinstance(diff.standard_node, exp.Expression) and isinstance(
+            diff.student_node, exp.Expression
+        ):
+            replacement = diff.student_node.copy()
+            if isinstance(diff.student_node.parent, exp.Not):
+                replacement = exp.Not(this=replacement)
+            root = diff.standard_node
+            while isinstance(root.parent, exp.Expression):
+                root = root.parent
+            return _mutate_by_node_replacement(root, diff.standard_node, replacement)
+    if diff.diff_type in {"limit_changed", "offset_changed"} and isinstance(
+        diff.student_node, exp.Expression
+    ):
+        # Clause-addition diffs have no standard AST node. The student's clause
+        # remains attached to its query block, so replay the complete student
+        # query as the exact atomic variant.
+        root = diff.student_node
+        while isinstance(root.parent, exp.Expression):
+            root = root.parent
+        return _sql_of(root)
     standard_node = diff.standard_node
     if diff.diff_type in {
         "group_by_changed",
@@ -1337,8 +1652,17 @@ def _record_world_attempt(
         "distinguished": run.executed and run.is_equivalent is False,
         "standard_row_count": len(run.standard_rows),
         "student_row_count": len(run.student_rows),
-        "standard_result": run.standard_rows[:5],
-        "student_result": run.student_rows[:5],
+        # Keep the public sample small in the ordinary run object, while the
+        # bounded full prefix lets semantic validators distinguish a duplicate
+        # from a merely different tail.  Without this, a 16-row DISTINCT
+        # witness was truncated to five rows and the validator incorrectly
+        # concluded that the projected value sets differed.
+        "standard_result": run.standard_rows[:_MAX_RECORDED_RESULT_ROWS],
+        "student_result": run.student_rows[:_MAX_RECORDED_RESULT_ROWS],
+        "result_rows_truncated": (
+            len(run.standard_rows) > _MAX_RECORDED_RESULT_ROWS
+            or len(run.student_rows) > _MAX_RECORDED_RESULT_ROWS
+        ),
         "obligation_distinguished": bool(
             atomic_validation.get("all_supported_distinguished")
         ),
@@ -1572,6 +1896,34 @@ def _link_mutation_diff_ids(
         for index, diff in enumerate(ast_diffs)
         if not is_redundant_summary_diff(diff, ast_diffs)
     ]
+    null_antijoin_ids = [
+        diff_id
+        for diff_id, diff in indexed
+        if diff.diff_type == "null_sensitive_antijoin_equivalence"
+    ]
+    correlated_predicate_ids = [
+        diff_id
+        for diff_id, diff in indexed
+        if diff.diff_type == "correlated_predicate_changed"
+    ]
+    recursive_step_ids = [
+        diff_id
+        for diff_id, diff in indexed
+        if diff.diff_type == "recursive_step_expression_changed"
+    ]
+    set_operator_ids = [
+        diff_id
+        for diff_id, diff in indexed
+        if diff.diff_type == "set_operator_changed"
+    ]
+    null_predicate_ids = [
+        diff_id
+        for diff_id, diff in indexed
+        if diff.diff_type in {
+            "null_equality_changed",
+            "null_predicate_negation_changed",
+        }
+    ]
     for item in mutation_evidence.get("tests", []):
         clause = str(item.get("clause") or "").upper()
         clause_matches = [
@@ -1587,14 +1939,96 @@ def _link_mutation_diff_ids(
             and knowledge_point
             and str(diff.knowledge_point_id or "").lower() == knowledge_point
         ]
-        matches = kp_matches if len(kp_matches) == 1 else clause_matches
+        # NOT IN/NOT EXISTS is represented as a focused NULL obligation, but
+        # the legacy clause mutator restores the enclosing WHERE.  Clause-only
+        # matching therefore loses the causal link even though the mutation
+        # is the exact repair.  Use this semantic identity only when the AST
+        # pass proved there is one such focused diff; multiple NULL differences
+        # remain conservative and are not guessed.
+        semantic_match = (
+            knowledge_point in {"null-handling", "comp-null", "subquery-correlated"}
+            and len(null_antijoin_ids) == 1
+            and item.get("action") == "replace_student_clause_with_standard_clause"
+        )
+        null_predicate_match = (
+            knowledge_point in {"null-handling", "comp-null"}
+            and len(null_predicate_ids) == 1
+            and item.get("action") == "replace_student_clause_with_standard_clause"
+        )
+        case_null_predicate_match = (
+            knowledge_point == "case"
+            and clause == "CASE"
+            and len(null_predicate_ids) == 1
+            and item.get("action") == "replace_student_clause_with_standard_clause"
+        )
+        correlated_match = (
+            knowledge_point == "subquery-correlated"
+            and len(correlated_predicate_ids) == 1
+            and item.get("action") in {
+                "restore_correlated_comparison",
+                "restore_correlated_predicate",
+            }
+        )
+        recursive_match = (
+            knowledge_point == "cte-recursive"
+            and clause in {"RECURSIVE CTE", "CTE", "WITH"}
+            and len(recursive_step_ids) == 1
+            and item.get("action") == "replace_student_clause_with_standard_clause"
+        )
+        set_operator_match = (
+            knowledge_point == "cte-recursive"
+            and clause in {"RECURSIVE CTE", "CTE", "WITH"}
+            and len(set_operator_ids) == 1
+            and item.get("action") == "replace_student_clause_with_standard_clause"
+        )
+        # A removed predicate inside one branch can produce a literal-diff
+        # summary plus the focused predicate_missing node. Prefer the focused
+        # node for a whole-WHERE replacement when it is unique; this keeps the
+        # repair binding causal instead of declaring the pair ambiguous.
+        predicate_gap_ids = [
+            diff_id
+            for diff_id, diff in indexed
+            if diff.diff_type in {"predicate_missing", "predicate_added"}
+            and diff_id in clause_matches
+        ]
+        predicate_gap_match = (
+            clause == "WHERE"
+            and len(predicate_gap_ids) == 1
+            and item.get("action") == "replace_student_clause_with_standard_clause"
+        )
+        if correlated_match:
+            matches = correlated_predicate_ids
+        elif recursive_match:
+            matches = recursive_step_ids
+        elif set_operator_match:
+            matches = set_operator_ids
+        elif predicate_gap_match:
+            matches = predicate_gap_ids
+        elif null_predicate_match:
+            matches = null_predicate_ids
+        elif case_null_predicate_match:
+            matches = null_predicate_ids
+        elif semantic_match:
+            matches = null_antijoin_ids
+        else:
+            matches = kp_matches if len(kp_matches) == 1 else clause_matches
         item["diff_ids"] = matches
         item["obligation_ids"] = [
             f"obligation_{diff_id.removeprefix('diff_')}" for diff_id in matches
         ]
         item["binding_quality"] = (
             "exact"
-            if len(matches) == 1 and (len(kp_matches) == 1 or len(clause_matches) == 1)
+            if len(matches) == 1 and (
+                semantic_match
+                or null_predicate_match
+                or case_null_predicate_match
+                or correlated_match
+                or recursive_match
+                or set_operator_match
+                or predicate_gap_match
+                or len(kp_matches) == 1
+                or len(clause_matches) == 1
+            )
             else "ambiguous"
             if len(matches) > 1
             else "unbound"
@@ -1615,8 +2049,14 @@ def _mutation_clause_matches_diff(clause: str, diff: ASTDiffNode) -> bool:
     aliases = {
         "PREDICATE": {"WHERE", "HAVING", "QUALIFY", "JOIN ON"},
         "LOGICAL": {"WHERE", "HAVING", "QUALIFY", "JOIN ON"},
+        # A predicate-level mutation often replaces the enclosing WHERE even
+        # when the atomic AST diff is IN/LIKE/BETWEEN. Keep that enclosing
+        # clause linked to the one atomic predicate obligation.
+        "IN": {"WHERE", "HAVING", "PREDICATE"},
+        "LIKE": {"WHERE", "HAVING", "PREDICATE"},
+        "BETWEEN": {"WHERE", "HAVING", "PREDICATE"},
+        "SELECT": {"PROJECTION", "SELECT", "AGGREGATE", "WINDOW", "CASE"},
         "JOIN_TYPE": {"JOIN TYPE", "JOIN"},
-        "SELECT": {"PROJECTION", "SELECT"},
         "AGGREGATE": {"AGGREGATE", "SELECT", "HAVING"},
         "CTE_RECURSIVE": {"CTE", "RECURSIVE CTE"},
     }
@@ -1663,20 +2103,35 @@ def _complete_comparison_single(
             execution_session=execution_session,
         )
     except Exception as exc:
-        status = "TIMEOUT" if _is_execution_timeout(exc) else (
-            "UNSUPPORTED"
-            if _is_likely_backend_capability_error(backend, str(exc), standard_executable)
-            else "ENGINE_ERROR"
-        )
+        schema_error = native_schema_resolution_kind(backend, exc)
+        if schema_error is not None:
+            status = "INPUT_ERROR"
+            error = f"standard_schema_replay_failed: {schema_error}"
+            error_code = "NATIVE_SCHEMA_REPLAY_GAP"
+            boundary_evidence = {
+                "reason": "native_schema_resolution_failed",
+                "sql_role": "standard",
+                "schema_error": schema_error,
+            }
+        else:
+            status = "TIMEOUT" if _is_execution_timeout(exc) else (
+                "UNSUPPORTED"
+                if _is_likely_backend_capability_error(backend, str(exc), standard_executable)
+                else "ENGINE_ERROR"
+            )
+            error = f"standard_sql_failed: {exc}"
+            error_code = getattr(exc, "code", None)
+            boundary_evidence = None
         return _failed(
-            f"standard_sql_failed: {exc}",
+            error,
             standard_executable,
             student_executable,
             rows,
             [],
             [],
             status=status,
-            error_code=getattr(exc, "code", None),
+            error_code=error_code,
+            boundary_evidence=boundary_evidence,
             execution_backend=backend,
             sql_dialect=target_dialect,
         )
@@ -1964,7 +2419,7 @@ def generate_test_database(
         clauses={"ORDER BY", "LIMIT"},
         diff_types={
             "order_by_changed", "order_by_tiebreaker_missing", "order_by_key_added",
-            "order_direction_changed", "limit_changed",
+            "order_direction_changed", "order_nulls_changed", "limit_changed",
         },
     )
 
@@ -1989,6 +2444,7 @@ def generate_test_database(
         for ast in parsed_queries
     )
     query_has_window = any(ast.find(exp.Window) is not None for ast in parsed_queries)
+    query_has_recursive = any(_is_recursive_ast(ast) for ast in parsed_queries)
     connect_type = getattr(exp, "Connect", None)
     query_has_hierarchical_connect = bool(connect_type) and any(
         ast.find(connect_type) is not None
@@ -2192,7 +2648,7 @@ def generate_test_database(
         _apply_nested_membership_chain_probe(data, standard_sql, student_sql)
     if has_set_world or has_cte_world:
         _apply_cte_set_overlap_probe(data, standard_sql, student_sql, ast_diffs)
-    if has_cte_world:
+    if has_cte_world or query_has_recursive:
         _apply_recursive_cte_safety(data, schema, standard_sql, student_sql)
     if has_cte_world or has_set_world:
         _apply_recursive_set_duplicate_probe(data, standard_sql, student_sql, ast_diffs)
@@ -2293,6 +2749,12 @@ def _finalize_generated_witness_data(
         student_sql,
         ast_diffs,
     )
+    _materialize_aggregate_filter_presence_witness(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+    )
     _materialize_aggregate_obligation_witness(data, standard_sql, ast_diffs)
     _materialize_declared_aggregate_boundary(
         data,
@@ -2333,6 +2795,7 @@ def _finalize_generated_witness_data(
         ast_diffs,
         standard_sql,
         student_sql,
+        schema_catalog=schema_catalog,
     )
     _materialize_correlated_key_drift_witness(
         data,
@@ -2358,6 +2821,13 @@ def _finalize_generated_witness_data(
         student_sql,
         schema_catalog=schema_catalog,
     )
+    _materialize_set_modifier_duplicate_path(
+        data,
+        obligations or [],
+        standard_sql,
+        student_sql,
+        schema_catalog=schema_catalog,
+    )
     _materialize_scalar_aggregate_boundary_path(
         data,
         obligations or [],
@@ -2375,6 +2845,2441 @@ def _finalize_generated_witness_data(
         standard_sql,
         student_sql,
     )
+    _materialize_cte_aggregate_alias_boundary(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+        schema_catalog=schema_catalog,
+    )
+    _materialize_derived_sum_alias_boundary(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+        schema_catalog=schema_catalog,
+    )
+    _materialize_having_ratio_boundary(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+        schema_catalog=schema_catalog,
+    )
+    _materialize_window_alias_cardinality_boundary(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+        schema_catalog=schema_catalog,
+    )
+    _materialize_null_sensitive_limit_order_witness(
+        data,
+        standard_sql,
+        student_sql,
+    )
+    # Temporal comparisons are finalized last.  Generic literal probes use
+    # string sentinels for unknown columns; that is safe for ordinary text
+    # predicates but makes DATE/YEAR boundaries either unparsable or
+    # accidentally equal on both sides.  Keep this pass narrow and
+    # query-block-aware so it only owns worlds with a temporal comparison
+    # obligation.
+    _materialize_temporal_comparison_witness(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+        schema_catalog=schema_catalog,
+    )
+    _materialize_correlated_exists_boundary_path(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+    )
+    _materialize_correlated_scalar_aggregate_key_drift_witness(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+        schema_catalog=schema_catalog,
+    )
+    # A top-level DISTINCT over a multi-table projection cannot be witnessed
+    # by copying payload cells in each physical table independently.  The
+    # projected tuple is produced by a *join path*: two distinct fact rows
+    # must resolve to the same dimension rows (or to equal payload values).
+    # Materialize that path last, after PK repair and all generic probes, so a
+    # later compatibility tactic cannot silently undo the duplicate.
+    _materialize_distinct_join_projection_witness(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+    )
+    _materialize_top_level_distinct_filter_witness(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+    )
+    _materialize_shared_literal_predicate_paths(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+        schema_catalog=schema_catalog,
+    )
+    _materialize_not_in_reachable_path(
+        data,
+        standard_sql,
+        student_sql,
+        ast_diffs,
+    )
+    _materialize_simple_in_exists_membership_witness(
+        data,
+        standard_sql,
+        student_sql,
+    )
+    _materialize_conjunctive_in_exists_membership_witness(
+        data,
+        standard_sql,
+        student_sql,
+    )
+    # Logical truth-table rows are the final owner of the two predicate
+    # columns.  Comparison/literal and compatibility materializers above may
+    # touch the same cells after the registry probe; replaying the narrow
+    # AND/OR/precedence probe here preserves all four boolean assignments for
+    # its semantic validator without changing unrelated predicate worlds.
+    if any(
+        diff.diff_type in {
+            "logical_operator_changed",
+            "logical_precedence_tree_changed",
+        }
+        for diff in ast_diffs
+    ):
+        _apply_logical_operator_probe(data, standard_sql, student_sql)
+    if any(
+        diff.diff_type in {
+            "set_operator_changed",
+            "set_modifier_changed",
+            "set_all_modifier_changed",
+        }
+        for diff in ast_diffs
+    ):
+        # Set-branch overlap is the final owner of projected cells.  Generic
+        # numeric/PK repairs can otherwise overwrite it after the registry
+        # adapter has created the path.
+        _apply_set_operator_probes(data, standard_sql, student_sql, ast_diffs)
+    # LIKE presence paths own their source column after all generic literal
+    # and compatibility probes.  Replay this narrow adapter at the end so a
+    # later numeric/string repair cannot erase the positive/negative value
+    # pair it selected.
+    _materialize_like_presence_witness(
+        data,
+        [
+            diff
+            for diff in ast_diffs
+            if diff.diff_type in {"predicate_missing", "predicate_added"}
+            and not diff.extra.get("subquery_depth")
+        ],
+    )
+    if any(
+        diff.diff_type in {
+            "join_missing",
+            "join_type_changed",
+            "join_on_changed",
+            "join_predicate_placement_changed",
+        }
+        for diff in ast_diffs
+    ):
+        # Numeric/string compatibility repair above can reinterpret a
+        # materialized key (e.g. ``1`` as ``pro_com_1``).  Re-establish the
+        # declared JOIN endpoint after that repair, preserving one real match
+        # and one dangling path for the join validator.
+        _materialize_declared_join_witness(data, ast_diffs)
+    _repair_declared_nonnull_columns(data, schema_catalog=schema_catalog)
+
+
+def _repair_declared_nonnull_columns(
+    data: dict[str, list[dict[str, Any]]],
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> None:
+    """Restore hard NOT NULL columns after legacy probes have run.
+
+    NULL is a valid witness only when the catalog permits it.  Legacy probes
+    predate the structured catalog and may write NULL based on SQL shape alone;
+    this final integrity pass prevents those writes from creating impossible
+    databases or false NOT IN counterexamples.
+    """
+    if schema_catalog is None:
+        return
+    for table_name, rows in data.items():
+        table_schema = schema_catalog.table(table_name)
+        if table_schema is None:
+            continue
+        for column_schema in table_schema.columns.values():
+            if column_schema.nullable:
+                continue
+            actual_column = _column_lookup(list(rows[0])).get(
+                _norm_name(column_schema.name)
+            ) if rows else None
+            if actual_column is None:
+                continue
+            for index, row in enumerate(rows):
+                if row.get(actual_column) is not None:
+                    continue
+                kind = _authoritative_column_kind(
+                    table_name,
+                    column_schema.name,
+                    schema_catalog,
+                )
+                seed = _seed_value(column_schema.name, index)
+                row[actual_column] = (
+                    _coerce_typed_seed(seed, kind, column_schema.name, index)
+                    if kind
+                    else seed
+                )
+
+
+def _materialize_distinct_join_projection_witness(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+) -> bool:
+    """Create two valid join paths with the same DISTINCT projection.
+
+    The old DISTINCT probe duplicated columns independently in every table.
+    That works for a single source table, but it cannot make
+    ``d.name, p.name`` equal when two fact rows still point at different
+    dimension keys.  This bounded materializer chooses two rows from one
+    direct source table, keeps their candidate keys unique, aligns the JOIN
+    equalities to one dimension row, and then equalizes the projected payload.
+
+    It deliberately skips self-joins, repeated physical aliases, and
+    projections containing a varying primary key.  In those cases a generic
+    duplicate would violate the declared relational shape and the existing
+    specialized probes remain responsible for the witness.
+    """
+    if not any(diff.diff_type == "distinct_changed" for diff in ast_diffs):
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    standard_select = _top_select(standard_ast) if standard_ast is not None else None
+    student_select = _top_select(student_ast) if student_ast is not None else None
+    if not isinstance(standard_select, exp.Select) or not isinstance(student_select, exp.Select):
+        return False
+    if not standard_select.args.get("distinct") or student_select.args.get("distinct"):
+        return False
+    distinct = standard_select.args.get("distinct")
+    if isinstance(distinct, exp.Distinct) and distinct.args.get("on") is not None:
+        return False
+
+    source = _direct_from_table(standard_select)
+    joins = list(standard_select.args.get("joins") or ())
+    if not isinstance(source, exp.Table) or not joins:
+        return False
+    direct_aliases = _direct_select_tables(standard_select)
+    if len(direct_aliases) < 2:
+        return False
+
+    # A physical table used through two aliases needs a self-join-specific
+    # path; using one row index for both aliases here can manufacture a false
+    # duplicate or a Cartesian product.
+    physical_aliases: dict[str, int] = defaultdict(int)
+    for table_node in standard_select.find_all(exp.Table):
+        if table_node.find_ancestor(exp.Select) is not standard_select:
+            continue
+        physical_aliases[_norm_name(table_node.name)] += 1
+    if any(count > 1 for count in physical_aliases.values()):
+        return False
+
+    projected_refs: list[tuple[str, str]] = []
+    for item in standard_select.expressions or ():
+        expression = item.this if isinstance(item, exp.Alias) else item
+        if not isinstance(expression, exp.Column):
+            # Expressions may still be handled by the older probes.  This
+            # materializer only claims the simple column projection shape.
+            return False
+        ref = _column_ref_in_select_data(data, expression, standard_select)
+        if ref is None:
+            return False
+        projected_refs.append(ref)
+    if not projected_refs:
+        return False
+
+    table_names = {
+        _norm_name(name): name
+        for name, rows in data.items()
+        if rows
+    }
+    direct_physical = set(direct_aliases.values())
+    if not direct_physical.issubset(table_names):
+        return False
+
+    # Prefer the FROM table as the duplicated path, then fall back to another
+    # one-to-many source whose key is not itself projected.  This preserves
+    # primary-key uniqueness while still allowing two result rows.
+    candidates = [
+        _norm_name(source.name),
+        *sorted(direct_physical - {_norm_name(source.name)}),
+    ]
+    projected_by_table: dict[str, set[str]] = defaultdict(set)
+    for table, column in projected_refs:
+        projected_by_table[table].add(column)
+    driver: str | None = None
+    for candidate in candidates:
+        actual_name = table_names.get(candidate)
+        rows = data.get(actual_name or "", [])
+        if len(rows) < 2:
+            continue
+        columns = list(rows[0])
+        primary = _primary_key_candidate(columns, actual_name or candidate)
+        if primary and _norm_name(primary) in projected_by_table.get(candidate, set()):
+            continue
+        driver = candidate
+        break
+    if driver is None:
+        return False
+
+    # Map each direct physical table to the row used by path 0/path 1.  Only
+    # the driver varies; joined dimension rows are intentionally shared.
+    path_rows = {
+        table: (0, 1) if table == driver else (0, 0)
+        for table in direct_physical
+    }
+
+    edges: list[tuple[tuple[str, str], tuple[str, str]]] = []
+    for join in joins:
+        on = join.args.get("on")
+        if not isinstance(on, exp.Expression):
+            continue
+        equalities = [on] if isinstance(on, exp.EQ) else list(on.find_all(exp.EQ))
+        for equality in equalities:
+            if not isinstance(equality.left, exp.Column) or not isinstance(equality.right, exp.Column):
+                continue
+            left = _column_ref_in_select_data(data, equality.left, standard_select)
+            right = _column_ref_in_select_data(data, equality.right, standard_select)
+            if left is None or right is None or left[0] not in direct_physical or right[0] not in direct_physical:
+                continue
+            edges.append((left, right))
+    if not edges:
+        return False
+
+    def actual_column(ref: tuple[str, str]) -> tuple[list[dict[str, Any]], str] | None:
+        return _actual_data_ref(data, ref)
+
+    # Apply local literal predicates before aligning the join graph.  The
+    # equality pass below is authoritative for the path keys.
+    for row_index in (0, 1):
+        _set_select_local_literal_predicates(data, standard_select, row_index)
+
+    # Every equality gets one common value on both paths.  Existing typed
+    # values are preferred; a small deterministic fallback handles NULL or
+    # missing seed values without introducing an AST object into the row.
+    with write_owner("materializer:distinct_join_projection"):
+        for left, right in edges:
+            left_actual = actual_column(left)
+            right_actual = actual_column(right)
+            if left_actual is None or right_actual is None:
+                continue
+            left_rows, left_column = left_actual
+            right_rows, right_column = right_actual
+            current = left_rows[0].get(left_column)
+            if current is None:
+                current = right_rows[0].get(right_column)
+            if current is None:
+                current = (
+                    700000
+                    if _is_numeric_column(left_column) or _is_numeric_column(right_column)
+                    else "__distinct_join_key__"
+                )
+            for path in (0, 1):
+                left_rows[path_rows[left[0]][path]][left_column] = current
+                right_rows[path_rows[right[0]][path]][right_column] = current
+
+        # Equalize the values that the SELECT actually observes.  A dimension
+        # projection already uses the same row on both paths; a driver payload
+        # needs a write to both distinct source rows.
+        for table, column in projected_refs:
+            actual = actual_column((table, column))
+            if actual is None:
+                return False
+            rows, actual_column_name = actual
+            first_value = rows[path_rows[table][0]].get(actual_column_name)
+            marker = (
+                777777
+                if isinstance(first_value, (int, float, Decimal)) and not isinstance(first_value, bool)
+                else "__distinct_join_projection__"
+            )
+            for path in (0, 1):
+                rows[path_rows[table][path]][actual_column_name] = marker
+    return True
+
+
+def _materialize_top_level_distinct_filter_witness(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+) -> bool:
+    """Duplicate two rows that actually survive a simple DISTINCT filter.
+
+    The legacy duplicate adapter used physical rows 0 and 1.  A preceding
+    predicate probe may instead make rows 0 and 3 the qualifying rows, so the
+    duplicate was present in the table but absent from the executed result.
+    This late, single-table path writes the filter-positive values first and
+    then duplicates only the projected, non-key payload.
+    """
+    if not any(diff.diff_type == "distinct_changed" for diff in ast_diffs):
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    standard_select = _top_select(standard_ast) if standard_ast is not None else None
+    student_select = _top_select(student_ast) if student_ast is not None else None
+    if not isinstance(standard_select, exp.Select) or not isinstance(
+        student_select, exp.Select
+    ):
+        return False
+    standard_distinct = standard_select.args.get("distinct")
+    student_distinct = student_select.args.get("distinct")
+    if bool(standard_distinct) == bool(student_distinct):
+        return False
+    distinct_select = standard_select if standard_distinct else student_select
+    plain_select = student_select if standard_distinct else standard_select
+    if isinstance(standard_distinct, exp.Distinct) and standard_distinct.args.get("on") is not None:
+        return False
+    if isinstance(student_distinct, exp.Distinct) and student_distinct.args.get("on") is not None:
+        return False
+    if any(
+        select.find(exp.AggFunc) is not None
+        or select.args.get(key)
+        for select in (standard_select, student_select)
+        for key in ("group", "having", "qualify", "order", "limit", "offset")
+    ):
+        return False
+
+    source = _direct_from_table(distinct_select)
+    plain_source = _direct_from_table(plain_select)
+    if not isinstance(source, exp.Table) or not isinstance(plain_source, exp.Table):
+        return False
+    if _norm_name(source.name) != _norm_name(plain_source.name):
+        return False
+    if distinct_select.args.get("joins") or plain_select.args.get("joins"):
+        return False
+    table_name = _norm_name(source.name)
+    actual_table = next(
+        (name for name in data if _norm_name(name) == table_name),
+        None,
+    )
+    rows = data.get(actual_table or "", [])
+    if len(rows) < 2:
+        return False
+
+    where = distinct_select.args.get("where")
+    comparisons: list[exp.Expression] = []
+    if isinstance(where, exp.Where):
+        if isinstance(_unwrap_paren(where.this), (exp.And, exp.Or, exp.Not)):
+            return False
+        comparisons = [
+            node
+            for node in where.find_all(
+                exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE
+            )
+            if node.find_ancestor(exp.Select) is distinct_select
+        ]
+        if not comparisons:
+            return False
+
+    projected_columns: list[str] = []
+    for item in distinct_select.expressions or ():
+        expression = item.this if isinstance(item, exp.Alias) else item
+        if not isinstance(expression, exp.Column):
+            return False
+        ref = _column_ref_in_select_data(data, expression, distinct_select)
+        actual = _actual_data_ref(data, ref) if ref else None
+        if ref is None or actual is None or _norm_name(ref[0]) != table_name:
+            return False
+        column = actual[1]
+        if _is_key_column(column) or _is_primary_key_candidate(
+            actual_table or table_name,
+            column,
+            list(rows[0]),
+        ):
+            # A duplicate primary/business key would violate the bounded
+            # relational shape and cannot prove a DISTINCT difference.
+            return False
+        projected_columns.append(column)
+    if not projected_columns:
+        return False
+
+    filter_assignments: list[tuple[str, Any]] = []
+    for comparison in comparisons:
+        if not isinstance(comparison.left, exp.Column) or not isinstance(
+            comparison.right, exp.Literal
+        ):
+            return False
+        ref = _column_ref_in_select_data(data, comparison.left, distinct_select)
+        actual = _actual_data_ref(data, ref) if ref else None
+        value = _comparison_truth_value(comparison, True)
+        if actual is None or value is None:
+            return False
+        filter_assignments.append((actual[1], value))
+
+    with write_owner("materializer:distinct_filter_projection"):
+        for column, value in filter_assignments:
+            rows[0][column] = value
+            rows[1][column] = value
+        for column in projected_columns:
+            rows[1][column] = rows[0][column]
+    return True
+
+
+def _materialize_shared_literal_predicate_paths(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Make simple string filters reachable for aggregate/DISTINCT worlds.
+
+    The generic seed generator deliberately avoids guessing the type of an
+    untyped column.  That is normally the right fail-closed behavior, but it
+    leaves a bounded witness empty when a public query filters on a literal
+    such as ``country = 'Austria'``.  This final pass is intentionally narrow:
+    it only handles a single-table top-level aggregate or DISTINCT query and
+    writes the declared literal to two rows.  It never rewrites primary keys,
+    projections, joins, or non-text typed columns.
+    """
+    relevant = {
+        "aggregate_function_changed",
+        "aggregate_argument_changed",
+        "aggregate_distinct_changed",
+        "distinct_changed",
+    }
+    if not any(diff.diff_type in relevant for diff in ast_diffs):
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    standard_select = _top_select(standard_ast) if standard_ast is not None else None
+    student_select = _top_select(student_ast) if student_ast is not None else None
+    if not isinstance(standard_select, exp.Select) or not isinstance(student_select, exp.Select):
+        return False
+    source = _direct_from_table(standard_select)
+    if not isinstance(source, exp.Table) or standard_select.args.get("joins"):
+        return False
+    actual_table = next(
+        (name for name in data if _norm_name(name) == _norm_name(source.name)),
+        None,
+    )
+    rows = data.get(actual_table or "")
+    if not rows or len(rows) < 2:
+        return False
+
+    bindings: dict[str, tuple[str, Any]] = {}
+    where = standard_select.args.get("where")
+    if not isinstance(where, exp.Where):
+        return False
+    for node in where.find_all(exp.EQ, exp.In):
+        if node.find_ancestor(exp.Select) is not standard_select:
+            continue
+        column: exp.Column | None = None
+        values: list[Any] = []
+        if isinstance(node, exp.EQ):
+            if isinstance(node.left, exp.Column) and isinstance(node.right, exp.Literal):
+                column, values = node.left, [_literal_value(node.right)]
+            elif isinstance(node.right, exp.Column) and isinstance(node.left, exp.Literal):
+                column, values = node.right, [_literal_value(node.left)]
+        elif isinstance(node.this, exp.Column):
+            column = node.this
+            values = [
+                _literal_value(item)
+                for item in (node.expressions or ())
+                if isinstance(item, exp.Literal)
+            ]
+        if not isinstance(column, exp.Column) or not values or not all(
+            isinstance(value, str) for value in values
+        ):
+            continue
+        ref = _column_ref_in_select_data(data, column, standard_select)
+        if ref is None or _norm_name(ref[0]) != _norm_name(actual_table):
+            continue
+        actual = _actual_data_ref(data, ref)
+        if actual is None:
+            continue
+        _predicate_rows, actual_column = actual
+        kind = _authoritative_column_kind(
+            actual_table,
+            actual_column,
+            schema_catalog,
+        )
+        if kind in {"numeric", "date", "time"}:
+            continue
+        desired = values[0]
+        previous = bindings.get(actual_column)
+        if previous is not None and previous[1] != desired:
+            return False
+        bindings[actual_column] = (actual_column, desired)
+    if not bindings:
+        return False
+
+    with write_owner("materializer:shared_literal_predicate_paths"):
+        for actual_column, (_column_name, value) in bindings.items():
+            rows[0][actual_column] = value
+            rows[1][actual_column] = value
+
+        # COUNT(column) versus COUNT(*) needs one NULL measure among the two
+        # rows that satisfy the filter.  Keep the write conditional on the
+        # mutation shape so ordinary aggregate filters are not altered.
+        standard_aggregates = [
+            aggregate
+            for aggregate in standard_select.find_all(exp.AggFunc)
+            if _nearest_select(aggregate) is standard_select
+        ]
+        student_aggregates = [
+            aggregate
+            for aggregate in student_select.find_all(exp.AggFunc)
+            if _nearest_select(aggregate) is student_select
+        ]
+        if standard_aggregates and student_aggregates:
+            standard_count = next(
+                (item for item in standard_aggregates if type(item).__name__.upper() == "COUNT"),
+                None,
+            )
+            student_count = next(
+                (item for item in student_aggregates if type(item).__name__.upper() == "COUNT"),
+                None,
+            )
+            if standard_count is not None and student_count is not None:
+                standard_arg = standard_count.this
+                student_arg = student_count.this
+                if isinstance(standard_arg, exp.Column) and isinstance(student_arg, exp.Star):
+                    ref = _column_ref_in_select_data(data, standard_arg, standard_select)
+                    actual = _actual_data_ref(data, ref) if ref else None
+                    if actual is not None:
+                        measure_rows, measure_column = actual
+                        nullable = _catalog_column_schema(
+                            actual_table,
+                            measure_column,
+                            schema_catalog,
+                        )
+                        if nullable is None or nullable.nullable:
+                            if measure_rows[0].get(measure_column) is None:
+                                measure_rows[0][measure_column] = 1
+                            measure_rows[1][measure_column] = None
+
+        # A top-level DISTINCT needs two reachable rows with the same
+        # projected tuple.  Do not copy a primary key or a predicate column.
+        if standard_select.args.get("distinct"):
+            primary = _primary_key_candidate(list(rows[0]), actual_table)
+            projected_columns: list[str] = []
+            for item in standard_select.expressions or ():
+                expression = item.this if isinstance(item, exp.Alias) else item
+                if not isinstance(expression, exp.Column):
+                    projected_columns = []
+                    break
+                ref = _column_ref_in_select_data(data, expression, standard_select)
+                actual = _actual_data_ref(data, ref) if ref else None
+                if actual is None:
+                    projected_columns = []
+                    break
+                projected_columns.append(actual[1])
+            for column in projected_columns:
+                if column in bindings or (primary and _norm_name(column) == _norm_name(primary)):
+                    continue
+                rows[1][column] = rows[0].get(column)
+    return True
+
+
+def _materialize_not_in_reachable_path(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+) -> bool:
+    """Build one complete row path for a top-level ``NOT IN`` difference.
+
+    A local membership witness is insufficient when the anti-membership
+    predicate is the last term of a large outer conjunction.  This narrow
+    materializer is intentionally limited to the common teaching shape where
+    the standard query has ``NOT <outer-column> IN (SELECT <column> ...)``.
+    It makes one outer row survive its direct join, every top-level EXISTS,
+    and a scalar COUNT prerequisite, while keeping a second outer value in
+    the membership overlap so the semantic validator remains meaningful.
+
+    Only existing bounded rows are edited.  The pass is last in finalization
+    so generic probes cannot undo the assembled path afterward.
+    """
+    boundary_diff = next(
+        (
+            diff
+            for diff in ast_diffs
+            if diff.diff_type == "in_predicate_negation_changed"
+            and diff.extra.get("standard_membership_table")
+        ),
+        None,
+    )
+    if boundary_diff is None:
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    if standard_ast is None or student_ast is None:
+        return False
+    standard_outer = _top_select(standard_ast)
+    student_outer = _top_select(student_ast)
+    if not isinstance(standard_outer, exp.Select) or not isinstance(student_outer, exp.Select):
+        return False
+
+    def select_body(node: exp.Expression | None) -> exp.Select | None:
+        if isinstance(node, exp.Subquery):
+            node = node.this
+        if isinstance(node, exp.Select):
+            return node
+        if isinstance(node, exp.Expression):
+            found = node.find(exp.Select)
+            return found if isinstance(found, exp.Select) else None
+        return None
+
+    expected_predicate_sql = str(
+        boundary_diff.extra.get("standard_sql") or ""
+    )
+    membership: tuple[
+        exp.In,
+        exp.Select,
+        tuple[str, str],
+        tuple[str, str],
+        tuple[list[dict[str, Any]], str],
+        tuple[list[dict[str, Any]], str],
+    ] | None = None
+    for in_node in standard_outer.find_all(exp.In):
+        if in_node.find_ancestor(exp.Select) is not standard_outer:
+            continue
+        if not isinstance(in_node.parent, exp.Not) or not isinstance(in_node.this, exp.Column):
+            continue
+        if expected_predicate_sql and _sql_of(in_node.parent) != expected_predicate_sql:
+            continue
+        inner = select_body(in_node.args.get("query"))
+        if inner is None or not inner.expressions:
+            continue
+        projected = inner.expressions[0]
+        projected = projected.this if isinstance(projected, exp.Alias) else projected
+        if not isinstance(projected, exp.Column):
+            continue
+        outer_ref = _column_ref_in_select_data(data, in_node.this, standard_outer)
+        inner_ref = _column_ref_in_select_data(data, projected, inner)
+        outer_actual = _actual_data_ref(data, outer_ref) if outer_ref else None
+        inner_actual = _actual_data_ref(data, inner_ref) if inner_ref else None
+        if outer_ref is None or inner_ref is None or outer_actual is None or inner_actual is None:
+            continue
+        membership = (
+            in_node,
+            inner,
+            outer_ref,
+            inner_ref,
+            outer_actual,
+            inner_actual,
+        )
+        break
+    if membership is None:
+        return False
+
+    membership_in, membership_inner, outer_ref, inner_ref, outer_actual, inner_actual = membership
+    outer_rows, outer_column = outer_actual
+    inner_rows, inner_column = inner_actual
+    if len(outer_rows) < 2 or len(inner_rows) < 2:
+        return False
+
+    def align_local_equalities(select: exp.Select, row_index: int) -> bool:
+        changed = False
+        for equality in select.find_all(exp.EQ):
+            if equality.find_ancestor(exp.Select) is not select:
+                continue
+            if not isinstance(equality.left, exp.Column) or not isinstance(equality.right, exp.Column):
+                continue
+            left_ref = _column_ref_in_select_data(data, equality.left, select)
+            right_ref = _column_ref_in_select_data(data, equality.right, select)
+            if left_ref is None or right_ref is None or left_ref[0] == right_ref[0]:
+                continue
+            left_actual = _actual_data_ref(data, left_ref)
+            right_actual = _actual_data_ref(data, right_ref)
+            if left_actual is None or right_actual is None:
+                continue
+            left_rows, left_column = left_actual
+            right_rows, right_column = right_actual
+            if row_index >= len(left_rows) or row_index >= len(right_rows):
+                continue
+            value = left_rows[row_index].get(left_column)
+            if value is None:
+                value = right_rows[row_index].get(right_column)
+            if value is None:
+                value = _seed_value(left_column, row_index)
+            left_rows[row_index][left_column] = value
+            right_rows[row_index][right_column] = value
+            changed = True
+        return changed
+
+    def copy_outer_to_inner(
+        outer_ref: tuple[str, str],
+        inner_ref: tuple[str, str],
+    ) -> bool:
+        source = _actual_data_ref(data, outer_ref)
+        target = _actual_data_ref(data, inner_ref)
+        if source is None or target is None:
+            return False
+        source_rows, source_column = source
+        target_rows, target_column = target
+        if not source_rows or not target_rows:
+            return False
+        value = source_rows[0].get(source_column)
+        if value is None:
+            value = _seed_value(source_column, 0)
+            source_rows[0][source_column] = value
+        target_rows[0][target_column] = value
+        return True
+
+    def satisfy_neighboring_antimembership(target: exp.In) -> bool:
+        """Keep unchanged top-level NOT IN predicates true for row zero."""
+        neighbor_changed = False
+        for candidate in standard_outer.find_all(exp.In):
+            if candidate is target:
+                continue
+            if candidate.find_ancestor(exp.Select) is not standard_outer:
+                continue
+            if not isinstance(candidate.parent, exp.Not) or not isinstance(
+                candidate.this, exp.Column
+            ):
+                continue
+            inner = select_body(candidate.args.get("query"))
+            if inner is None or not inner.expressions:
+                continue
+            projected = inner.expressions[0]
+            projected = projected.this if isinstance(projected, exp.Alias) else projected
+            if not isinstance(projected, exp.Column):
+                continue
+            neighbor_outer_ref = _column_ref_in_select_data(
+                data, candidate.this, standard_outer
+            )
+            neighbor_inner_ref = _column_ref_in_select_data(data, projected, inner)
+            neighbor_outer = (
+                _actual_data_ref(data, neighbor_outer_ref)
+                if neighbor_outer_ref is not None
+                else None
+            )
+            neighbor_inner = (
+                _actual_data_ref(data, neighbor_inner_ref)
+                if neighbor_inner_ref is not None
+                else None
+            )
+            if neighbor_outer is None or neighbor_inner is None:
+                continue
+            neighbor_outer_rows, neighbor_outer_column = neighbor_outer
+            neighbor_inner_rows, neighbor_inner_column = neighbor_inner
+            if not neighbor_outer_rows or not neighbor_inner_rows:
+                continue
+            outer_value = neighbor_outer_rows[0].get(neighbor_outer_column)
+            if outer_value is None:
+                outer_value = _seed_value(neighbor_outer_column, 0)
+                neighbor_outer_rows[0][neighbor_outer_column] = outer_value
+                neighbor_changed = True
+            used: set[Any] = set()
+            for index, row in enumerate(neighbor_inner_rows):
+                value = row.get(neighbor_inner_column)
+                if value is not None and value != outer_value and value not in used:
+                    used.add(value)
+                    continue
+                replacement = _counter_value(neighbor_inner_column, outer_value)
+                while replacement is None or replacement == outer_value or replacement in used:
+                    replacement = _unique_key_value(
+                        neighbor_inner_column,
+                        index + len(used) + 1,
+                        used | {outer_value},
+                        replacement,
+                    )
+                row[neighbor_inner_column] = replacement
+                used.add(replacement)
+                neighbor_changed = True
+        return neighbor_changed
+
+    # Find the physical key used by the top-level ``Pt.PCP = PhPCP.EmployeeID``
+    # style join.  The target must be a real physician key; inventing one would
+    # make the assembled outer row disappear before NOT IN is evaluated.
+    join_ref: tuple[str, str] | None = None
+    outer_where = standard_outer.args.get("where")
+    if isinstance(outer_where, exp.Where):
+        for equality in outer_where.find_all(exp.EQ):
+            if equality.find_ancestor(exp.Select) is not standard_outer:
+                continue
+            if not isinstance(equality.left, exp.Column) or not isinstance(equality.right, exp.Column):
+                continue
+            left_ref = _column_ref_in_select_data(data, equality.left, standard_outer)
+            right_ref = _column_ref_in_select_data(data, equality.right, standard_outer)
+            if left_ref == outer_ref and right_ref and right_ref[0] != outer_ref[0]:
+                join_ref = right_ref
+                break
+            if right_ref == outer_ref and left_ref and left_ref[0] != outer_ref[0]:
+                join_ref = left_ref
+                break
+    if join_ref is None:
+        return False
+    join_actual = _actual_data_ref(data, join_ref)
+    if join_actual is None or len(join_actual[0]) < 2:
+        return False
+    physician_rows, physician_column = join_actual
+    # Earlier compatibility probes may have copied a foreign key into the
+    # unique physician key column.  Normalize this small key domain first;
+    # otherwise the final path can contain a duplicate EmployeeID and SQLite
+    # may expose an accidental second physician row (or reject a stricter
+    # engine fixture).  Keep row 0 as the selected path and reserve row 1 as
+    # the validator's overlapping control value.
+    target_value = physician_rows[0].get(physician_column)
+    if target_value is None:
+        target_value = _seed_value(physician_column, 0)
+    seen_keys: set[Any] = {target_value}
+    physician_rows[0][physician_column] = target_value
+    for index, row in enumerate(physician_rows[1:], start=1):
+        value = row.get(physician_column)
+        if value is None or value in seen_keys:
+            value = _unique_key_value(physician_column, index, seen_keys, value)
+            row[physician_column] = value
+        seen_keys.add(value)
+    overlap_value = physician_rows[1].get(physician_column)
+    if overlap_value is None or overlap_value == target_value:
+        return False
+
+    # Resolve the correlation links against this same AST.  Parsing the SQL a
+    # second time and comparing object ids loses the links, which was the
+    # reason the older generic path silently left Prescribes/Undergoes empty.
+    links_by_inner: dict[int, list[tuple[tuple[str, str], tuple[str, str]]]] = defaultdict(list)
+    for source_ref, target_ref, link_inner in _correlated_subquery_links(standard_ast):
+        links_by_inner[id(link_inner)].append((source_ref, target_ref))
+
+    changed = False
+    with write_owner("materializer:not_in_reachable_path"):
+        # Keep one anti-membership-only outer value and one overlapping value.
+        # The remaining department heads are made non-target so the first row
+        # is guaranteed to survive standard NOT IN.
+        outer_rows[0][outer_column] = target_value
+        outer_rows[1][outer_column] = overlap_value
+        safe_heads = [
+            row.get(physician_column)
+            for row in physician_rows
+            if row.get(physician_column) is not None and row.get(physician_column) != target_value
+        ]
+        for index, row in enumerate(inner_rows):
+            value = overlap_value if index == 0 else safe_heads[(index - 1) % len(safe_heads)]
+            if value == target_value:
+                value = _counter_value(inner_column, target_value)
+            row[inner_column] = value
+
+        # Align the top-level row's direct equality without copying a new key
+        # into the unique physician table.
+        changed |= align_local_equalities(standard_outer, 0)
+        outer_rows[0][outer_column] = target_value
+        physician_rows[0][physician_column] = target_value
+        changed |= satisfy_neighboring_antimembership(membership_in)
+
+        # Make each direct EXISTS reachable from the selected Patient row.
+        for exists in standard_outer.find_all(exp.Exists):
+            if exists.find_ancestor(exp.Select) is not standard_outer:
+                continue
+            inner = select_body(exists.this)
+            if inner is None:
+                continue
+            changed |= align_local_equalities(inner, 0)
+            _set_select_local_literal_predicates(data, inner, 0)
+            for source_ref, target_ref in links_by_inner.get(id(inner), ()):
+                changed |= copy_outer_to_inner(source_ref, target_ref)
+
+        # The scalar COUNT prerequisite is common in multi-condition teaching
+        # exercises.  Two existing joined appointment/nurse rows are enough
+        # for ``2 <= COUNT(...)`` and keep the fixture bounded.
+        for subquery in standard_outer.find_all(exp.Subquery):
+            if subquery.find_ancestor(exp.Select) is not standard_outer:
+                continue
+            inner = select_body(subquery)
+            if inner is None or inner.find(exp.Count) is None:
+                continue
+            for row_index in range(2):
+                changed |= align_local_equalities(inner, row_index)
+                _set_select_local_literal_predicates(data, inner, row_index)
+
+        changed = True
+    return changed
+
+
+def _materialize_correlated_exists_boundary_path(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+) -> bool:
+    """Make an inner comparison boundary reachable from the outer query.
+
+    A comparison inside ``EXISTS`` is not sufficient by itself.  The outer
+    block may also require a join, another EXISTS, a scalar COUNT, and an
+    anti-membership predicate.  The generic probes correctly create local
+    boundary values, but they can leave the conjunction with no surviving
+    outer row.  This narrow pass constructs one row-0 path through those
+    dependencies and keeps all writes bounded to existing rows.
+
+    The pass is intentionally limited to a standard/student operator change
+    whose standard comparison is inside EXISTS.  It does not rewrite arbitrary
+    predicates or infer a complete relational model.
+    """
+    boundary_diff = next(
+        (
+            diff
+            for diff in ast_diffs
+            if diff.diff_type == "comparison_operator_changed"
+            and isinstance(diff.standard_node, exp.Expression)
+            and isinstance(diff.standard_node, (exp.GT, exp.GTE, exp.LT, exp.LTE, exp.EQ, exp.NEQ))
+            and diff.standard_node.find_ancestor(exp.Exists) is not None
+        ),
+        None,
+    )
+    if boundary_diff is None:
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    if standard_ast is None or student_ast is None:
+        return False
+    standard_inner = boundary_diff.standard_node.find_ancestor(exp.Select)
+    if not isinstance(standard_inner, exp.Select):
+        return False
+    standard_outer = _top_select(standard_ast)
+    student_outer = _top_select(student_ast)
+    if not isinstance(standard_outer, exp.Select) or not isinstance(student_outer, exp.Select):
+        return False
+    if standard_inner is standard_outer:
+        return False
+
+    comparison = boundary_diff.standard_node
+    if not isinstance(comparison.left, exp.Column) or not isinstance(comparison.right, exp.Literal):
+        return False
+    boundary = _literal_value(comparison.right)
+    if not isinstance(boundary, (int, float, Decimal)) or isinstance(boundary, bool):
+        return False
+    boundary_ref = _column_ref_in_select_data(data, comparison.left, standard_inner)
+    boundary_actual = _actual_data_ref(data, boundary_ref) if boundary_ref else None
+    if boundary_actual is None or not boundary_actual[0]:
+        return False
+
+    outer_sources = _direct_select_tables(standard_outer)
+    if not outer_sources:
+        return False
+
+    def subquery_select(node: exp.Expression) -> exp.Select | None:
+        candidate = node.this if isinstance(node, exp.Subquery) else node
+        if isinstance(candidate, exp.Select):
+            return candidate
+        if isinstance(candidate, exp.Expression):
+            found = candidate.find(exp.Select)
+            return found if isinstance(found, exp.Select) else None
+        return None
+
+    def set_ref_from_rows(
+        outer_ref: tuple[str, str],
+        inner_ref: tuple[str, str],
+        outer_index: int = 0,
+        inner_index: int = 0,
+    ) -> bool:
+        outer_actual = _actual_data_ref(data, outer_ref)
+        inner_actual = _actual_data_ref(data, inner_ref)
+        if outer_actual is None or inner_actual is None:
+            return False
+        outer_rows, outer_column = outer_actual
+        inner_rows, inner_column = inner_actual
+        if outer_index >= len(outer_rows) or inner_index >= len(inner_rows):
+            return False
+        value = outer_rows[outer_index].get(outer_column)
+        if value is None:
+            value = inner_rows[inner_index].get(inner_column)
+        if value is None:
+            value = _seed_value(outer_column, outer_index)
+        outer_rows[outer_index][outer_column] = value
+        inner_rows[inner_index][inner_column] = value
+        return True
+
+    changed = False
+    with write_owner("materializer:correlated_exists_boundary_path"):
+        # First make the top-level JOIN path executable.
+        changed |= _materialize_select_row_path(data, standard_outer, row_index=0)
+
+        # Correlation links are scope-resolved, so this also handles aliases
+        # and nested blocks without comparing raw column names.
+        links_by_inner: dict[int, list[tuple[tuple[str, str], tuple[str, str]]]] = defaultdict(list)
+        for outer_ref, inner_ref, inner in _correlated_subquery_links(standard_sql):
+            links_by_inner.setdefault(id(inner), []).append((outer_ref, inner_ref))
+
+        # Every top-level EXISTS must have one reachable row.  Its local JOIN
+        # equalities are materialized first, then correlated keys are copied
+        # from the selected outer row.
+        for exists in standard_outer.find_all(exp.Exists):
+            if exists.find_ancestor(exp.Select) is not standard_outer:
+                continue
+            inner = subquery_select(exists.this)
+            if inner is None:
+                continue
+            changed |= _materialize_select_row_path(data, inner, row_index=0)
+            for outer_ref, inner_ref in links_by_inner.get(id(inner), []):
+                changed |= set_ref_from_rows(outer_ref, inner_ref)
+
+        # COUNT scalar subqueries in the outer WHERE need enough rows to make
+        # their comparison true.  For a numeric lower bound, use exactly the
+        # requested count where the source tables provide that many rows.
+        for subquery in standard_outer.find_all(exp.Subquery):
+            inner = subquery_select(subquery)
+            if inner is None or inner.find(exp.Count) is None:
+                continue
+            parent_comparison = subquery.find_ancestor(
+                exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE
+            )
+            requested = 2
+            if isinstance(parent_comparison, exp.Expression):
+                for side in (parent_comparison.left, parent_comparison.right):
+                    value = _literal_value(side)
+                    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+                        requested = max(1, min(int(value), _MAX_WITNESS_ROWS_PER_TABLE))
+            local_tables = list(_direct_select_tables(inner).values())
+            for index in range(requested):
+                changed |= _materialize_select_row_path(
+                    data,
+                    inner,
+                    row_index=index,
+                )
+            # ``registered = 1`` is a common teaching COUNT condition.  Keep
+            # precisely the requested joined nurse rows positive and make the
+            # remaining rows non-positive so the scalar comparison is stable.
+            for comparison_node in inner.find_all(exp.EQ):
+                if not isinstance(comparison_node.left, exp.Column) or not isinstance(comparison_node.right, exp.Literal):
+                    continue
+                local_ref = _column_ref_in_select_data(data, comparison_node.left, inner)
+                literal = _literal_value(comparison_node.right)
+                actual = _actual_data_ref(data, local_ref) if local_ref else None
+                if actual is None or not isinstance(literal, (int, float, Decimal)):
+                    continue
+                rows, column = actual
+                for index, row in enumerate(rows):
+                    row[column] = literal if index < requested else _counter_value(column, literal)
+
+        # A NOT IN subquery must not contain a matching or NULL value when the
+        # outer path is meant to survive.  This is safe only for a plain
+        # direct-column membership source; complex anti-joins keep their
+        # existing dedicated materializer.
+        for in_node in standard_outer.find_all(exp.In):
+            if in_node.find_ancestor(exp.Select) is not standard_outer:
+                continue
+            query = in_node.args.get("query")
+            inner = subquery_select(query) if isinstance(query, exp.Subquery) else None
+            if inner is None or not isinstance(in_node.this, exp.Column) or not inner.expressions:
+                continue
+            projected = inner.expressions[0]
+            projected = projected.this if isinstance(projected, exp.Alias) else projected
+            if not isinstance(projected, exp.Column):
+                continue
+            outer_ref = _column_ref_in_select_data(data, in_node.this, standard_outer)
+            inner_ref = _column_ref_in_select_data(data, projected, inner)
+            outer_actual = _actual_data_ref(data, outer_ref) if outer_ref else None
+            inner_actual = _actual_data_ref(data, inner_ref) if inner_ref else None
+            if outer_actual is None or inner_actual is None:
+                continue
+            outer_rows, outer_column = outer_actual
+            inner_rows, inner_column = inner_actual
+            if not outer_rows or not inner_rows:
+                continue
+            outer_value = outer_rows[0].get(outer_column)
+            if outer_value is None:
+                outer_value = _seed_value(outer_column, 0)
+                outer_rows[0][outer_column] = outer_value
+            for index, row in enumerate(inner_rows):
+                row[inner_column] = _counter_value(inner_column, outer_value)
+                if row[inner_column] is None or row[inner_column] == outer_value:
+                    row[inner_column] = 100000 + index
+            changed = True
+
+        # Finally place the exact threshold in the target inner row.  The
+        # student operator then includes/excludes that row while all outer
+        # prerequisites remain satisfied.
+        boundary_rows, boundary_column = boundary_actual
+        boundary_rows[0][boundary_column] = boundary
+        changed = True
+    return changed
+
+
+def _materialize_null_sensitive_limit_order_witness(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+) -> bool:
+    """Keep NULL from masking a direction difference in a limited result."""
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    if not isinstance(standard_ast, exp.Expression) or not isinstance(student_ast, exp.Expression):
+        return False
+    standard_select = _top_select(standard_ast)
+    student_select = _top_select(student_ast)
+    if not isinstance(standard_select, exp.Select) or not isinstance(student_select, exp.Select):
+        return False
+    if not (standard_select.args.get("limit") or student_select.args.get("limit")):
+        return False
+    standard_order = _result_order_clause(standard_ast)
+    student_order = _result_order_clause(student_ast)
+    if not isinstance(standard_order, exp.Order) or not isinstance(student_order, exp.Order):
+        return False
+    has_null_case = any(
+        isinstance(item, exp.Case) and item.find(exp.Is) is not None
+        for order in (standard_order, student_order)
+        for ordered in (order.expressions or ())
+        for item in [ordered.this if isinstance(ordered, exp.Ordered) else ordered]
+    )
+    if not has_null_case:
+        return False
+    order_column = next(
+        (
+            item.this if isinstance(item, exp.Ordered) else item
+            for item in (standard_order.expressions or ())
+            if isinstance(item.this if isinstance(item, exp.Ordered) else item, exp.Column)
+        ),
+        None,
+    )
+    if not isinstance(order_column, exp.Column):
+        return False
+    source = _direct_from_table(standard_select)
+    if not isinstance(source, exp.Table):
+        return False
+    table_name = next(
+        (name for name in data if _norm_name(name) == _norm_name(source.name)),
+        None,
+    )
+    rows = data.get(table_name or "")
+    if not rows or len(rows) < 2:
+        return False
+    lookup = _column_lookup(list(rows[0]))
+    actual_order = lookup.get(_norm_name(order_column.name))
+    if actual_order is None:
+        return False
+    projected_columns: list[str] = []
+    for item in standard_select.expressions or ():
+        expression = item.this if isinstance(item, exp.Alias) else item
+        if isinstance(expression, exp.Column):
+            actual = lookup.get(_norm_name(expression.name))
+            if actual and actual != actual_order:
+                projected_columns.append(actual)
+    with write_owner("materializer:null_sensitive_limit_order"):
+        # The standard ASC/DESC discriminator is strongest when every order
+        # value is non-NULL.  This leaves the NULL CASE branch syntactically
+        # present but prevents both queries from selecting the same null row.
+        for index, row in enumerate(rows):
+            row[actual_order] = 100 + index
+            for column in projected_columns:
+                value = row.get(column)
+                if isinstance(value, str):
+                    row[column] = f"__order_row_{index:03d}__"
+                elif isinstance(value, (int, float, Decimal)):
+                    row[column] = 10000 + index
+    return True
+
+
+def _materialize_window_alias_cardinality_boundary(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Push ``rn <= k``/``rn < k`` through a CTE window alias.
+
+    The outer predicate references a derived column, so a normal comparison
+    materializer cannot locate a physical cell.  For ROW_NUMBER/RANK teaching
+    queries, make exactly ``k`` rows share one partition and give the window a
+    deterministic order.  The pass is deliberately limited to a single
+    direct source table plus one equality JOIN.
+    """
+    if not any(
+        diff.diff_type in {"comparison_operator_changed", "literal_changed"}
+        for diff in ast_diffs
+    ):
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    if standard_ast is None:
+        return False
+    comparison_types = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)
+    for diff in ast_diffs:
+        if diff.diff_type not in {"comparison_operator_changed", "literal_changed"}:
+            continue
+        comparison = _comparison_node_from_diff(diff.standard_node, diff.extra.get("standard_sql"))
+        if not isinstance(comparison, comparison_types):
+            continue
+        outer_column = next(
+            (node for node in (comparison.left, comparison.right) if isinstance(node, exp.Column)),
+            None,
+        )
+        literal_node = next(
+            (node for node in (comparison.left, comparison.right) if isinstance(node, (exp.Literal, exp.Boolean))),
+            None,
+        )
+        if not isinstance(outer_column, exp.Column) or literal_node is None:
+            continue
+        boundary = _semantic_literal_value(literal_node)
+        if not isinstance(boundary, (int, float, Decimal)) or isinstance(boundary, bool):
+            continue
+        outer_select = _nearest_select(comparison)
+        if not isinstance(outer_select, exp.Select):
+            continue
+        source = _direct_from_table(outer_select)
+        if not isinstance(source, exp.Table):
+            continue
+        cte = next(
+            (
+                node for node in standard_ast.find_all(exp.CTE)
+                if _norm_name(node.alias or "") == _norm_name(source.name)
+            ),
+            None,
+        )
+        if not isinstance(cte, exp.CTE) or not isinstance(cte.this, exp.Select):
+            continue
+        body = cte.this
+        window_alias = next(
+            (
+                item for item in body.expressions or ()
+                if isinstance(item, exp.Alias)
+                and _norm_name(item.alias) == _norm_name(outer_column.name)
+                and isinstance(item.this, exp.Window)
+            ),
+            None,
+        )
+        if not isinstance(window_alias, exp.Alias):
+            continue
+        window = window_alias.this
+        if not isinstance(window, exp.Window) or not isinstance(window.this, (exp.RowNumber, exp.Rank, exp.DenseRank)):
+            continue
+        required = int(boundary) if isinstance(comparison, (exp.LTE, exp.GTE, exp.EQ)) else max(1, int(boundary))
+        if required < 1:
+            continue
+        source_tables = _direct_select_tables(body)
+        if not source_tables:
+            continue
+        partition_columns = [item for item in (window.args.get("partition_by") or []) if isinstance(item, exp.Column)]
+        order_clause = window.args.get("order")
+        order_items = list(order_clause.expressions or []) if isinstance(order_clause, exp.Order) else []
+        order_columns = [
+            (item.this if isinstance(item, exp.Ordered) else item, bool(item.args.get("desc")) if isinstance(item, exp.Ordered) else False)
+            for item in order_items
+            if isinstance(item.this if isinstance(item, exp.Ordered) else item, exp.Column)
+        ]
+        if not order_columns:
+            continue
+        order_ref = _column_ref_in_select_data(data, order_columns[0][0], body)
+        if order_ref is None:
+            continue
+        order_actual = _actual_data_ref(data, order_ref)
+        if order_actual is None or len(order_actual[0]) < required:
+            continue
+        source_table = order_ref[0]
+        partition_refs = [
+            _column_ref_in_select_data(data, column, body)
+            for column in partition_columns
+        ]
+        partition_refs = [item for item in partition_refs if item is not None]
+        join_pairs = _join_on_column_pairs(standard_sql)
+        with write_owner("materializer:window_alias_cardinality_boundary"):
+            _align_standard_join_equalities(data, standard_sql)
+            # Route the source rows through one parent partition when the
+            # partition key is on the other side of a simple equality JOIN.
+            for partition_ref in partition_refs:
+                if partition_ref[0] == source_table:
+                    actual = _actual_data_ref(data, partition_ref)
+                    if actual is None:
+                        continue
+                    rows, column = actual
+                    anchor = rows[0].get(column)
+                    for row in rows[:required]:
+                        row[column] = anchor
+                    for index, row in enumerate(rows[required:], start=required):
+                        row[column] = _group_probe_value(column, index, 90)
+                    continue
+                edge = next(
+                    (
+                        pair for pair in join_pairs
+                        if partition_ref[0] in {pair[0][0], pair[1][0]}
+                        and source_table in {pair[0][0], pair[1][0]}
+                    ),
+                    None,
+                )
+                if edge is None:
+                    continue
+                child_ref = next((item for item in edge if item[0] == source_table), None)
+                parent_join_ref = next((item for item in edge if item[0] != source_table), None)
+                parent_actual = _actual_data_ref(data, parent_join_ref) if parent_join_ref else None
+                child_join_actual = _actual_data_ref(data, child_ref) if child_ref else None
+                if parent_actual is None or child_join_actual is None:
+                    continue
+                parent_rows, parent_column = parent_actual
+                child_rows, child_column = child_join_actual
+                anchor = parent_rows[0].get(parent_column)
+                used = {row.get(parent_column) for row in parent_rows if row.get(parent_column) is not None}
+                for index, row in enumerate(parent_rows[1:], start=1):
+                    if row.get(parent_column) in {None, anchor}:
+                        candidate = _unique_key_value(parent_column, index, used, anchor)
+                        row[parent_column] = candidate
+                        used.add(candidate)
+                for row in child_rows[:required]:
+                    row[child_column] = anchor
+                for index, row in enumerate(child_rows[required:], start=required):
+                    if len(parent_rows) > 1:
+                        row[child_column] = parent_rows[1 + ((index - required) % (len(parent_rows) - 1))].get(parent_column)
+                    else:
+                        row[child_column] = _counter_value(child_column, anchor)
+                partition_actual = _actual_data_ref(data, partition_ref)
+                if partition_actual is not None:
+                    partition_rows, partition_column = partition_actual
+                    partition_anchor = partition_rows[0].get(partition_column)
+                    used_partition = {
+                        row.get(partition_column)
+                        for row in partition_rows
+                        if row.get(partition_column) is not None
+                    }
+                    for index, row in enumerate(partition_rows[1:], start=1):
+                        candidate = _group_probe_value(partition_column, index, 90)
+                        if candidate in used_partition or candidate == partition_anchor:
+                            candidate = _group_probe_value(partition_column, index + 1, 91)
+                        row[partition_column] = candidate
+
+            rows, order_column = order_actual
+            descending = bool(order_columns[0][1])
+            for index, row in enumerate(rows[:required]):
+                value = 1000 - index if descending else 1000 + index
+                row[order_column] = value
+        return True
+    return False
+
+
+def _materialize_having_ratio_boundary(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Materialize exact percentage boundaries in simple HAVING clauses.
+
+    Supported form (the common introductory analytics exercise):
+
+    ``scale * SUM(CASE WHEN flag = 0 THEN 1 ELSE 0 END) /
+    COUNT(measure) > threshold``
+
+    The witness uses a small integer denominator and aligns only existing
+    equality edges.  If the expression is not this shape, it returns without
+    changing data; the caller will retain the explicit bounded/unknown state.
+    """
+    if not any(
+        diff.clause_category.upper() in {"HAVING", "PREDICATE"}
+        and diff.diff_type in {"having_changed", "comparison_operator_changed", "literal_changed"}
+        for diff in ast_diffs
+    ):
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    if standard_ast is None or student_ast is None:
+        return False
+
+    def numeric_literal(node: exp.Expression | None) -> Any | None:
+        value = _semantic_literal_value(node)
+        return value if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool) else None
+
+    def endpoint(node: exp.Expression) -> tuple[exp.Expression, Any] | None:
+        if isinstance(node.left, (exp.Literal, exp.Boolean)):
+            return node.right, _semantic_literal_value(node.left)
+        if isinstance(node.right, (exp.Literal, exp.Boolean)):
+            return node.left, _semantic_literal_value(node.right)
+        return None
+
+    for having in standard_ast.find_all(exp.Having):
+        select = _nearest_select(having)
+        if not isinstance(select, exp.Select):
+            continue
+        comparison = next(
+            (
+                item
+                for item in having.find_all(exp.GT, exp.GTE, exp.LT, exp.LTE, exp.EQ, exp.NEQ)
+                if item.find_ancestor(exp.Select) is select and endpoint(item) is not None
+            ),
+            None,
+        )
+        if comparison is None:
+            continue
+        pair = endpoint(comparison)
+        if pair is None:
+            continue
+        aggregate_expression, boundary = pair
+        if not isinstance(boundary, (int, float, Decimal)) or isinstance(boundary, bool):
+            continue
+        division = aggregate_expression.find(exp.Div)
+        if not isinstance(division, exp.Div):
+            continue
+        sum_node = division.left.find(exp.Sum) if isinstance(division.left, exp.Expression) else None
+        count_node = division.right.find(exp.Count) if isinstance(division.right, exp.Expression) else None
+        if not isinstance(sum_node, exp.Sum) or not isinstance(count_node, exp.Count):
+            continue
+        case_node = sum_node.this if isinstance(sum_node.this, exp.Case) else None
+        if not isinstance(case_node, exp.Case):
+            continue
+        ifs = case_node.args.get("ifs") or []
+        condition = ifs[0].this if ifs and isinstance(ifs[0], exp.If) else None
+        condition_parts = (
+            condition
+            if isinstance(condition, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE))
+            else None
+        )
+        if condition_parts is None:
+            continue
+        flag_column = condition_parts.left if isinstance(condition_parts.left, exp.Column) else None
+        flag_literal = condition_parts.right if isinstance(condition_parts.right, (exp.Literal, exp.Boolean)) else None
+        if not isinstance(flag_column, exp.Column) or flag_literal is None:
+            continue
+        count_column = count_node.find(exp.Column)
+        if not isinstance(count_column, exp.Column):
+            # COUNT(*) is intentionally left to the existing COUNT path.
+            continue
+        flag_ref = _column_ref_in_select_data(data, flag_column, select)
+        count_ref = _column_ref_in_select_data(data, count_column, select)
+        if flag_ref is None or count_ref is None or flag_ref[0] != count_ref[0]:
+            continue
+        fact_actual = _actual_data_ref(data, flag_ref)
+        count_actual = _actual_data_ref(data, count_ref)
+        if fact_actual is None or count_actual is None or fact_actual[0] is not count_actual[0]:
+            continue
+        fact_rows, flag_actual_column = fact_actual
+        count_rows, count_actual_column = count_actual
+        if len(fact_rows) < 2:
+            continue
+
+        # Extract the scale from the numerator.  The only accepted extra
+        # arithmetic is a single numeric multiplier outside SUM.
+        scale = Decimal("1")
+        numerator = division.left
+        if isinstance(numerator, exp.Mul):
+            factors = [item for item in (numerator.left, numerator.right)]
+            scale_value = next((numeric_literal(item) for item in factors if numeric_literal(item) is not None), None)
+            if scale_value is None:
+                continue
+            scale = Decimal(str(scale_value))
+        elif numerator is not sum_node:
+            continue
+
+        # Find the smallest bounded denominator that can represent the target
+        # exactly as scale * errors / count.
+        target = Decimal(str(boundary))
+        denominator = error_count = None
+        for candidate_count in range(2, min(len(fact_rows), 16) + 1):
+            for candidate_errors in range(candidate_count + 1):
+                if scale * Decimal(candidate_errors) / Decimal(candidate_count) == target:
+                    denominator, error_count = candidate_count, candidate_errors
+                    break
+            if denominator is not None:
+                break
+        if denominator is None or error_count is None:
+            continue
+
+        group = select.args.get("group")
+        group_refs = [
+            _column_ref_in_select(item, select)
+            for item in (group.expressions if isinstance(group, exp.Group) else ())
+            if isinstance(item, exp.Column)
+        ]
+        group_refs = [item for item in group_refs if item is not None]
+        if not group_refs:
+            continue
+        join_pairs = _join_on_column_pairs(standard_sql)
+        if not join_pairs:
+            continue
+
+        def actual_ref(ref: tuple[str, str]) -> tuple[list[dict[str, Any]], str] | None:
+            return _actual_data_ref(data, ref)
+
+        def choose_unique(pair_ref: tuple[tuple[str, str], tuple[str, str]]) -> tuple[tuple[str, str], tuple[str, str]] | None:
+            left_ref, right_ref = pair_ref
+            left_unique = _catalog_has_unary_unique_key(schema_catalog, left_ref) or (
+                (actual_ref(left_ref) is not None)
+                and _is_primary_key_candidate(left_ref[0], actual_ref(left_ref)[1], list(actual_ref(left_ref)[0][0]))
+            )
+            right_unique = _catalog_has_unary_unique_key(schema_catalog, right_ref) or (
+                (actual_ref(right_ref) is not None)
+                and _is_primary_key_candidate(right_ref[0], actual_ref(right_ref)[1], list(actual_ref(right_ref)[0][0]))
+            )
+            if left_unique and not right_unique:
+                return left_ref, right_ref
+            if right_unique and not left_unique:
+                return right_ref, left_ref
+            left_score = _join_key_uniqueness_score(data, left_ref, schema_catalog)
+            right_score = _join_key_uniqueness_score(data, right_ref, schema_catalog)
+            if left_score == right_score:
+                return None
+            return (left_ref, right_ref) if left_score > right_score else (right_ref, left_ref)
+
+        with write_owner("materializer:having_ratio_boundary"):
+            _align_standard_join_equalities(data, standard_sql)
+            # First establish a bounded parent/child path for every equality
+            # edge.  Prefix rows all use parent row 0; the tail is routed to
+            # later parent rows, whose group labels are split below.
+            for pair_ref in join_pairs:
+                selected = choose_unique(pair_ref)
+                if selected is None:
+                    continue
+                unique_ref, repeated_ref = selected
+                unique_actual = actual_ref(unique_ref)
+                repeated_actual = actual_ref(repeated_ref)
+                if unique_actual is None or repeated_actual is None:
+                    continue
+                unique_rows, unique_column = unique_actual
+                repeated_rows, repeated_column = repeated_actual
+                if not unique_rows or not repeated_rows:
+                    continue
+                anchor = unique_rows[0].get(unique_column)
+                # Only the leaf fact relation needs several rows in the
+                # anchor group.  Intermediate child relations (for example
+                # questions between responses and topics) must keep just
+                # their row 0 on the anchor key; otherwise unreferenced child
+                # rows become additional anchor rows when the fact tail is
+                # routed through them.
+                anchor_row_count = (
+                    denominator
+                    if repeated_ref[0] == flag_ref[0]
+                    else 1
+                )
+                for index, row in enumerate(repeated_rows):
+                    if index < anchor_row_count:
+                        row[repeated_column] = anchor
+                    elif len(unique_rows) > 1:
+                        parent_index = 1 + ((index - anchor_row_count) % (len(unique_rows) - 1))
+                        row[repeated_column] = unique_rows[parent_index].get(unique_column)
+                    else:
+                        row[repeated_column] = _counter_value(repeated_column, anchor)
+
+            # Keep non-join group labels unique after the anchor row.  This is
+            # what prevents the rest of the bounded database from inflating
+            # the exact percentage group.
+            join_endpoints = {ref for pair_ref in join_pairs for ref in pair_ref}
+            for group_ref in group_refs:
+                group_actual = actual_ref(group_ref)
+                if group_actual is None:
+                    continue
+                group_rows, group_column = group_actual
+                anchor = group_rows[0].get(group_column)
+                if group_ref in join_endpoints:
+                    continue
+                for index, row in enumerate(group_rows[1:], start=1):
+                    candidate = _group_probe_value(group_column, index, 80)
+                    if candidate == anchor:
+                        candidate = _group_probe_value(group_column, index + 1, 81)
+                    row[group_column] = candidate
+
+            true_value = _temporal_value_for_comparison(
+                condition_parts,
+                _semantic_literal_value(flag_literal),
+                true=True,
+            )
+            false_value = _temporal_value_for_comparison(
+                condition_parts,
+                _semantic_literal_value(flag_literal),
+                true=False,
+            )
+            if true_value is None or false_value is None:
+                continue
+            for index, row in enumerate(fact_rows):
+                row[flag_actual_column] = true_value if index < error_count else false_value
+                row[count_actual_column] = 900000 + index
+        return True
+    return False
+
+
+def _materialize_derived_sum_alias_boundary(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Materialize a simple derived-table ``SUM(CASE ...)`` boundary."""
+    if not any(
+        diff.diff_type in {"comparison_operator_changed", "literal_changed"}
+        for diff in ast_diffs
+    ):
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    if standard_ast is None:
+        return False
+    for comparison in standard_ast.find_all(exp.GT, exp.GTE, exp.LT, exp.LTE, exp.EQ, exp.NEQ):
+        outer_select = _nearest_select(comparison)
+        if not isinstance(outer_select, exp.Select):
+            continue
+        outer_column = next(
+            (node for node in (comparison.left, comparison.right) if isinstance(node, exp.Column)),
+            None,
+        )
+        literal_node = next(
+            (node for node in (comparison.left, comparison.right) if isinstance(node, (exp.Literal, exp.Boolean))),
+            None,
+        )
+        if not isinstance(outer_column, exp.Column) or literal_node is None:
+            continue
+        boundary = _semantic_literal_value(literal_node)
+        if not isinstance(boundary, (int, float, Decimal)) or isinstance(boundary, bool):
+            continue
+        from_clause = outer_select.args.get("from_") or outer_select.args.get("from")
+        source_subquery = from_clause.this if isinstance(from_clause, exp.From) else None
+        if not isinstance(source_subquery, exp.Subquery) or not isinstance(source_subquery.this, exp.Select):
+            continue
+        body = source_subquery.this
+        aggregate_projection = next(
+            (
+                item for item in body.expressions or ()
+                if isinstance(item, exp.Alias)
+                and _norm_name(item.alias) == _norm_name(outer_column.name)
+                and isinstance(item.this, exp.Sum)
+            ),
+            None,
+        )
+        if not isinstance(aggregate_projection, exp.Alias):
+            continue
+        aggregate = aggregate_projection.this
+        group = body.args.get("group")
+        group_column_node = next(
+            (item for item in (group.expressions if isinstance(group, exp.Group) else ()) if isinstance(item, exp.Column)),
+            None,
+        )
+        if not isinstance(group_column_node, exp.Column):
+            continue
+        source_table_node = _direct_from_table(body)
+        if not isinstance(source_table_node, exp.Table):
+            continue
+        source_ref = _norm_name(source_table_node.name)
+        source_table = next((name for name in data if _norm_name(name) == source_ref), None)
+        if not source_table:
+            continue
+        group_ref = _column_ref_in_select_data(data, group_column_node, body)
+        group_actual = _actual_data_ref(data, group_ref) if group_ref else None
+        if group_actual is None:
+            continue
+        # The standard teaching revenue form has a single equality JOIN from
+        # the fact table to the grouped dimension.  Resolve the join path and
+        # retain one dimension row per non-anchor group.
+        join_pair = next(
+            (
+                pair for pair in _join_on_column_pairs(standard_sql)
+                if source_ref in {pair[0][0], pair[1][0]}
+                and group_ref is not None
+                and group_ref[0] in {pair[0][0], pair[1][0]}
+            ),
+            None,
+        )
+        if join_pair is None or group_ref is None:
+            continue
+        child_ref = next((item for item in join_pair if item[0] == source_ref), None)
+        parent_join_ref = next((item for item in join_pair if item[0] != source_ref), None)
+        child_actual = _actual_data_ref(data, child_ref) if child_ref else None
+        parent_join_actual = _actual_data_ref(data, parent_join_ref) if parent_join_ref else None
+        if child_actual is None or parent_join_actual is None:
+            continue
+        fact_rows, child_column = child_actual
+        parent_rows, parent_join_column = parent_join_actual
+        group_rows, group_column = group_actual
+        if not fact_rows or not parent_rows:
+            continue
+
+        case_node = aggregate.this if isinstance(aggregate.this, exp.Case) else None
+        if not isinstance(case_node, exp.Case):
+            continue
+        if_nodes = case_node.args.get("ifs") or []
+        condition = if_nodes[0].this if if_nodes and isinstance(if_nodes[0], exp.If) else None
+        if not isinstance(condition, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)):
+            continue
+        condition_column = condition.left if isinstance(condition.left, exp.Column) else None
+        condition_literal = condition.right if isinstance(condition.right, (exp.Literal, exp.Boolean)) else None
+        if not isinstance(condition_column, exp.Column) or condition_literal is None:
+            continue
+        condition_ref = _column_ref_in_select_data(data, condition_column, body)
+        condition_actual = _actual_data_ref(data, condition_ref) if condition_ref else None
+        if condition_actual is None or condition_ref[0] != source_ref:
+            continue
+        # Resolve the two multiplicative branches.  We intentionally require
+        # a column from the fact side and a column from the grouped dimension.
+        branch_nodes = []
+        true_branch = if_nodes[0].args.get("true") if if_nodes else None
+        if isinstance(true_branch, exp.Expression):
+            branch_nodes.append(true_branch)
+        default_node = case_node.args.get("default")
+        if isinstance(default_node, exp.Expression):
+            branch_nodes.append(default_node)
+        if len(branch_nodes) != 2:
+            continue
+        branch_columns = [list(node.find_all(exp.Column)) for node in branch_nodes]
+        all_columns = [column for columns in branch_columns for column in columns]
+        if not all_columns:
+            continue
+        # Pick a fact measure (slots/quantity/amount) and a dimension price;
+        # this covers the canonical PGExercises revenue exercise without
+        # guessing arbitrary multi-column arithmetic.
+        fact_measure_node = next(
+            (
+                column for column in all_columns
+                if (_column_ref_in_select_data(data, column, body) or ("" , ""))[0] == source_ref
+                and _norm_name(column.name) != _norm_name(condition_column.name)
+            ),
+            None,
+        )
+        default_columns = list(default_node.find_all(exp.Column)) if isinstance(default_node, exp.Expression) else []
+        dimension_value_node = next(
+            (
+                column for column in [*default_columns, *all_columns]
+                if group_ref[0] == (_column_ref_in_select_data(data, column, body) or ("", ""))[0]
+            ),
+            None,
+        )
+        if not isinstance(fact_measure_node, exp.Column) or not isinstance(dimension_value_node, exp.Column):
+            continue
+        fact_measure_ref = _column_ref_in_select_data(data, fact_measure_node, body)
+        dimension_value_ref = _column_ref_in_select_data(data, dimension_value_node, body)
+        fact_measure_actual = _actual_data_ref(data, fact_measure_ref) if fact_measure_ref else None
+        dimension_value_actual = _actual_data_ref(data, dimension_value_ref) if dimension_value_ref else None
+        if fact_measure_actual is None or dimension_value_actual is None:
+            continue
+        condition_rows, condition_column_actual = condition_actual
+        fact_measure_rows, fact_measure_column = fact_measure_actual
+        dimension_value_rows, dimension_value_column = dimension_value_actual
+        with write_owner("materializer:derived_sum_alias_boundary"):
+            _align_standard_join_equalities(data, standard_sql)
+            anchor_key = parent_rows[0].get(parent_join_column)
+            used_keys = {row.get(parent_join_column) for row in parent_rows if row.get(parent_join_column) is not None}
+            for index, row in enumerate(parent_rows[1:], start=1):
+                if row.get(parent_join_column) in {None, anchor_key}:
+                    candidate = _unique_key_value(parent_join_column, index, used_keys, anchor_key)
+                    row[parent_join_column] = candidate
+                    used_keys.add(candidate)
+            for row in fact_rows[:1]:
+                row[child_column] = anchor_key
+            for index, row in enumerate(fact_rows[1:], start=1):
+                if len(parent_rows) > 1:
+                    row[child_column] = parent_rows[1 + ((index - 1) % (len(parent_rows) - 1))].get(parent_join_column)
+                else:
+                    row[child_column] = _counter_value(child_column, anchor_key)
+            # Give each dimension group a stable distinct label.
+            anchor_group = group_rows[0].get(group_column)
+            used_groups = {row.get(group_column) for row in group_rows if row.get(group_column) is not None}
+            for index, row in enumerate(group_rows[1:], start=1):
+                candidate = _group_probe_value(group_column, index, 95)
+                if candidate in used_groups or candidate == anchor_group:
+                    candidate = _group_probe_value(group_column, index + 1, 96)
+                row[group_column] = candidate
+                used_groups.add(candidate)
+            # Select the ELSE branch (memid != 0 in the canonical form), then
+            # make one row's revenue exactly the threshold.
+            condition_value = _semantic_literal_value(condition_literal)
+            false_value = _temporal_value_for_comparison(condition, condition_value, true=False)
+            if false_value is None:
+                continue
+            condition_rows[0][condition_column_actual] = false_value
+            fact_measure_rows[0][fact_measure_column] = 10
+            dimension_value_rows[0][dimension_value_column] = boundary / 10
+        return True
+    return False
+
+
+def _materialize_cte_aggregate_alias_boundary(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Push an outer CTE-alias boundary down to its aggregate input rows.
+
+    A comparison such as ``WHERE avg_value >= 22`` has no physical column in
+    the outer query block.  The generic boundary probe therefore cannot
+    resolve a cell to write.  For the common teaching form of a CTE exposing
+    ``AVG/MIN/MAX/SUM(...) AS avg_value``, resolve that alias through the CTE,
+    then create one small group whose aggregate is exactly the threshold.
+    """
+    if not any(
+        diff.diff_type in {"comparison_operator_changed", "literal_changed"}
+        for diff in ast_diffs
+    ):
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    if standard_ast is None or student_ast is None:
+        return False
+
+    def cte_for_outer_column(
+        outer_select: exp.Select,
+        column: exp.Column,
+    ) -> tuple[exp.Select, exp.Alias, exp.Expression] | None:
+        source = _direct_from_table(outer_select)
+        if not isinstance(source, exp.Table):
+            return None
+        source_name = _norm_name(source.name)
+        cte_node = next(
+            (
+                item
+                for item in standard_ast.find_all(exp.CTE)
+                if _norm_name(item.alias or "") == source_name
+            ),
+            None,
+        )
+        if not isinstance(cte_node, exp.CTE) or not isinstance(cte_node.this, exp.Select):
+            return None
+        body = cte_node.this
+        wanted = _norm_name(column.name)
+        for projection in body.expressions or ():
+            if not isinstance(projection, exp.Alias) or _norm_name(projection.alias) != wanted:
+                continue
+            aggregate = projection.this.find(*_AGG_FUNC_TYPES)
+            if aggregate is not None:
+                return body, projection, aggregate
+        return None
+
+    changed = False
+    for diff in ast_diffs:
+        if diff.diff_type not in {"comparison_operator_changed", "literal_changed"}:
+            continue
+        standard_comparison = _comparison_node_from_diff(
+            diff.standard_node,
+            diff.extra.get("standard_sql"),
+        )
+        student_comparison = _comparison_node_from_diff(
+            diff.student_node,
+            diff.extra.get("student_sql"),
+        )
+        if not isinstance(standard_comparison, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)):
+            continue
+        if not isinstance(student_comparison, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)):
+            continue
+        standard_column = next(
+            (item for item in (standard_comparison.left, standard_comparison.right) if isinstance(item, exp.Column)),
+            None,
+        )
+        if not isinstance(standard_column, exp.Column):
+            continue
+        outer_select = _nearest_select(standard_comparison)
+        if not isinstance(outer_select, exp.Select):
+            continue
+        definition = cte_for_outer_column(outer_select, standard_column)
+        if definition is None:
+            continue
+        body, projection, aggregate = definition
+        literal_node = (
+            standard_comparison.right
+            if isinstance(standard_comparison.right, (exp.Literal, exp.Boolean))
+            else standard_comparison.left
+            if isinstance(standard_comparison.left, (exp.Literal, exp.Boolean))
+            else None
+        )
+        boundary = _semantic_literal_value(literal_node)
+        if not isinstance(boundary, (int, float, Decimal)) or isinstance(boundary, bool):
+            continue
+        argument_column = aggregate.find(exp.Column)
+        group = body.args.get("group")
+        group_column = next(
+            (item for item in (group.expressions if isinstance(group, exp.Group) else ()) if isinstance(item, exp.Column)),
+            None,
+        )
+        if not isinstance(argument_column, exp.Column) or not isinstance(group_column, exp.Column):
+            continue
+        measure_ref = _column_ref_in_select_data(data, argument_column, body)
+        group_ref = _column_ref_in_select_data(data, group_column, body)
+        measure_actual = _actual_data_ref(data, measure_ref) if measure_ref else None
+        group_actual = _actual_data_ref(data, group_ref) if group_ref else None
+        if not measure_actual or not group_actual:
+            continue
+        measure_rows, measure_column = measure_actual
+        group_rows, group_column_name = group_actual
+        if not measure_rows or not group_rows:
+            continue
+        # Find the equality edge connecting the aggregate input and the group
+        # table.  The common CTE form has exactly one such edge.
+        join_pair = next(
+            (
+                pair
+                for pair in _join_on_column_pairs(standard_sql)
+                if {pair[0][0], pair[1][0]} == {measure_ref[0], group_ref[0]}
+            ),
+            None,
+        )
+        if join_pair is None:
+            continue
+        measure_join_ref = next((ref for ref in join_pair if ref[0] == measure_ref[0]), None)
+        group_join_ref = next((ref for ref in join_pair if ref[0] == group_ref[0]), None)
+        measure_join_actual = _actual_data_ref(data, measure_join_ref) if measure_join_ref else None
+        group_join_actual = _actual_data_ref(data, group_join_ref) if group_join_ref else None
+        if not measure_join_actual or not group_join_actual:
+            continue
+        measure_join_rows, measure_join_column = measure_join_actual
+        group_join_rows, group_join_column = group_join_actual
+        if len(measure_rows) < 2 or not group_join_rows:
+            continue
+        function = type(aggregate).__name__.upper()
+        if function not in {"AVG", "SUM", "MIN", "MAX"}:
+            continue
+        with write_owner("materializer:cte_aggregate_alias_boundary"):
+            _align_standard_join_equalities(data, standard_sql)
+            anchor_key = group_join_rows[0].get(group_join_column)
+            if anchor_key is None:
+                anchor_key = _seed_value(group_join_column, 0)
+                group_join_rows[0][group_join_column] = anchor_key
+            used_keys = {row.get(group_join_column) for row in group_join_rows if row.get(group_join_column) is not None}
+            for index, row in enumerate(group_join_rows[1:], start=1):
+                candidate = row.get(group_join_column)
+                if candidate is None or candidate in used_keys:
+                    candidate = _unique_key_value(group_join_column, index, used_keys, anchor_key)
+                    row[group_join_column] = candidate
+                used_keys.add(candidate)
+            # Two input rows are sufficient for AVG/SUM and preserve a valid
+            # integer/date/text schema without expanding the witness world.
+            for index, row in enumerate(measure_join_rows[:2]):
+                row[measure_join_column] = anchor_key
+            for row in measure_join_rows[2:]:
+                if row.get(measure_join_column) == anchor_key:
+                    row[measure_join_column] = _counter_value(measure_join_column, anchor_key)
+            if function == "AVG":
+                measure_rows[0][measure_column] = boundary - 1
+                measure_rows[1][measure_column] = boundary + 1
+            elif function == "SUM":
+                measure_rows[0][measure_column] = boundary / 2
+                measure_rows[1][measure_column] = boundary / 2
+            elif function == "MIN":
+                measure_rows[0][measure_column] = boundary
+                measure_rows[1][measure_column] = boundary + 1
+            elif function == "MAX":
+                measure_rows[0][measure_column] = boundary
+                measure_rows[1][measure_column] = boundary - 1
+        changed = True
+    return changed
+
+
+def _semantic_literal_value(node: exp.Expression | None) -> Any:
+    """Return scalar SQL literal values used by the temporal path materializer.
+
+    ``_literal_value`` intentionally accepts only ``exp.Literal`` because it
+    is also used by conservative AST extraction.  A witness writer needs the
+    adjacent scalar nodes that SQLGlot represents separately (BOOLEAN and
+    NULL), so keep this broader conversion local rather than weakening the
+    parser's fail-closed contract.
+    """
+    if isinstance(node, exp.Boolean):
+        return bool(node.this)
+    if isinstance(node, exp.Null):
+        return None
+    return _literal_value(node)
+
+
+def _comparison_node_from_diff(
+    node: Any,
+    sql_text: str | None,
+) -> exp.Expression | None:
+    """Normalize a diff endpoint to its comparison expression."""
+    comparison_types = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)
+    if isinstance(node, comparison_types):
+        return node
+    if isinstance(sql_text, str) and sql_text.strip():
+        parsed = _parse_sql(sql_text)
+        if isinstance(parsed, comparison_types):
+            return parsed
+        if parsed is not None:
+            candidate = parsed.find(*comparison_types)
+            if isinstance(candidate, comparison_types):
+                return candidate
+    return None
+
+
+def _temporal_comparison_parts(
+    comparison: exp.Expression,
+) -> tuple[exp.Expression, exp.Column, Any, str | None] | None:
+    """Return ``(value_expression, source_column, literal, date_part)``.
+
+    The supported teaching forms are a direct date/timestamp column compared
+    with a date literal, and YEAR/MONTH/DAY/EXTRACT(part FROM column) compared
+    with an integer literal.  More complex expressions deliberately remain
+    for the bounded-gap classifier instead of receiving a guessed witness.
+    """
+    if not isinstance(comparison, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)):
+        return None
+    left, right = comparison.left, comparison.right
+    value_expression: exp.Expression | None = None
+    literal_node: exp.Expression | None = None
+    if isinstance(left, exp.Expression) and isinstance(right, (exp.Literal, exp.Boolean, exp.Null)):
+        value_expression, literal_node = left, right
+    elif isinstance(right, exp.Expression) and isinstance(left, (exp.Literal, exp.Boolean, exp.Null)):
+        value_expression, literal_node = right, left
+    if value_expression is None or literal_node is None:
+        return None
+
+    date_part: str | None = None
+    source_column: exp.Column | None = None
+    if isinstance(value_expression, exp.Column):
+        source_column = value_expression
+    elif isinstance(value_expression, (exp.Year, exp.Month, exp.Day)):
+        date_part = type(value_expression).__name__.lower()
+        source_column = (
+            value_expression.this
+            if isinstance(value_expression.this, exp.Column)
+            else value_expression.find(exp.Column)
+        )
+    elif isinstance(value_expression, exp.Extract):
+        part_node = value_expression.this
+        date_part = str(getattr(part_node, "this", part_node) or "").lower()
+        source_column = (
+            value_expression.expression
+            if isinstance(value_expression.expression, exp.Column)
+            else value_expression.find(exp.Column)
+        )
+    elif isinstance(value_expression, exp.Anonymous):
+        function_name = str(value_expression.this or "").upper()
+        if function_name in {"YEAR", "MONTH", "DAY", "DAYOFMONTH"}:
+            date_part = function_name.lower()
+            source_column = value_expression.find(exp.Column)
+    if not isinstance(source_column, exp.Column):
+        return None
+    return value_expression, source_column, _semantic_literal_value(literal_node), date_part
+
+
+def _temporal_boundary_value(
+    source_column: exp.Column,
+    literal: Any,
+    date_part: str | None,
+    *,
+    table: str,
+    schema_catalog: SchemaCatalog | None,
+) -> str | None:
+    """Convert a comparison threshold into a valid bounded date value."""
+    declared_kind = _authoritative_column_kind(table, source_column.name, schema_catalog)
+    if date_part:
+        if not isinstance(literal, (int, float, Decimal)) or isinstance(literal, bool):
+            return None
+        integer = int(literal)
+        normalized = date_part.lower().rstrip("s")
+        if normalized == "year":
+            if integer < 1 or integer > 9999:
+                return None
+            return f"{integer:04d}-01-01"
+        if normalized == "month" and 1 <= integer <= 12:
+            return f"2024-{integer:02d}-01"
+        if normalized in {"day", "dayofmonth"} and 1 <= integer <= 28:
+            return f"2024-01-{integer:02d}"
+        return None
+    if literal is None:
+        return None
+    parsed = _coerce_datetime(literal)
+    if parsed is None:
+        # A declared DATE/TIMESTAMP column with a non-ISO literal is still a
+        # temporal query, but guessing its format would make the witness
+        # engine-dependent.  Let the existing boundary classifier handle it.
+        return None
+    if declared_kind not in {None, "date", "time"} and not _is_date_column(source_column.name):
+        return None
+    has_time = any((parsed.hour, parsed.minute, parsed.second, parsed.microsecond))
+    return parsed.strftime("%Y-%m-%d %H:%M:%S" if has_time else "%Y-%m-%d")
+
+
+def _add_bounded_calendar_interval(
+    value: datetime,
+    amount: int,
+    unit: str,
+) -> datetime | None:
+    normalized = unit.lower().rstrip("s")
+    if normalized == "day":
+        return value + timedelta(days=amount)
+    if normalized == "week":
+        return value + timedelta(weeks=amount)
+    if normalized not in {"month", "year"} or value.day > 28:
+        return None
+    months = amount if normalized == "month" else amount * 12
+    month_index = value.year * 12 + value.month - 1 + months
+    year, zero_based_month = divmod(month_index, 12)
+    if year < 1 or year > 9999:
+        return None
+    return value.replace(year=year, month=zero_based_month + 1)
+
+
+def _derived_series_expression_boundary(
+    query_ast: exp.Expression,
+    expression: exp.Expression,
+) -> str | None:
+    """Evaluate ``derived_series.column +/- fixed interval`` at its first row."""
+    expression = _unwrap_sqlite_interval_expression(expression)
+    if not isinstance(expression, (exp.Add, exp.Sub)):
+        return None
+    base = expression.left
+    interval = _sqlite_interval_amount(expression.right)
+    if not isinstance(base, exp.Column) or interval is None or not base.table:
+        return None
+    amount_node, unit = interval
+    if not isinstance(amount_node, exp.Literal):
+        return None
+    try:
+        amount = int(str(amount_node.this))
+    except (TypeError, ValueError):
+        return None
+    if isinstance(expression, exp.Sub):
+        amount = -amount
+
+    series_type = getattr(exp, "ExplodingGenerateSeries", None)
+    if series_type is None:
+        return None
+    for subquery in query_ast.find_all(exp.Subquery):
+        if _norm_name(subquery.alias_or_name) != _norm_name(base.table):
+            continue
+        select = subquery.this
+        if not isinstance(select, exp.Select):
+            continue
+        for projection in select.expressions or ():
+            if _norm_name(projection.alias_or_name) != _norm_name(base.name):
+                continue
+            projected = projection.this if isinstance(projection, exp.Alias) else projection
+            cast_to_date = bool(
+                isinstance(projected, exp.Cast)
+                and str(projected.args.get("to") or "").upper() == "DATE"
+            )
+            series = projected.find(series_type)
+            if not isinstance(series, series_type):
+                continue
+            if _bounded_generate_series_size(series) is None:
+                continue
+            start = _literal_datetime_value(series.args.get("start"))
+            if start is None:
+                continue
+            boundary = _add_bounded_calendar_interval(start, amount, unit)
+            if boundary is None:
+                continue
+            return boundary.strftime(
+                "%Y-%m-%d" if cast_to_date else "%Y-%m-%d %H:%M:%S"
+            )
+    return None
+
+
+def _temporal_value_for_comparison(
+    comparison: exp.Expression,
+    literal: Any,
+    *,
+    true: bool,
+) -> Any | None:
+    """Choose a nearby value that satisfies/violates a scalar comparison."""
+    operator = type(comparison)
+    if literal is None:
+        return None
+    if isinstance(literal, (int, float, Decimal)) and not isinstance(literal, bool):
+        if operator is exp.EQ:
+            return literal if true else literal + 1
+        if operator is exp.NEQ:
+            return literal + 1 if true else literal
+        if operator is exp.GT:
+            return literal + 1 if true else literal
+        if operator is exp.GTE:
+            return literal if true else literal - 1
+        if operator is exp.LT:
+            return literal - 1 if true else literal
+        if operator is exp.LTE:
+            return literal if true else literal + 1
+        return None
+    parsed = _coerce_datetime(literal)
+    if parsed is not None:
+        delta = timedelta(days=1)
+        if operator is exp.EQ:
+            return parsed.strftime("%Y-%m-%d") if true else (parsed + delta).strftime("%Y-%m-%d")
+        if operator is exp.NEQ:
+            return (parsed + delta).strftime("%Y-%m-%d") if true else parsed.strftime("%Y-%m-%d")
+        if operator is exp.GT:
+            return (parsed + delta).strftime("%Y-%m-%d") if true else parsed.strftime("%Y-%m-%d")
+        if operator is exp.GTE:
+            return parsed.strftime("%Y-%m-%d") if true else (parsed - delta).strftime("%Y-%m-%d")
+        if operator is exp.LT:
+            return (parsed - delta).strftime("%Y-%m-%d") if true else parsed.strftime("%Y-%m-%d")
+        if operator is exp.LTE:
+            return parsed.strftime("%Y-%m-%d") if true else (parsed + delta).strftime("%Y-%m-%d")
+    if operator is exp.EQ:
+        return literal if true else f"__not_{literal}__"
+    if operator is exp.NEQ:
+        return f"__not_{literal}__" if true else literal
+    return None
+
+
+def _materialize_select_literal_path(
+    data: dict[str, list[dict[str, Any]]],
+    select: exp.Select,
+    row_index: int,
+    *,
+    protected: tuple[str, str] | None = None,
+) -> None:
+    """Make one bounded row satisfy simple SELECT-local literal predicates."""
+    where = select.args.get("where")
+    if not isinstance(where, exp.Where):
+        return
+    for node in where.find_all(exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE):
+        if node.find_ancestor(exp.Select) is not select:
+            continue
+        column = node.left if isinstance(node.left, exp.Column) else node.right if isinstance(node.right, exp.Column) else None
+        literal_node = node.right if column is node.left else node.left if column is node.right else None
+        if not isinstance(column, exp.Column) or not isinstance(literal_node, (exp.Literal, exp.Boolean, exp.Null)):
+            continue
+        ref = _column_ref_in_select_data(data, column, select)
+        actual = _actual_data_ref(data, ref) if ref else None
+        if not actual:
+            continue
+        rows, actual_column = actual
+        if row_index >= len(rows) or (protected is not None and ref == protected):
+            continue
+        literal = _semantic_literal_value(literal_node)
+        value = _temporal_value_for_comparison(node, literal, true=True)
+        if value is not None:
+            rows[row_index][actual_column] = value
+    for node in where.find_all(exp.In):
+        if node.find_ancestor(exp.Select) is not select or not isinstance(node.this, exp.Column):
+            continue
+        values = [_semantic_literal_value(item) for item in node.expressions]
+        if not values:
+            continue
+        ref = _column_ref_in_select_data(data, node.this, select)
+        actual = _actual_data_ref(data, ref) if ref else None
+        if actual and row_index < len(actual[0]) and (protected is None or ref != protected):
+            actual[0][row_index][actual[1]] = values[0]
+
+
+def _materialize_temporal_comparison_witness(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Materialize exact DATE/YEAR boundaries for one comparison world.
+
+    This is intentionally a small, deterministic witness pass.  It does not
+    fabricate rows or rewrite arbitrary expressions: it resolves the source
+    column through the current query block, aligns existing equality joins,
+    makes one local path reachable, and writes the exact temporal boundary.
+    """
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    if standard_ast is None or student_ast is None:
+        return False
+    comparison_types = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)
+    changed = False
+    for diff in ast_diffs:
+        if diff.diff_type not in {"comparison_operator_changed", "literal_changed"}:
+            continue
+        standard_comparison = _comparison_node_from_diff(
+            diff.standard_node,
+            diff.extra.get("standard_sql"),
+        )
+        student_comparison = _comparison_node_from_diff(
+            diff.student_node,
+            diff.extra.get("student_sql"),
+        )
+        if not isinstance(standard_comparison, comparison_types) or not isinstance(student_comparison, comparison_types):
+            continue
+        standard_parts = _temporal_comparison_parts(standard_comparison)
+        student_parts = _temporal_comparison_parts(student_comparison)
+        if standard_parts is None and student_parts is None:
+            standard_column = (
+                standard_comparison.left
+                if isinstance(standard_comparison.left, exp.Column)
+                else None
+            )
+            student_column = (
+                student_comparison.left
+                if isinstance(student_comparison.left, exp.Column)
+                else None
+            )
+            standard_boundary = _derived_series_expression_boundary(
+                standard_ast,
+                standard_comparison.right,
+            )
+            student_boundary = _derived_series_expression_boundary(
+                student_ast,
+                student_comparison.right,
+            )
+            if (
+                isinstance(standard_column, exp.Column)
+                and isinstance(student_column, exp.Column)
+                and standard_boundary is not None
+                and standard_boundary == student_boundary
+            ):
+                standard_parts = (
+                    standard_column,
+                    standard_column,
+                    standard_boundary,
+                    None,
+                )
+                student_parts = (
+                    student_column,
+                    student_column,
+                    student_boundary,
+                    None,
+                )
+        if standard_parts is None or student_parts is None:
+            continue
+        _, standard_column, standard_literal, standard_part = standard_parts
+        _, student_column, student_literal, student_part = student_parts
+        if _norm_name(standard_column.name) != _norm_name(student_column.name):
+            continue
+        standard_select = _nearest_select(standard_comparison)
+        student_select = _nearest_select(student_comparison)
+        if not isinstance(standard_select, exp.Select) or not isinstance(student_select, exp.Select):
+            continue
+        standard_ref = _column_ref_in_select_data(data, standard_column, standard_select)
+        student_ref = _column_ref_in_select_data(data, student_column, student_select)
+        if standard_ref is None or student_ref is None or standard_ref != student_ref:
+            continue
+        actual = _actual_data_ref(data, standard_ref)
+        if actual is None or not actual[0]:
+            continue
+        table_name = standard_ref[0]
+        boundary = _temporal_boundary_value(
+            standard_column,
+            standard_literal,
+            standard_part,
+            table=table_name,
+            schema_catalog=schema_catalog,
+        )
+        if boundary is None:
+            # A literal change may have a temporal threshold only on the
+            # student side; try that endpoint before giving up.
+            boundary = _temporal_boundary_value(
+                student_column,
+                student_literal,
+                student_part,
+                table=table_name,
+                schema_catalog=schema_catalog,
+            )
+        if boundary is None:
+            continue
+        with write_owner(f"materializer:temporal_boundary:{diff.diff_type}"):
+            # Equality joins are a dependency of the witness, not a new
+            # semantic difference.  Re-aligning the existing standard path
+            # is bounded and keeps a date row from being stranded in a join.
+            _align_standard_join_equalities(data, standard_sql)
+            _materialize_select_literal_path(
+                data,
+                standard_select,
+                0,
+                protected=standard_ref,
+            )
+            _materialize_select_literal_path(
+                data,
+                student_select,
+                0,
+                protected=student_ref,
+            )
+            actual[0][0][actual[1]] = boundary
+        changed = True
+    return changed
 
 
 def _materialize_aggregate_filter_witness(
@@ -2739,6 +5644,8 @@ def _materialize_predicate_presence_obligation_witness(
     ]
     if not presence_diffs:
         return
+    if _materialize_like_presence_witness(data, presence_diffs):
+        return
     standard_ast = _parse_sql(standard_sql)
     student_ast = _parse_sql(student_sql)
     standard_select = _top_select(standard_ast) if standard_ast is not None else None
@@ -2765,13 +5672,12 @@ def _materialize_predicate_presence_obligation_witness(
         return
 
     keys = list(leaves)
-    selected_assignment: dict[str, bool] | None = None
-    selected_values: dict[str, Any] = {}
+    candidates: list[tuple[dict[str, bool], dict[str, Any], bool, bool]] = []
     for truth_values in product((False, True), repeat=len(keys)):
         assignment = dict(zip(keys, truth_values))
         standard_truth = _predicate_assignment_truth(standard_predicate, assignment)
         student_truth = _predicate_assignment_truth(student_predicate, assignment)
-        if standard_truth is None or student_truth is None or standard_truth == student_truth:
+        if standard_truth is None or student_truth is None:
             continue
         values: dict[str, Any] = {}
         compatible = True
@@ -2784,25 +5690,329 @@ def _materialize_predicate_presence_obligation_witness(
                 break
             values[column] = value
         if compatible:
-            selected_assignment = assignment
-            selected_values = values
-            break
-    if selected_assignment is None:
+            candidates.append(
+                (assignment, values, bool(standard_truth), bool(student_truth))
+            )
+    if not candidates:
         return
+
+    # A presence obligation needs both a real positive path for the predicate
+    # it owns and a divergent path.  Selecting only the first divergent truth
+    # assignment made ``x = c`` versus no WHERE produce an all-negative table,
+    # so the validator could not prove that the predicate itself was active.
+    def reference_truth(item: tuple[dict[str, bool], dict[str, Any], bool, bool]) -> bool:
+        _assignment, _values, standard_truth, student_truth = item
+        return standard_truth if standard_predicate is not None else student_truth
+
+    positive = [item for item in candidates if reference_truth(item)]
+    divergent = [item for item in candidates if item[2] != item[3]]
+    selected: list[tuple[dict[str, Any], bool, bool]] = []
+    seen_values: set[str] = set()
+    for item in [*positive, *divergent, *candidates]:
+        values, standard_truth, student_truth = item[1], item[2], item[3]
+        signature = json.dumps(values, sort_keys=True, default=str)
+        if signature in seen_values:
+            continue
+        seen_values.add(signature)
+        selected.append((values, standard_truth, student_truth))
+        if len(selected) >= min(3, len(candidates)):
+            break
 
     candidate_tables = []
     for table_name, rows in data.items():
         if not rows:
             continue
         lookup = _column_lookup(rows[0].keys())
-        if all(column in lookup for column in selected_values):
+        if all(column in lookup for values, _standard_truth, _student_truth in selected for column in values):
             candidate_tables.append((table_name, rows, lookup))
     if len(candidate_tables) != 1:
         return
     _table_name, rows, lookup = candidate_tables[0]
     with write_owner("materializer:predicate_positive_negative"):
-        for column, value in selected_values.items():
-            rows[0][lookup[column]] = value
+        for row_index, (values, _standard_truth, _student_truth) in enumerate(selected):
+            if row_index >= len(rows):
+                break
+            row = rows[row_index]
+            for column, value in values.items():
+                row[lookup[column]] = value
+
+
+def _materialize_like_presence_witness(
+    data: dict[str, list[dict[str, Any]]],
+    presence_diffs: list[ASTDiffNode],
+) -> bool:
+    """Materialize a positive/negative row for a missing or added LIKE."""
+    for diff in presence_diffs:
+        if diff.diff_type == "predicate_missing":
+            active_sql = str(diff.extra.get("standard_sql") or "")
+            query_sql = str(diff.extra.get("standard_query_sql") or "")
+        else:
+            active_sql = str(diff.extra.get("student_sql") or "")
+            query_sql = str(diff.extra.get("student_query_sql") or "")
+        if "LIKE" not in active_sql.upper() or not active_sql.strip():
+            continue
+        try:
+            parsed = _parse_sql(
+                f"SELECT * FROM __phase1_like_presence WHERE {active_sql}"
+            )
+            like = parsed.find(exp.Like) if parsed is not None else None
+        except Exception:
+            continue
+        if not isinstance(like, exp.Like) or not isinstance(like.this, exp.Column):
+            continue
+        pattern = _expression_static_value(like.expression)
+        if not isinstance(pattern, str):
+            continue
+        try:
+            candidates = like_candidate_domain(pattern)
+            counter_value = _like_counter_value(pattern)
+            candidates = [counter_value, *candidates]
+            matching = next(
+                (
+                    value
+                    for value in candidates
+                    if like_matches(pattern, value) is True
+                ),
+                None,
+            )
+            non_matching = next(
+                (
+                    value
+                    for value in candidates
+                    if like_matches(pattern, value) is False
+                ),
+                None,
+            )
+        except RegexEvaluationError:
+            continue
+        if matching is None or non_matching is None:
+            continue
+        negated = isinstance(like.parent, exp.Not)
+        active_value = non_matching if negated else matching
+        inactive_value = matching if negated else non_matching
+
+        source_names: set[str] = set()
+        if query_sql:
+            try:
+                query_ast = _parse_sql(query_sql)
+                source_names = {
+                    _norm_name(table.name)
+                    for table in query_ast.find_all(exp.Table)
+                    if table.name
+                }
+            except Exception:
+                source_names = set()
+        requested_column = _norm_name(like.this.name)
+        candidates: list[tuple[str, list[dict[str, Any]], str]] = []
+        for table_name, rows in data.items():
+            if not rows:
+                continue
+            actual = _column_lookup(rows[0]).get(requested_column)
+            if actual is None:
+                continue
+            if source_names and _norm_name(table_name) not in source_names:
+                continue
+            candidates.append((table_name, rows, actual))
+        if not candidates and source_names:
+            for table_name, rows in data.items():
+                if not rows:
+                    continue
+                actual = _column_lookup(rows[0]).get(requested_column)
+                if actual is not None:
+                    candidates.append((table_name, rows, actual))
+        if len(candidates) != 1:
+            continue
+        _table_name, rows, actual = candidates[0]
+        with write_owner("materializer:predicate_like_presence"):
+            rows[0][actual] = active_value
+            for row in rows[1:]:
+                row[actual] = inactive_value
+        return True
+    return False
+
+
+def _materialize_aggregate_filter_presence_witness(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+) -> bool:
+    """Make a top-level aggregate observe a present-vs-absent filter.
+
+    Predicate path validation can prove that a row satisfies the filter and
+    that another row does not, but MIN/MAX/SUM/AVG may still collapse those
+    rows to the same aggregate result.  This narrow single-table adapter owns
+    one simple top-level comparison and chooses aggregate inputs whose
+    filtered and unfiltered results are different.  Grouped, joined, windowed,
+    and multi-predicate shapes remain on their existing conservative paths.
+    """
+    if not any(
+        diff.diff_type in {"predicate_missing", "predicate_added"}
+        and not diff.extra.get("subquery_depth")
+        for diff in ast_diffs
+    ):
+        return False
+
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    standard_select = _top_select(standard_ast) if standard_ast is not None else None
+    student_select = _top_select(student_ast) if student_ast is not None else None
+    if not isinstance(standard_select, exp.Select) or not isinstance(
+        student_select, exp.Select
+    ):
+        return False
+
+    standard_where = standard_select.args.get("where")
+    student_where = student_select.args.get("where")
+    standard_has_where = isinstance(standard_where, exp.Where)
+    student_has_where = isinstance(student_where, exp.Where)
+    if standard_has_where == student_has_where:
+        return False
+    filtered_select = standard_select if standard_has_where else student_select
+    filtered_where = standard_where if standard_has_where else student_where
+    if not isinstance(filtered_where, exp.Where):
+        return False
+    predicate = _unwrap_paren(filtered_where.this)
+    if isinstance(predicate, (exp.And, exp.Or, exp.Not)):
+        return False
+    if not isinstance(predicate, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)):
+        return False
+
+    if isinstance(predicate.left, exp.Column) and isinstance(
+        predicate.right, exp.Literal
+    ):
+        filter_column = predicate.left
+        filter_literal = predicate.right
+        column_on_left = True
+    elif isinstance(predicate.right, exp.Column) and isinstance(
+        predicate.left, exp.Literal
+    ):
+        filter_column = predicate.right
+        filter_literal = predicate.left
+        column_on_left = False
+    else:
+        return False
+    if _is_key_column(filter_column.name):
+        # Duplicating a key-like filter value can violate an unstated but
+        # common relational identity and would make this a fabricated world.
+        return False
+
+    standard_source = _direct_from_table(standard_select)
+    student_source = _direct_from_table(student_select)
+    if not isinstance(standard_source, exp.Table) or not isinstance(
+        student_source, exp.Table
+    ) or _norm_name(standard_source.name) != _norm_name(student_source.name):
+        return False
+    if standard_select.args.get("joins") or student_select.args.get("joins"):
+        return False
+    if any(
+        select.args.get(key)
+        for select in (standard_select, student_select)
+        for key in ("group", "having", "distinct", "qualify", "order", "limit", "offset")
+    ):
+        return False
+
+    def aggregate_nodes(select: exp.Select) -> list[exp.Expression]:
+        return [
+            node
+            for node in select.find_all(*_AGG_FUNC_TYPES)
+            if _nearest_select(node) is select
+        ]
+
+    standard_aggregates = aggregate_nodes(standard_select)
+    student_aggregates = aggregate_nodes(student_select)
+    if len(standard_aggregates) != 1 or len(student_aggregates) != 1:
+        return False
+    standard_aggregate = standard_aggregates[0]
+    student_aggregate = student_aggregates[0]
+    if (
+        type(standard_aggregate) is not type(student_aggregate)
+        or _sql_of(standard_aggregate.this) != _sql_of(student_aggregate.this)
+    ):
+        return False
+
+    table_name = _norm_name(standard_source.name)
+    actual_table = next(
+        (name for name in data if _norm_name(name) == table_name),
+        None,
+    )
+    rows = data.get(actual_table or "", [])
+    if len(rows) < 2:
+        return False
+    filter_ref = _column_ref_in_select_data(data, filter_column, filtered_select)
+    filter_actual = _actual_data_ref(data, filter_ref) if filter_ref else None
+    if filter_actual is None or _norm_name(filter_ref[0]) != table_name:
+        return False
+    filter_rows, filter_column_name = filter_actual
+
+    aggregate_argument = standard_aggregate.this
+    measure_column = (
+        aggregate_argument
+        if isinstance(aggregate_argument, exp.Column)
+        else aggregate_argument.find(exp.Column)
+        if isinstance(aggregate_argument, exp.Expression)
+        else None
+    )
+    measure_ref = (
+        _column_ref_in_select_data(data, measure_column, standard_select)
+        if isinstance(measure_column, exp.Column)
+        else None
+    )
+    measure_actual = _actual_data_ref(data, measure_ref) if measure_ref else None
+    if measure_actual is not None and _norm_name(measure_ref[0]) != table_name:
+        return False
+    if measure_actual is not None and measure_actual[1] == filter_column_name:
+        # The filter and aggregate argument would compete for the same cell;
+        # leave that shape to the existing predicate/aggregate materializers.
+        return False
+
+    scalar = _literal_value(filter_literal)
+    values = _scalar_predicate_values(
+        predicate,
+        scalar,
+        filter_column.name,
+        column_on_left=column_on_left,
+    )
+    if values is None or values[0] == values[1]:
+        return False
+    positive_value, negative_value = values
+    function = type(standard_aggregate).__name__.upper()
+    if function not in {"COUNT", "SUM", "AVG", "MIN", "MAX"}:
+        return False
+
+    with write_owner("materializer:aggregate_filter_presence"):
+        for index, row in enumerate(filter_rows):
+            row[filter_column_name] = positive_value if index == 0 else negative_value
+
+        if measure_actual is None:
+            # COUNT(*) already observes the extra unfiltered rows.  Other
+            # aggregate arguments cannot be made distinct without a column.
+            return function == "COUNT"
+        measure_rows, measure_column_name = measure_actual
+        if function == "COUNT":
+            if isinstance(aggregate_argument, exp.Distinct):
+                for index, row in enumerate(measure_rows):
+                    row[measure_column_name] = index + 1
+            else:
+                for row in measure_rows:
+                    row[measure_column_name] = 1
+        elif function == "MIN":
+            measure_rows[0][measure_column_name] = 10
+            for row in measure_rows[1:]:
+                row[measure_column_name] = 1
+        elif function == "MAX":
+            measure_rows[0][measure_column_name] = 1
+            for row in measure_rows[1:]:
+                row[measure_column_name] = 10
+        elif function == "SUM":
+            measure_rows[0][measure_column_name] = 10
+            for row in measure_rows[1:]:
+                row[measure_column_name] = 1
+        elif function == "AVG":
+            measure_rows[0][measure_column_name] = 10
+            for row in measure_rows[1:]:
+                row[measure_column_name] = 20
+    return True
 
 
 def _materialize_aggregate_obligation_witness(
@@ -3279,6 +6489,42 @@ def _materialize_joined_having_count_boundary(
                     for row in group_rows[:boundary]:
                         row[group_column] = group_anchor
 
+            # A generated parent table may have had its display/group column
+            # normalized by an earlier generic HAVING probe (for example all
+            # ``s.nome`` values become ``100``).  Reusing the parent's other
+            # join keys is valid, but leaving that display column identical
+            # makes every post-JOIN row part of the boundary group.  Keep the
+            # anchor group intact and split only the non-participating group
+            # keys.  Never rewrite a join endpoint here: changing it would
+            # invalidate the cardinality witness we just established.
+            join_endpoints = {
+                (left_ref[0], left_ref[1]),
+                (right_ref[0], right_ref[1]),
+            }
+            for group_ref in group_refs:
+                if group_ref in join_endpoints:
+                    continue
+                group_actual = _actual_data_ref(data, group_ref)
+                if group_actual is None:
+                    continue
+                group_rows, group_column = group_actual
+                if not group_rows:
+                    continue
+                anchor_value = group_rows[0].get(group_column)
+                for index, row in enumerate(group_rows[1:], start=1):
+                    candidate = _group_probe_value(group_column, index, 60)
+                    if candidate == anchor_value:
+                        candidate = _group_probe_value(group_column, index + 1, 61)
+                    row[group_column] = candidate
+                if repeated_ref[0] == group_relation:
+                    # The repeated-side group column must remain equal for the
+                    # exact participating prefix; split its tail only.
+                    for index, row in enumerate(group_rows[boundary:], start=boundary):
+                        candidate = _group_probe_value(group_column, index, 62)
+                        if candidate == anchor_value:
+                            candidate = _group_probe_value(group_column, index + 1, 63)
+                        row[group_column] = candidate
+
             if count_ref is not None:
                 count_actual = _actual_data_ref(data, count_ref)
                 if count_actual is not None:
@@ -3742,6 +6988,288 @@ def _materialize_set_grouped_branch_path(
     return True
 
 
+def _materialize_set_modifier_duplicate_path(
+    data: dict[str, list[dict[str, Any]]],
+    obligations: list[DistinguishingObligation],
+    standard_sql: str,
+    student_sql: str,
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Materialize the minimum bag multiplicity for set ``ALL`` changes.
+
+    An overlap tuple is sufficient for UNION ALL versus UNION, but
+    INTERSECT/EXCEPT need repeated branch output before ``ALL`` is observable.
+    This finalizer covers only direct, one-table, column-projection teaching
+    forms.  It never duplicates a unary unique key and never edits a projected
+    predicate column, so declared relational constraints remain intact.
+    """
+    if not any(
+        constraint.kind == "set_left_right_overlap"
+        for obligation in obligations
+        for constraint in obligation.hard_constraints
+    ):
+        return False
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    standard_node = _set_operator_node(standard_ast)
+    student_node = _set_operator_node(student_ast)
+    if not isinstance(standard_node, (exp.Intersect, exp.Except)) or not isinstance(
+        student_node, type(standard_node)
+    ):
+        return False
+    if _set_operator_modifier(standard_node) == _set_operator_modifier(student_node):
+        return False
+    if (
+        _sql_of(standard_node.this) != _sql_of(student_node.this)
+        or _sql_of(standard_node.expression) != _sql_of(student_node.expression)
+    ):
+        return False
+
+    def branch_context(branch: exp.Expression) -> dict[str, Any] | None:
+        select = branch if isinstance(branch, exp.Select) else branch.find(exp.Select)
+        if not isinstance(select, exp.Select):
+            return None
+        direct_tables = set(_direct_select_tables(select).values())
+        if len(direct_tables) != 1 or select.args.get("joins"):
+            return None
+        table = next(iter(direct_tables))
+        actual_table = next(
+            (name for name in data if _norm_name(name) == table and data[name]),
+            None,
+        )
+        rows = data.get(actual_table or "")
+        if not actual_table or not rows:
+            return None
+        projected: list[str] = []
+        projection_shapes: list[str] = []
+        predicate_columns = {
+            _norm_name(column.name)
+            for where in select.find_all(exp.Where)
+            if where.find_ancestor(exp.Select) is select
+            for column in where.find_all(exp.Column)
+            if column.find_ancestor(exp.Select) is select
+        }
+        lookup = _column_lookup(list(rows[0]))
+
+        no_source = object()
+
+        def arithmetic_source(node: exp.Expression) -> str | None | object:
+            """Resolve one-column deterministic arithmetic projections.
+
+            Returning ``no_source`` means the subtree contains only literals;
+            ``None`` means it is outside the deliberately small supported
+            grammar.  A source column may occur more than once, but two
+            different source columns are rejected so the materializer never
+            has to coordinate an unbounded expression domain.
+            """
+            if isinstance(node, exp.Paren):
+                return arithmetic_source(node.this)
+            if isinstance(node, exp.Column):
+                ref = _column_ref_in_select_data(data, node, select)
+                if ref is None or ref[0] != table:
+                    return None
+                actual = lookup.get(ref[1])
+                return actual or None
+            if isinstance(node, exp.Literal):
+                return no_source if node.is_number else None
+            if isinstance(node, exp.Neg):
+                return arithmetic_source(node.this)
+            if isinstance(node, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)):
+                left_source = arithmetic_source(node.left)
+                right_source = arithmetic_source(node.right)
+                if left_source is None or right_source is None:
+                    return None
+                if left_source is no_source and right_source is no_source:
+                    return no_source
+                if left_source is no_source:
+                    return right_source
+                if right_source is no_source:
+                    return left_source
+                return left_source if _norm_name(str(left_source)) == _norm_name(
+                    str(right_source)
+                ) else None
+            return None
+
+        for item in select.expressions or ():
+            expression = item.this if isinstance(item, exp.Alias) else item
+            actual: str | None
+            if isinstance(expression, exp.Column):
+                ref = _column_ref_in_select_data(data, expression, select)
+                actual = (
+                    lookup.get(ref[1])
+                    if ref is not None and ref[0] == table
+                    else None
+                )
+            else:
+                source = arithmetic_source(expression)
+                actual = source if isinstance(source, str) else None
+                if actual and (
+                    _authoritative_column_kind(table, actual, schema_catalog)
+                    not in {None, "numeric"}
+                    or (
+                        _authoritative_column_kind(table, actual, schema_catalog)
+                        is None
+                        and not _is_numeric_column(actual)
+                    )
+                ):
+                    actual = None
+            if not actual:
+                return None
+            if _norm_name(actual) in predicate_columns:
+                return None
+            if (
+                _catalog_has_unary_unique_key(
+                    schema_catalog,
+                    (table, _norm_name(actual)),
+                )
+                or _is_primary_key_candidate(actual_table, actual, list(rows[0]))
+            ):
+                return None
+            projected.append(actual)
+            normalized_expression = expression.copy()
+            for column in list(normalized_expression.find_all(exp.Column)):
+                column.replace(exp.column("__phase1_set_value"))
+            projection_shapes.append(_sql_of(normalized_expression))
+        if not projected:
+            return None
+        return {
+            "select": select,
+            "table": table,
+            "actual_table": actual_table,
+            "rows": rows,
+            "projection": projected,
+            "projection_shapes": projection_shapes,
+        }
+
+    left = branch_context(standard_node.this)
+    right = branch_context(standard_node.expression)
+    if left is None or right is None or len(left["projection"]) != len(
+        right["projection"]
+    ):
+        return False
+    if left["projection_shapes"] != right["projection_shapes"]:
+        return False
+
+    def marker(column: str, position: int, table: str) -> Any:
+        kind = _authoritative_column_kind(table, column, schema_catalog)
+        if kind == "numeric" or (kind is None and _is_numeric_column(column)):
+            return 880000 + position
+        if kind in {"date", "time"} or (kind is None and _is_date_column(column)):
+            return f"2099-01-{position + 1:02d}"
+        return f"__set_modifier_duplicate_{position}__"
+
+    def simple_literal_assignments(
+        context: dict[str, Any],
+    ) -> dict[tuple[str, str], Any] | None:
+        """Return one satisfiable assignment for a simple branch WHERE."""
+        select = context["select"]
+        where = select.args.get("where")
+        if where is None:
+            return {}
+        if not isinstance(where, exp.Where):
+            return None
+        body = _unwrap_paren(where.this)
+        terms = _flatten_and(body)
+        if not terms:
+            return None
+        assignments: dict[tuple[str, str], Any] = {}
+        for term in terms:
+            if not isinstance(term, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)):
+                return None
+            value = _comparison_truth_value(term, True)
+            if value is None or not isinstance(term.left, exp.Column):
+                return None
+            ref = _column_ref_in_select_data(data, term.left, select)
+            if ref is None:
+                return None
+            previous = assignments.get(ref)
+            if previous is not None and previous != value:
+                return None
+            assignments[ref] = value
+        return assignments
+
+    left_assignments = simple_literal_assignments(left)
+    right_assignments = simple_literal_assignments(right)
+    if left_assignments is None or right_assignments is None:
+        return False
+
+    same_table = left["rows"] is right["rows"]
+    with write_owner("materializer:set_modifier_duplicate"):
+        if isinstance(standard_node, exp.Intersect):
+            if len(left["rows"]) < 2 or len(right["rows"]) < 2:
+                return False
+            combined_assignments = dict(left_assignments)
+            for ref, value in right_assignments.items():
+                previous = combined_assignments.get(ref)
+                if previous is not None and previous != value:
+                    return False
+                combined_assignments[ref] = value
+            if same_table:
+                for (table, column), value in combined_assignments.items():
+                    actual = _actual_data_ref(data, (table, column))
+                    if actual is None:
+                        return False
+                    rows, actual_column = actual
+                    for row_index in (0, 1):
+                        rows[row_index][actual_column] = value
+            else:
+                for context, assignments in (
+                    (left, left_assignments),
+                    (right, right_assignments),
+                ):
+                    for (table, column), value in assignments.items():
+                        actual = _actual_data_ref(data, (table, column))
+                        if actual is None:
+                            return False
+                        rows, actual_column = actual
+                        for row_index in (0, 1):
+                            rows[row_index][actual_column] = value
+            for position, (left_column, right_column) in enumerate(
+                zip(left["projection"], right["projection"])
+            ):
+                value = marker(left_column, position, left["table"])
+                left["rows"][0][left_column] = value
+                left["rows"][1][left_column] = value
+                right["rows"][0][right_column] = value
+                right["rows"][1][right_column] = value
+            return True
+
+        # EXCEPT ALL versus EXCEPT needs left multiplicity two and right
+        # multiplicity one.  Separate physical tables can express that
+        # directly.  For a shared table, accept only the safe superset shape
+        # ``left branch without WHERE`` minus a materializable filtered right.
+        if len(left["rows"]) < 2 or not right["rows"]:
+            return False
+        if same_table:
+            if left["select"].args.get("where") is not None or not isinstance(
+                right["select"].args.get("where"), exp.Where
+            ):
+                return False
+            _set_select_local_literal_predicates(data, right["select"], 0)
+            _set_select_literal_predicates_false(data, right["select"], 1)
+        else:
+            _set_select_local_literal_predicates(data, left["select"], 0)
+            _set_select_local_literal_predicates(data, left["select"], 1)
+            _set_select_local_literal_predicates(data, right["select"], 0)
+
+        for position, (left_column, right_column) in enumerate(
+            zip(left["projection"], right["projection"])
+        ):
+            value = marker(left_column, position, left["table"])
+            left["rows"][0][left_column] = value
+            left["rows"][1][left_column] = value
+            right["rows"][0][right_column] = value
+            if not same_table:
+                for row_index, row in enumerate(right["rows"][1:], start=1):
+                    row[right_column] = (
+                        value + row_index
+                        if isinstance(value, (int, float, Decimal))
+                        else f"{value}_{row_index}"
+                    )
+        return True
+
+
 def _materialize_aggregate_filter_rows(
     data: dict[str, list[dict[str, Any]]],
     standard_sql: str,
@@ -4020,6 +7548,7 @@ def _materialize_order_obligation_witness(
                 "order_direction_changed",
                 "order_by_tiebreaker_missing",
                 "order_by_key_added",
+                "order_nulls_changed",
             }
         ),
         None,
@@ -4034,16 +7563,35 @@ def _materialize_order_obligation_witness(
     )
     prefix_keys: list[tuple[str, bool]]
     discriminator_key: tuple[str, bool] | None = None
-    if order_diff.diff_type == "order_direction_changed":
+    if order_diff.diff_type in {"order_direction_changed", "order_nulls_changed"}:
         changed = next(
             (
                 index
                 for index, (standard, student) in enumerate(zip(standard_keys, student_keys))
                 if standard[0].lower() == student[0].lower()
-                and standard[1] != student[1]
+                and (
+                    standard[1] != student[1]
+                    if order_diff.diff_type == "order_direction_changed"
+                    else standard[1] == student[1]
+                )
             ),
             None,
         )
+        if order_diff.diff_type == "order_nulls_changed":
+            standard_nulls = tuple(order_diff.extra.get("standard_nulls_first") or ())
+            student_nulls = tuple(order_diff.extra.get("student_nulls_first") or ())
+            changed = next(
+                (
+                    index
+                    for index, (standard, student) in enumerate(zip(standard_keys, student_keys))
+                    if standard[0].lower() == student[0].lower()
+                    and standard[1] == student[1]
+                    and index < len(standard_nulls)
+                    and index < len(student_nulls)
+                    and standard_nulls[index] != student_nulls[index]
+                ),
+                None,
+            )
         if changed is None:
             return
         prefix_keys = standard_keys[:changed]
@@ -4086,6 +7634,21 @@ def _materialize_order_obligation_witness(
         return
     prefix_columns = [str(column) for column in resolved[:-1]]
     discriminator_column = str(resolved[-1])
+    if order_diff.diff_type == "order_nulls_changed":
+        with write_owner("materializer:order_null_separation"):
+            rows[0][discriminator_column] = None
+            non_null = next(
+                (
+                    row.get(discriminator_column)
+                    for row in rows[1:]
+                    if row.get(discriminator_column) is not None
+                ),
+                None,
+            )
+            if non_null is None:
+                non_null, _ = _order_materializer_values(discriminator_column)
+            rows[1][discriminator_column] = non_null
+        return
     existing_pair = _existing_order_pair_indexes(
         rows,
         prefix_columns,
@@ -4148,6 +7711,8 @@ def _materialize_subquery_membership_obligation_witness(
     ast_diffs: list[ASTDiffNode],
     standard_sql: str = "",
     student_sql: str = "",
+    *,
+    schema_catalog: SchemaCatalog | None = None,
 ) -> None:
     """Keep both matching and non-matching correlated outer paths."""
     diff = next(
@@ -4159,11 +7724,25 @@ def _materialize_subquery_membership_obligation_witness(
         None,
     )
     if diff is None:
+        diff = next(
+            (
+                item for item in ast_diffs
+                if item.diff_type == "null_sensitive_antijoin_equivalence"
+            ),
+            None,
+        )
+    if diff is None:
         return
-    requires_inner_null = any(
-        item.diff_type == "null_sensitive_antijoin_equivalence"
-        for item in ast_diffs
-    )
+    if diff.diff_type == "null_sensitive_antijoin_equivalence":
+        _materialize_null_sensitive_antijoin_membership_path(
+            data,
+            diff,
+            standard_sql,
+            student_sql,
+            schema_catalog=schema_catalog,
+        )
+        return
+    requires_inner_null = False
     outer_table = _norm_name(str(diff.extra.get("standard_source_table") or ""))
     inner_table = _norm_name(str(diff.extra.get("standard_membership_table") or ""))
     outer_column = _norm_name(str(diff.extra.get("standard_outer_column") or ""))
@@ -4231,6 +7810,764 @@ def _materialize_subquery_membership_obligation_witness(
         standard_sql,
         student_sql,
     )
+
+
+def _materialize_null_sensitive_antijoin_membership_path(
+    data: dict[str, list[dict[str, Any]]],
+    diff: ASTDiffNode,
+    standard_sql: str,
+    student_sql: str,
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Finalize one bounded NULL-sensitive NOT IN/NOT EXISTS witness."""
+    metadata = diff.extra
+    outer_ref = (
+        _norm_name(str(metadata.get("standard_source_table") or "")),
+        _norm_name(str(metadata.get("standard_outer_column") or "")),
+    )
+    inner_ref = (
+        _norm_name(str(metadata.get("standard_membership_table") or "")),
+        _norm_name(str(metadata.get("standard_membership_column") or "")),
+    )
+    outer_actual = _actual_data_ref(data, outer_ref)
+    inner_actual = _actual_data_ref(data, inner_ref)
+    if not all((*outer_ref, *inner_ref)) or outer_actual is None or inner_actual is None:
+        return False
+    outer_rows, outer_column = outer_actual
+    inner_rows, inner_column = inner_actual
+    if len(outer_rows) < 2 or len(inner_rows) < 2:
+        return False
+
+    not_in_sql = (
+        standard_sql
+        if str(metadata.get("not_in_side") or "standard") == "standard"
+        else student_sql
+    )
+    not_in_ast = _parse_sql(not_in_sql)
+    outer_select = _top_select(not_in_ast) if not_in_ast is not None else None
+    membership: tuple[exp.In, exp.Select] | None = None
+    if isinstance(outer_select, exp.Select):
+        for in_node in outer_select.find_all(exp.In):
+            if (
+                in_node.find_ancestor(exp.Select) is not outer_select
+                or not isinstance(in_node.parent, exp.Not)
+                or not isinstance(in_node.this, exp.Column)
+            ):
+                continue
+            query = in_node.args.get("query")
+            inner_select = query.this if isinstance(query, exp.Subquery) else None
+            projected = (
+                inner_select.expressions[0]
+                if isinstance(inner_select, exp.Select) and inner_select.expressions
+                else None
+            )
+            projected = projected.this if isinstance(projected, exp.Alias) else projected
+            if not isinstance(inner_select, exp.Select) or not isinstance(projected, exp.Column):
+                continue
+            if (
+                _scope_column_ref(in_node.this, outer_select) == outer_ref
+                and _scope_column_ref(projected, inner_select) == inner_ref
+            ):
+                membership = in_node, inner_select
+                break
+    if membership is None:
+        return False
+    _, inner_select = membership
+
+    def satisfy_inner_filters(row_index: int) -> None:
+        _set_select_local_literal_predicates(data, inner_select, row_index)
+        where = inner_select.args.get("where")
+        if not isinstance(where, exp.Where):
+            return
+        for check in where.find_all(exp.Is):
+            if (
+                check.find_ancestor(exp.Select) is not inner_select
+                or not isinstance(check.this, exp.Column)
+                or not isinstance(check.expression, exp.Null)
+            ):
+                continue
+            ref = _scope_column_ref(check.this, inner_select)
+            actual = _actual_data_ref(data, ref) if ref is not None else None
+            if actual is None:
+                continue
+            rows, column = actual
+            if row_index >= len(rows):
+                continue
+            if isinstance(check.parent, exp.Not):
+                value = rows[row_index].get(column)
+                rows[row_index][column] = (
+                    value
+                    if value is not None
+                    else typed_seed(
+                        ref[0],
+                        ref[1],
+                        row_index + 1,
+                    )
+                )
+            else:
+                rows[row_index][column] = None
+
+    def projected_null_reaches_filter() -> bool:
+        where = inner_select.args.get("where")
+        if not isinstance(where, exp.Where):
+            return True
+        for column in where.find_all(exp.Column):
+            if (
+                column.find_ancestor(exp.Select) is not inner_select
+                or _scope_column_ref(column, inner_select) != inner_ref
+            ):
+                continue
+            check = column.parent
+            if (
+                isinstance(check, exp.Is)
+                and isinstance(check.expression, exp.Null)
+                and not isinstance(check.parent, exp.Not)
+            ):
+                continue
+            return False
+        return True
+
+    def satisfy_outer_null_filters(row_index: int) -> None:
+        """Keep a selected outer row reachable through local NULL tests."""
+        if not isinstance(outer_select, exp.Select):
+            return
+        where = outer_select.args.get("where")
+        if not isinstance(where, exp.Where):
+            return
+        actual = _actual_data_ref(data, outer_ref)
+        if actual is None or row_index >= len(actual[0]):
+            return
+        rows, column = actual
+        for check in where.find_all(exp.Is):
+            if (
+                check.find_ancestor(exp.Select) is not outer_select
+                or not isinstance(check.this, exp.Column)
+                or _scope_column_ref(check.this, outer_select) != outer_ref
+                or not isinstance(check.expression, exp.Null)
+            ):
+                continue
+            if isinstance(check.parent, exp.Not):
+                rows[row_index][column] = typed_seed(
+                    outer_ref[0],
+                    outer_ref[1],
+                    row_index + 1,
+                )
+            else:
+                rows[row_index][column] = None
+
+    inner_schema = _catalog_column_schema(
+        inner_ref[0],
+        inner_ref[1],
+        schema_catalog,
+    )
+    outer_schema = _catalog_column_schema(
+        outer_ref[0],
+        outer_ref[1],
+        schema_catalog,
+    )
+    inner_nullable = inner_schema is None or inner_schema.nullable
+    outer_nullable = outer_schema is None or outer_schema.nullable
+    metadata = diff.extra
+    require_inner_null = bool(metadata.get("require_inner_null", True))
+    require_outer_null = bool(metadata.get("require_outer_null", False))
+    null_index = 0
+    match_index = 1
+
+    def typed_seed(table: str, column: str, index: int, value: Any = None) -> Any:
+        """Use declared column affinity for short/ambiguous witness columns."""
+        kind = _authoritative_column_kind(table, column, schema_catalog)
+        seed = _seed_value(column, index) if value is None else value
+        return _coerce_typed_seed(seed, kind, column, index) if kind else seed
+
+    def typed_counter(table: str, column: str, value: Any, index: int) -> Any:
+        kind = _authoritative_column_kind(table, column, schema_catalog)
+        normalized = _coerce_typed_seed(value, kind, column, index) if kind else value
+        counter = _counter_value(column, normalized)
+        return _coerce_typed_seed(counter, kind, column, index) if kind else counter
+
+    with write_owner("materializer:null_sensitive_antijoin"):
+        # Earlier generic probes may have filled a short column such as ``v``
+        # with heuristic text.  Normalize only the two physical membership
+        # columns here, before copying values between their witness rows.
+        for index, row in enumerate(outer_rows):
+            if row.get(outer_column) is not None:
+                row[outer_column] = typed_seed(
+                    outer_ref[0], outer_column, index, row[outer_column]
+                )
+        for index, row in enumerate(inner_rows):
+            if row.get(inner_column) is not None:
+                row[inner_column] = typed_seed(
+                    inner_ref[0], inner_column, index, row[inner_column]
+                )
+        # Keep the selected outer rows reachable through predicates unrelated
+        # to the anti-join.  This is deliberately limited to literal local
+        # predicates in the root query block; joins and correlations retain
+        # their own topology owners.
+        if isinstance(outer_select, exp.Select):
+            _set_select_local_literal_predicates(data, outer_select, 0)
+            _set_select_local_literal_predicates(
+                data,
+                outer_select,
+                len(outer_rows) - (2 if require_outer_null else 1),
+            )
+        satisfy_inner_filters(null_index)
+        satisfy_inner_filters(match_index)
+        match_value = inner_rows[match_index].get(inner_column)
+        if match_value is None:
+            match_value = typed_seed(
+                inner_ref[0], inner_column, match_index + 1
+            )
+            if match_value is None:
+                match_value = 930001
+            inner_rows[match_index][inner_column] = match_value
+
+        same_cell_domain = (
+            outer_rows is inner_rows and outer_column == inner_column
+        )
+        if same_cell_domain:
+            if not outer_nullable:
+                return False
+            if require_outer_null:
+                outer_rows[match_index][outer_column] = match_value
+                outer_rows[-2][outer_column] = typed_counter(
+                    outer_ref[0],
+                    outer_column,
+                    match_value,
+                    len(outer_rows) - 2,
+                )
+                outer_rows[-1][outer_column] = None
+            else:
+                outer_rows[null_index][outer_column] = None
+                outer_rows[match_index][outer_column] = match_value
+            return True
+
+        outer_rows[0][outer_column] = match_value
+        inner_values = {
+            row.get(inner_column)
+            for row in inner_rows
+            if row.get(inner_column) is not None
+        }
+        non_match = typed_counter(
+            outer_ref[0], outer_column, match_value, len(outer_rows) + 1
+        )
+        while non_match is None or non_match in inner_values:
+            non_match = typed_counter(
+                outer_ref[0], outer_column, non_match, len(outer_rows) + 1
+            )
+        outer_rows[-2 if require_outer_null else -1][outer_column] = non_match
+
+        # Apply root-local NULL predicates after the anti-join values are set;
+        # otherwise ``v IS NULL`` is overwritten by the generic match-path
+        # assignment above and the student EXISTS branch remains unreachable.
+        satisfy_outer_null_filters(0)
+        if require_outer_null:
+            satisfy_outer_null_filters(len(outer_rows) - 1)
+
+        if require_inner_null and inner_nullable and projected_null_reaches_filter():
+            inner_rows[null_index][inner_column] = None
+            satisfy_inner_filters(null_index)
+            inner_rows[null_index][inner_column] = None
+            return True
+        if require_outer_null and outer_nullable:
+            outer_rows[-1][outer_column] = None
+            return True
+    return False
+
+
+def _materialize_simple_in_exists_membership_witness(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+) -> bool:
+    """Materialize a bounded witness for a simple uncorrelated IN/EXISTS pair.
+
+    ``x IN (SELECT k FROM inner_table)`` and an uncorrelated
+    ``EXISTS (SELECT k FROM inner_table)`` are not interchangeable: the former
+    filters the outer rows by ``k`` while the latter only checks that the inner
+    relation is non-empty.  The generic predicate-presence materializer cannot
+    infer that distinction because the EXISTS branch has no comparable scalar
+    predicate.  Keep this fallback deliberately narrow; correlated, filtered,
+    joined, grouped, ordered, limited, negated, and same-table shapes remain
+    on the ordinary bounded/UNDECIDED path.
+    """
+
+    def root_predicate(
+        sql: str,
+    ) -> tuple[exp.Select, exp.Expression] | None:
+        ast = _parse_sql(sql)
+        # A root SELECT is required.  This excludes set operators and derived
+        # table wrappers whose row topology needs a different witness owner.
+        if not isinstance(ast, exp.Select):
+            return None
+        where = ast.args.get("where")
+        if not isinstance(where, exp.Where):
+            return None
+        predicate = _unwrap_paren(where.this)
+        if not isinstance(predicate, (exp.In, exp.Exists)):
+            return None
+        if isinstance(predicate, exp.In) and isinstance(predicate.parent, exp.Not):
+            return None
+        if isinstance(predicate, exp.Exists) and isinstance(predicate.parent, exp.Not):
+            return None
+        return ast, predicate
+
+    def simple_root(select: exp.Select) -> exp.Table | None:
+        from_clause = select.args.get("from_") or select.args.get("from")
+        if (
+            not isinstance(from_clause, exp.From)
+            or not isinstance(from_clause.this, exp.Table)
+            or from_clause.expressions
+        ):
+            return None
+        # The outer block must have one projected column and no other relational
+        # operator.  The root WHERE is handled separately by this helper.
+        if len(select.expressions or ()) != 1:
+            return None
+        projected = select.expressions[0]
+        projected = projected.this if isinstance(projected, exp.Alias) else projected
+        if not isinstance(projected, exp.Column):
+            return None
+        if any(
+            select.args.get(key) is not None
+            for key in (
+                "joins",
+                "group",
+                "having",
+                "order",
+                "limit",
+                "offset",
+                "qualify",
+                "distinct",
+                "with",
+                "with_",
+            )
+        ):
+            return None
+        return from_clause.this
+
+    def simple_inner(select: exp.Select) -> exp.Table | None:
+        from_clause = select.args.get("from_") or select.args.get("from")
+        if (
+            not isinstance(from_clause, exp.From)
+            or not isinstance(from_clause.this, exp.Table)
+            or from_clause.expressions
+        ):
+            return None
+        if len(select.expressions or ()) != 1:
+            return None
+        if any(
+            select.args.get(key) is not None
+            for key in (
+                "where",
+                "joins",
+                "group",
+                "having",
+                "order",
+                "limit",
+                "offset",
+                "qualify",
+                "distinct",
+                "with",
+                "with_",
+            )
+        ):
+            return None
+        return from_clause.this
+
+    standard_pair = root_predicate(standard_sql)
+    student_pair = root_predicate(student_sql)
+    if standard_pair is None or student_pair is None:
+        return False
+    standard_select, standard_predicate = standard_pair
+    student_select, student_predicate = student_pair
+    if isinstance(standard_predicate, exp.In) == isinstance(student_predicate, exp.In):
+        return False
+    in_node = standard_predicate if isinstance(standard_predicate, exp.In) else student_predicate
+    exists_node = standard_predicate if isinstance(standard_predicate, exp.Exists) else student_predicate
+    if not isinstance(in_node, exp.In) or not isinstance(exists_node, exp.Exists):
+        return False
+    in_outer_select = standard_select if standard_predicate is in_node else student_select
+    exists_outer_select = standard_select if standard_predicate is exists_node else student_select
+    if in_node.find_ancestor(exp.Select) is not in_outer_select:
+        return False
+    if exists_node.find_ancestor(exp.Select) is not exists_outer_select:
+        return False
+
+    standard_outer_table = simple_root(standard_select)
+    student_outer_table = simple_root(student_select)
+    if standard_outer_table is None or student_outer_table is None:
+        return False
+    standard_outer = _norm_name(standard_outer_table.name)
+    student_outer = _norm_name(student_outer_table.name)
+    if not standard_outer or standard_outer != student_outer:
+        return False
+
+    # Once the root WHERE is removed, the two query blocks must be identical
+    # modulo harmless alias/qualifier spelling.  This prevents the helper from
+    # hiding a second projection, source, or ordering change.
+    def without_root_where(select: exp.Select) -> str:
+        copied = select.copy()
+        copied.set("where", None)
+        return _alias_insensitive_sql(copied)
+
+    if without_root_where(standard_select) != without_root_where(student_select):
+        return False
+
+    in_query = in_node.args.get("query")
+    in_inner = in_query.this if isinstance(in_query, exp.Subquery) else None
+    exists_inner = exists_node.this if isinstance(exists_node.this, exp.Select) else None
+    if not isinstance(in_inner, exp.Select) or not isinstance(exists_inner, exp.Select):
+        return False
+    in_table = simple_inner(in_inner)
+    exists_table = simple_inner(exists_inner)
+    if in_table is None or exists_table is None:
+        return False
+    inner_name = _norm_name(in_table.name)
+    if not inner_name or inner_name != _norm_name(exists_table.name):
+        return False
+    # Same-table writes would make the outer and inner domains alias the same
+    # physical rows.  Leave that more delicate shape to the dedicated probes.
+    if inner_name == standard_outer:
+        return False
+    if _subquery_is_correlated(in_inner) or _subquery_is_correlated(exists_inner):
+        return False
+
+    in_projected = in_inner.expressions[0]
+    in_projected = in_projected.this if isinstance(in_projected, exp.Alias) else in_projected
+    exists_projected = exists_inner.expressions[0]
+    exists_projected = (
+        exists_projected.this
+        if isinstance(exists_projected, exp.Alias)
+        else exists_projected
+    )
+    if not isinstance(in_projected, exp.Column):
+        return False
+    if not isinstance(exists_projected, (exp.Column, exp.Literal, exp.Boolean, exp.Null)):
+        return False
+    outer_column_ref = _scope_column_ref(in_node.this, in_outer_select)
+    inner_column_ref = _scope_column_ref(in_projected, in_inner)
+    if outer_column_ref is None or inner_column_ref is None:
+        return False
+    if outer_column_ref[0] != standard_outer or inner_column_ref[0] != inner_name:
+        return False
+    if isinstance(exists_projected, exp.Column):
+        exists_column_ref = _scope_column_ref(exists_projected, exists_inner)
+        if exists_column_ref is None or exists_column_ref[0] != inner_name:
+            return False
+
+    outer_actual = _actual_data_ref(data, outer_column_ref)
+    inner_actual = _actual_data_ref(data, inner_column_ref)
+    if outer_actual is None or inner_actual is None:
+        return False
+    outer_rows, outer_column = outer_actual
+    inner_rows, inner_column = inner_actual
+    if len(outer_rows) < 2 or not inner_rows:
+        return False
+
+    outer_values = [row.get(outer_column) for row in outer_rows]
+    inner_values = [row.get(inner_column) for row in inner_rows]
+    non_null_inner = [value for value in inner_values if value is not None]
+
+    # Prefer an already present inner value that is also present in the outer
+    # relation.  This preserves primary-key uniqueness and avoids unnecessary
+    # writes in ordinary generated worlds.
+    match_value = next(
+        (
+            value
+            for value in non_null_inner
+            if value in outer_values
+        ),
+        None,
+    )
+    match_index = (
+        next(
+            (index for index, value in enumerate(outer_values) if value == match_value),
+            None,
+        )
+        if match_value is not None
+        else None
+    )
+    if match_value is None:
+        candidate = non_null_inner[0] if non_null_inner else next(
+            (value for value in outer_values if value is not None),
+            _seed_value(outer_column, 0),
+        )
+        occupied_outer = {value for value in outer_values[1:] if value is not None}
+        occupied_inner_tail = {
+            value for value in inner_values[1:] if value is not None
+        }
+        while candidate is None or candidate in occupied_outer or candidate in occupied_inner_tail:
+            candidate = _counter_value(outer_column, candidate)
+        match_value = candidate
+        match_index = 0
+        inner_rows[0][inner_column] = match_value
+    if match_index is None:
+        # The selected inner key is not currently represented by the outer
+        # table.  Pick a value that will not collide with the reserved negative
+        # outer row or the remaining inner rows.
+        occupied_outer = {value for value in outer_values[1:] if value is not None}
+        occupied_inner_tail = {
+            value for value in inner_values[1:] if value is not None
+        }
+        candidate = match_value
+        while candidate in occupied_outer or candidate in occupied_inner_tail:
+            candidate = _counter_value(outer_column, candidate)
+        match_value = candidate
+        match_index = 0
+        inner_rows[0][inner_column] = match_value
+    negative_index = next(
+        (index for index in range(len(outer_rows)) if index != match_index),
+        None,
+    )
+    if negative_index is None:
+        return False
+    occupied_inner = {
+        row.get(inner_column)
+        for row in inner_rows
+        if row.get(inner_column) is not None
+    }
+    occupied_outer_other = {
+        row.get(outer_column)
+        for index, row in enumerate(outer_rows)
+        if index != negative_index and row.get(outer_column) is not None
+    }
+    non_match = _counter_value(outer_column, match_value)
+    while (
+        non_match is None
+        or non_match in occupied_inner
+        or non_match in occupied_outer_other
+        or non_match == match_value
+    ):
+        non_match = _counter_value(outer_column, non_match)
+
+    with write_owner("materializer:simple_in_exists_membership"):
+        outer_rows[match_index][outer_column] = match_value
+        outer_rows[negative_index][outer_column] = non_match
+    return True
+
+
+def _materialize_conjunctive_in_exists_membership_witness(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+) -> bool:
+    """Reach one uncorrelated IN->EXISTS edit inside an AND predicate.
+
+    The simple helper above intentionally handles only a single root
+    predicate.  A common teaching query combines several membership filters;
+    the generic presence probe can then make an unchanged sibling (for
+    example ``IN('A')``) unreachable and leave both original queries empty.
+    This bounded extension activates only when every non-target root leaf is
+    textually identical and the target inner query is a single-table query.
+    """
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    if not isinstance(standard_ast, exp.Select) or not isinstance(student_ast, exp.Select):
+        return False
+    standard_where = standard_ast.args.get("where")
+    student_where = student_ast.args.get("where")
+    if not isinstance(standard_where, exp.Where) or not isinstance(student_where, exp.Where):
+        return False
+    standard_leaves = _flatten_and(standard_where.this)
+    student_leaves = _flatten_and(student_where.this)
+    standard_in_nodes = [
+        node for node in standard_ast.find_all(exp.In)
+        if node.find_ancestor(exp.Select) is standard_ast
+    ]
+    student_in_nodes = [
+        node for node in student_ast.find_all(exp.In)
+        if node.find_ancestor(exp.Select) is student_ast
+    ]
+    student_exists_nodes = [
+        node for node in student_ast.find_all(exp.Exists)
+        if node.find_ancestor(exp.Select) is student_ast
+        and not isinstance(node.parent, exp.Not)
+    ]
+    if not standard_in_nodes or not student_exists_nodes:
+        return False
+
+    def inner_select(node: exp.Expression) -> exp.Select | None:
+        if isinstance(node, exp.In):
+            query = node.args.get("query")
+            return query.this if isinstance(query, exp.Subquery) and isinstance(query.this, exp.Select) else None
+        if isinstance(node, exp.Exists):
+            return node.this if isinstance(node.this, exp.Select) else None
+        return None
+
+    def inner_key(node: exp.Expression) -> str:
+        inner = inner_select(node)
+        return re.sub(r"\s+", "", _alias_insensitive_sql(inner).lower()) if inner is not None else ""
+
+    student_in_keys = {inner_key(node) for node in student_in_nodes}
+    target_pair: tuple[exp.In, exp.Exists] | None = None
+    for in_node in standard_in_nodes:
+        key = inner_key(in_node)
+        if not key or key in student_in_keys:
+            continue
+        exists_node = next(
+            (node for node in student_exists_nodes if inner_key(node) == key),
+            None,
+        )
+        if exists_node is not None:
+            if target_pair is not None:
+                return False
+            target_pair = (in_node, exists_node)
+    if target_pair is None:
+        return False
+    target_in, target_exists = target_pair
+
+    def leaf_key(node: exp.Expression) -> str:
+        return re.sub(r"\s+", "", _alias_insensitive_sql(node).lower())
+
+    def without_target(
+        leaves: list[exp.Expression],
+        target: exp.Expression,
+    ) -> list[str]:
+        target_leaf = target
+        if isinstance(target.parent, exp.Not):
+            target_leaf = target.parent
+        return sorted(
+            leaf_key(node)
+            for node in leaves
+            if node is not target_leaf
+        )
+
+    if without_target(standard_leaves, target_in) != without_target(student_leaves, target_exists):
+        return False
+
+    outer_table = _direct_from_table(standard_ast)
+    target_inner = inner_select(target_in)
+    if not isinstance(outer_table, exp.Table) or target_inner is None:
+        return False
+    target_inner_table = _direct_from_table(target_inner)
+    if not isinstance(target_inner_table, exp.Table):
+        return False
+    if _subquery_is_correlated(target_inner) or _norm_name(outer_table.name) == _norm_name(target_inner_table.name):
+        return False
+    target_projected = target_inner.expressions[0] if target_inner.expressions else None
+    target_projected = target_projected.this if isinstance(target_projected, exp.Alias) else target_projected
+    if not isinstance(target_in.this, exp.Column) or not isinstance(target_projected, exp.Column):
+        return False
+    outer_ref = _scope_column_ref(target_in.this, standard_ast)
+    inner_ref = _scope_column_ref(target_projected, target_inner)
+    outer_actual = _actual_data_ref(data, outer_ref) if outer_ref else None
+    inner_actual = _actual_data_ref(data, inner_ref) if inner_ref else None
+    if outer_actual is None or inner_actual is None:
+        return False
+    outer_rows, outer_column = outer_actual
+    target_rows, target_column = inner_actual
+    if len(outer_rows) < 2 or not target_rows:
+        return False
+
+    def equality_filter(select: exp.Select) -> tuple[str, Any] | None:
+        where = select.args.get("where")
+        if not isinstance(where, exp.Where):
+            return None
+        for leaf in _flatten_and(where.this):
+            if not isinstance(leaf, exp.EQ):
+                continue
+            if isinstance(leaf.left, exp.Column):
+                value = _literal_value(leaf.right)
+                if value is not None:
+                    return leaf.left.name, value
+            if isinstance(leaf.right, exp.Column):
+                value = _literal_value(leaf.left)
+                if value is not None:
+                    return leaf.right.name, value
+        return None
+
+    def ensure_filter(
+        rows: list[dict[str, Any]],
+        select: exp.Select,
+        used: set[int],
+    ) -> tuple[int | None, tuple[str, Any] | None]:
+        spec = equality_filter(select)
+        if spec is None:
+            candidates = [index for index in range(len(rows)) if index not in used]
+            return (candidates[0] if candidates else None), None
+        column, value = spec
+        actual = next((name for name in rows[0] if _norm_name(name) == _norm_name(column)), None)
+        if actual is None:
+            return None, spec
+        existing = next(
+            (index for index, row in enumerate(rows) if index not in used and row.get(actual) == value),
+            None,
+        )
+        if existing is not None:
+            return existing, spec
+        candidates = [index for index in range(len(rows)) if index not in used]
+        if not candidates:
+            return None, spec
+        rows[candidates[0]][actual] = value
+        return candidates[0], spec
+
+    match_value = next((row.get(outer_column) for row in outer_rows if row.get(outer_column) is not None), None)
+    if match_value is None:
+        match_value = _seed_value(outer_column, 0)
+    occupied = {
+        row.get(outer_column)
+        for row in outer_rows
+        if row.get(outer_column) is not None
+    }
+    non_match = _counter_value(outer_column, match_value)
+    while non_match in occupied or non_match == match_value:
+        non_match = _counter_value(outer_column, non_match)
+    used_by_table: dict[str, set[int]] = defaultdict(set)
+    writes: list[tuple[dict[str, Any], str, Any]] = []
+    writes.append((outer_rows[0], outer_column, match_value))
+
+    # Make one unchanged positive IN sibling reachable for the selected outer
+    # row, while keeping negated siblings on their negative path.
+    for node in standard_in_nodes:
+        if node is target_in:
+            continue
+        inner = inner_select(node)
+        if inner is None:
+            return False
+        projected = inner.expressions[0] if inner.expressions else None
+        projected = projected.this if isinstance(projected, exp.Alias) else projected
+        if not isinstance(node.this, exp.Column) or not isinstance(projected, exp.Column):
+            return False
+        outer_ref = _scope_column_ref(node.this, standard_ast)
+        inner_ref = _scope_column_ref(projected, inner)
+        outer_link = _actual_data_ref(data, outer_ref) if outer_ref else None
+        inner_link = _actual_data_ref(data, inner_ref) if inner_ref else None
+        if outer_link is None or inner_link is None:
+            return False
+        sibling_outer_rows, sibling_outer_column = outer_link
+        sibling_rows, sibling_column = inner_link
+        if sibling_outer_rows is not outer_rows or sibling_outer_column != outer_column:
+            return False
+        table_key = _norm_name(str(inner_table_name := _direct_from_table(inner).name if isinstance(_direct_from_table(inner), exp.Table) else ""))
+        if not table_key:
+            return False
+        if isinstance(node.parent, exp.Not):
+            for index, row in enumerate(sibling_rows):
+                filter_spec = equality_filter(inner)
+                filter_actual = (
+                    next((name for name in row if _norm_name(name) == _norm_name(filter_spec[0])), None)
+                    if filter_spec is not None
+                    else None
+                )
+                if filter_spec is None or (filter_actual is not None and row.get(filter_actual) == filter_spec[1]):
+                    writes.append((row, sibling_column, non_match))
+            continue
+        index, _ = ensure_filter(sibling_rows, inner, used_by_table[table_key])
+        if index is None:
+            return False
+        used_by_table[table_key].add(index)
+        writes.append((sibling_rows[index], sibling_column, match_value))
+
+    target_table_key = _norm_name(target_inner_table.name)
+    target_index, _ = ensure_filter(target_rows, target_inner, used_by_table[target_table_key])
+    if target_index is None:
+        return False
+    writes.append((target_rows[target_index], target_column, non_match))
+    with write_owner("materializer:conjunctive_in_exists_membership"):
+        for row, column, value in writes:
+            row[column] = value
+    return True
 
 
 def _materialize_in_list_obligation_witness(
@@ -4606,8 +8943,34 @@ def generate_witness_suite(
 
 def transpile_to_sqlite(sql: str, source_dialect: str | None = None) -> str | None:
     prepared_sql = _prepare_sqlite_source(sql)
+    prepared_dialect = source_dialect
+    set_all_lowered = _lower_simple_set_all(
+        prepared_sql,
+        dialect=prepared_dialect,
+    )
+    if set_all_lowered is not None:
+        prepared_sql = set_all_lowered
+        prepared_dialect = "sqlite"
+    lateral_lowered = _lower_single_row_lateral_projection(
+        prepared_sql,
+        dialect=prepared_dialect,
+    )
+    if lateral_lowered is not None:
+        prepared_sql = lateral_lowered
+        prepared_dialect = "sqlite"
+    grouping_lowered = _lower_simple_grouping_extensions(
+        prepared_sql,
+        dialect=prepared_dialect,
+    )
+    if grouping_lowered is not None:
+        prepared_sql = grouping_lowered
+        prepared_dialect = "sqlite"
     manual = _manual_sqlite_compat(prepared_sql)
-    dialects = (source_dialect,) if source_dialect else _dialect_candidates(prepared_sql)
+    dialects = (
+        (prepared_dialect,)
+        if prepared_dialect
+        else _dialect_candidates(prepared_sql)
+    )
     for dialect in dialects:
         try:
             candidates = sqlglot.transpile(
@@ -4626,6 +8989,383 @@ def transpile_to_sqlite(sql: str, source_dialect: str | None = None) -> str | No
     return _manual_sqlite_compat(prepared_sql)
 
 
+def _lower_simple_set_all(
+    sql: str,
+    *,
+    dialect: str | None = None,
+) -> str | None:
+    """Lower a bounded two-branch INTERSECT/EXCEPT ALL into SQLite SQL."""
+    if not re.search(r"(?is)\b(?:INTERSECT|EXCEPT)\s+ALL\b", sql or ""):
+        return None
+    tree = _parse_sql(sql, dialect=dialect)
+    if not isinstance(tree, (exp.Intersect, exp.Except)):
+        return None
+    if tree.args.get("distinct") is not False:
+        return None
+    if any(
+        tree.args.get(key)
+        for key in ("order", "limit", "offset", "with", "with_", "side", "kind", "on")
+    ):
+        return None
+    left = tree.this
+    right = tree.expression
+    if not isinstance(left, exp.Select) or not isinstance(right, exp.Select):
+        return None
+    if any(
+        branch.args.get(key)
+        for branch in (left, right)
+        for key in (
+            "order", "limit", "offset", "with", "with_", "qualify",
+            "distinct",
+        )
+    ):
+        return None
+    if any(
+        branch.find(node_type) is not None
+        for branch in (left, right)
+        for node_type in (exp.SetOperation, exp.Window, exp.Subquery, exp.Star)
+    ):
+        return None
+    if len(left.expressions or ()) == 0 or len(left.expressions) != len(right.expressions or ()):
+        return None
+    internal_names = [f"__phase1_set_col_{index}" for index in range(len(left.expressions))]
+
+    def render_branch(branch: exp.Select) -> str | None:
+        copied = branch.copy()
+        copied.set(
+            "expressions",
+            [
+                exp.alias_(
+                    (
+                        expression.this.copy()
+                        if isinstance(expression, exp.Alias)
+                        else expression.copy()
+                    ),
+                    name,
+                )
+                for expression, name in zip(copied.expressions, internal_names)
+            ],
+        )
+        try:
+            rendered = copied.sql(
+                dialect="sqlite",
+                identify=True,
+                unsupported_level=ErrorLevel.RAISE,
+            )
+        except Exception:
+            return None
+        return rendered or None
+
+    left_sql = render_branch(left)
+    right_sql = render_branch(right)
+    if not left_sql or not right_sql:
+        return None
+
+    def quote(identifier: str) -> str:
+        return '"' + identifier.replace('"', '""') + '"'
+
+    def ranked(name: str, branch_sql: str) -> str:
+        columns = ", ".join(quote(item) for item in internal_names)
+        return (
+            f"{quote(name)} AS ("
+            f"SELECT {columns}, ROW_NUMBER() OVER (PARTITION BY {columns}) "
+            f"AS {quote('__phase1_set_row')} "
+            f"FROM ({branch_sql}) AS {quote(name + '_base')}"
+            f")"
+        )
+
+    comparisons = " AND ".join(
+        f"{quote('l')}.{quote(column)} IS {quote('r')}.{quote(column)}"
+        for column in internal_names
+    )
+    comparisons += (
+        f" AND {quote('l')}.{quote('__phase1_set_row')} = "
+        f"{quote('r')}.{quote('__phase1_set_row')}"
+    )
+    output_names = [
+        expression.alias_or_name or f"column{index + 1}"
+        for index, expression in enumerate(left.expressions)
+    ]
+    output = ", ".join(
+        f"{quote('l')}.{quote(column)} AS {quote(str(label))}"
+        for column, label in zip(internal_names, output_names)
+    )
+    ctes = ", ".join((ranked("__phase1_set_left", left_sql), ranked("__phase1_set_right", right_sql)))
+    if isinstance(tree, exp.Intersect):
+        return (
+            f"WITH {ctes} SELECT {output} "
+            f"FROM {quote('__phase1_set_left')} AS {quote('l')} "
+            f"JOIN {quote('__phase1_set_right')} AS {quote('r')} ON {comparisons}"
+        )
+    return (
+        f"WITH {ctes} SELECT {output} "
+        f"FROM {quote('__phase1_set_left')} AS {quote('l')} "
+        f"LEFT JOIN {quote('__phase1_set_right')} AS {quote('r')} ON {comparisons} "
+        f"WHERE {quote('r')}.{quote('__phase1_set_row')} IS NULL"
+    )
+
+
+def _lower_single_row_lateral_projection(
+    sql: str,
+    *,
+    dialect: str | None = None,
+) -> str | None:
+    """Inline a provably single-row scalar CROSS JOIN LATERAL projection."""
+    if not re.search(r"(?is)\bLATERAL\b", sql or ""):
+        return None
+    tree = _parse_sql(sql, dialect=dialect)
+    if not isinstance(tree, exp.Select):
+        return None
+    joins = list(tree.args.get("joins") or ())
+    if len(joins) != 1:
+        return None
+    join = joins[0]
+    lateral = join.this
+    if (
+        not isinstance(lateral, exp.Lateral)
+        or str(join.args.get("kind") or "").upper() != "CROSS"
+        or any(join.args.get(key) for key in ("side", "on", "using", "method"))
+        or lateral.args.get("outer")
+        or lateral.args.get("cross_apply")
+    ):
+        return None
+    subquery = lateral.this
+    inner = subquery.this if isinstance(subquery, exp.Subquery) else None
+    if not isinstance(inner, exp.Select):
+        return None
+    populated_inner_args = {
+        key for key, value in inner.args.items()
+        if key != "expressions" and value not in (None, False, [], ())
+    }
+    if populated_inner_args:
+        return None
+
+    lateral_alias = _norm_name(lateral.alias)
+    if not lateral_alias:
+        return None
+    projected: dict[str, exp.Alias] = {}
+    for item in inner.expressions:
+        if not isinstance(item, exp.Alias) or not item.alias:
+            return None
+        expression = item.this
+        if (
+            isinstance(expression, (exp.Column, exp.Literal)) is False
+            and expression.find(exp.Column) is None
+        ):
+            # Arithmetic over outer columns/literals is accepted below. Other
+            # opaque scalar node families need their own semantic audit.
+            return None
+        if any(
+            isinstance(node, (exp.Subquery, exp.AggFunc, exp.Window, exp.Func))
+            for node in expression.walk()
+        ):
+            return None
+        name = _norm_name(item.alias)
+        if not name or name in projected:
+            return None
+        projected[name] = item
+
+    rewritten_projections: list[exp.Expression] = []
+    for item in tree.expressions:
+        projection_columns = (
+            [item]
+            if isinstance(item, exp.Column)
+            else list(item.find_all(exp.Column))
+        )
+        lateral_columns = [
+            column
+            for column in projection_columns
+            if _norm_name(column.table) == lateral_alias
+        ]
+        direct_column = item.this if isinstance(item, exp.Alias) else item
+        if lateral_columns:
+            if (
+                len(lateral_columns) != 1
+                or not isinstance(direct_column, exp.Column)
+                or direct_column is not lateral_columns[0]
+            ):
+                return None
+            replacement = projected.get(_norm_name(direct_column.name))
+            if replacement is None:
+                return None
+            if isinstance(item, exp.Alias):
+                rewritten_projections.append(
+                    exp.alias_(replacement.this.copy(), item.alias)
+                )
+            else:
+                rewritten_projections.append(replacement.copy())
+        else:
+            rewritten_projections.append(item.copy())
+
+    projection_nodes = {
+        id(node)
+        for projection in tree.expressions
+        for node in projection.walk()
+    }
+    if any(
+        _norm_name(column.table) == lateral_alias
+        and id(column) not in projection_nodes
+        for column in tree.find_all(exp.Column)
+    ):
+        return None
+
+    lowered = tree.copy()
+    lowered.set("expressions", rewritten_projections)
+    lowered.set("joins", [])
+    return _sql_of(lowered)
+
+
+def _grouping_key_signature(node: exp.Expression) -> str:
+    node = _unwrap_paren(node)
+    if isinstance(node, exp.Column) and not node.table:
+        return _norm_name(node.name)
+    return _sql_of(node)
+
+
+def _grouping_set_expressions(node: exp.Expression) -> list[exp.Expression] | None:
+    node = _unwrap_paren(node)
+    if isinstance(node, exp.Tuple):
+        return [item.copy() for item in node.expressions]
+    if isinstance(node, exp.Expression):
+        return [node.copy()]
+    return None
+
+
+def _lower_simple_grouping_extensions(
+    sql: str,
+    *,
+    dialect: str | None = None,
+) -> str | None:
+    """Lower bounded PostgreSQL grouping extensions to UNION ALL branches.
+
+    ``CUBE`` is intentionally capped at three keys.  This keeps the number of
+    generated branches (2**n) and the SQLite execution cost bounded while
+    covering the form normally used in teaching queries.
+    """
+    if dialect != "postgres":
+        # A compact SQL string without an explicit dialect must not silently
+        # acquire PostgreSQL grouping semantics during SQLite compatibility.
+        return None
+    if not re.search(
+        r"(?is)\b(?:ROLLUP|CUBE|GROUPING\s+SETS)\s*\(",
+        sql or "",
+    ):
+        return None
+    tree = _parse_sql(sql, dialect=dialect)
+    if not isinstance(tree, exp.Select):
+        return None
+    group = tree.args.get("group")
+    if not isinstance(group, exp.Group):
+        return None
+    if any(
+        tree.args.get(key)
+        for key in ("having", "qualify", "limit", "offset", "with", "with_")
+    ) or tree.args.get("distinct"):
+        return None
+    if tree.find(exp.Window) is not None or re.search(
+        r"(?is)\bGROUPING(?:_ID)?\s*\(",
+        sql,
+    ):
+        return None
+    rollups = list(group.args.get("rollup") or ())
+    cubes = list(group.args.get("cube") or ())
+    grouping_sets = list(group.args.get("grouping_sets") or ())
+    extension_count = sum(bool(item) for item in (rollups, cubes, grouping_sets))
+    if group.expressions or extension_count != 1:
+        return None
+
+    branches: list[list[exp.Expression]] = []
+    if rollups:
+        if len(rollups) != 1:
+            return None
+        keys = [item.copy() for item in rollups[0].expressions]
+        branches = [keys[:size] for size in range(len(keys), -1, -1)]
+    elif cubes:
+        if len(cubes) != 1:
+            return None
+        keys = [item.copy() for item in cubes[0].expressions]
+        if not keys or len(keys) > 3 or any(
+            not isinstance(_unwrap_paren(item), exp.Column)
+            for item in keys
+        ):
+            return None
+        # PostgreSQL's CUBE produces every subset of the key list.  The
+        # branch order is immaterial without ORDER BY; descending masks keep
+        # the most detailed grouping first for deterministic evidence.
+        branches = [
+            [keys[index].copy() for index in range(len(keys)) if mask & (1 << index)]
+            for mask in range((1 << len(keys)) - 1, -1, -1)
+        ]
+    else:
+        if len(grouping_sets) != 1:
+            return None
+        for item in grouping_sets[0].expressions:
+            expressions = _grouping_set_expressions(item)
+            if expressions is None:
+                return None
+            branches.append(expressions)
+    if not branches or len(branches) > 8:
+        return None
+
+    all_key_signatures = {
+        _grouping_key_signature(key)
+        for branch in branches
+        for key in branch
+    }
+    projection_keys: list[set[str] | None] = []
+    for projection in tree.expressions:
+        expression = projection.this if isinstance(projection, exp.Alias) else projection
+        if isinstance(expression, exp.Literal) or isinstance(expression, exp.Null):
+            projection_keys.append(set())
+            continue
+        if expression.find(exp.AggFunc) is not None or isinstance(expression, exp.AggFunc):
+            if expression.find(exp.Window) is not None:
+                return None
+            projection_keys.append(None)
+            continue
+        signatures = {_grouping_key_signature(expression)}
+        alias = _norm_name(projection.alias_or_name)
+        if alias:
+            signatures.add(alias)
+        if not signatures & all_key_signatures:
+            return None
+        projection_keys.append(signatures)
+
+    order = tree.args.get("order")
+    lowered_branches: list[exp.Select] = []
+    for branch_keys in branches:
+        branch = tree.copy()
+        branch.set("order", None)
+        branch.set(
+            "group",
+            exp.Group(expressions=[item.copy() for item in branch_keys])
+            if branch_keys
+            else None,
+        )
+        active = {_grouping_key_signature(item) for item in branch_keys}
+        projections: list[exp.Expression] = []
+        for original, signatures in zip(branch.expressions, projection_keys):
+            if signatures is None or not signatures or signatures & active:
+                projections.append(original)
+                continue
+            alias = _norm_name(original.alias_or_name)
+            if not alias:
+                return None
+            projections.append(exp.alias_(exp.Null(), alias))
+        branch.set("expressions", projections)
+        lowered_branches.append(branch)
+
+    combined: exp.Expression = lowered_branches[0]
+    for branch in lowered_branches[1:]:
+        combined = exp.Union(this=combined, expression=branch, distinct=False)
+    if isinstance(order, exp.Order):
+        combined.set("order", order.copy())
+    try:
+        return combined.sql()
+    except Exception:
+        return None
+
+
 def _failed(
     error: str,
     standard_sqlite: str | None,
@@ -4638,15 +9378,12 @@ def _failed(
     error_code: str | None = None,
     boundary_evidence: dict[str, Any] | None = None,
     unsupported_features: list[str] | None = None,
-    execution_backend: str = "sqlite",
+    execution_backend: str | None = "sqlite",
     sql_dialect: str | None = None,
 ) -> SandboxRun:
-    if status in {"WRONG", "SECURITY_REJECTED"}:
-        public_status, conclusion = VERDICT_SUPPORTED, "NOT_EQUIVALENT"
-    elif status == "INPUT_ERROR":
-        public_status, conclusion = VERDICT_INPUT_GAP, EQUIVALENCE_UNDECIDED
-    else:
-        public_status, conclusion = VERDICT_ENGINE_GAP, EQUIVALENCE_UNDECIDED
+    projection = project_failure(status)
+    public_status = projection.status
+    conclusion = projection.equivalence_conclusion
     public_boundary_evidence = dict(boundary_evidence or {})
     return SandboxRun(
         executed=False,
@@ -4711,11 +9448,17 @@ def _select_execution_backend(
     target_dialect: str,
     execution_backend: str | None,
     native_executor_url: str | None,
+    declared_vendor_dialect: str | None = None,
 ) -> str:
     if execution_backend is None:
-        # Direct library callers retain the historical SQLite compatibility
-        # runner. API callers pass ``auto`` explicitly and must never change
-        # the resolved dialect's execution semantics silently.
+        # A declared vendor dialect is a semantic promise. Requiring an
+        # explicit backend prevents direct library callers from accidentally
+        # treating SQLite compatibility results as native vendor evidence.
+        if declared_vendor_dialect is not None:
+            return "implicit_vendor_backend"
+        # Undeclared/generic callers retain the bounded SQLite compatibility
+        # path. API callers pass ``auto`` explicitly and must never change the
+        # resolved dialect's execution semantics silently.
         return "sqlite"
 
     backend = (execution_backend or "auto").strip().lower()
@@ -4748,6 +9491,7 @@ def _prepare_executable_sql_pair(
     student_ast: exp.Expression | None = None,
     target_dialect: str | None = None,
     source_dialect: str | None = None,
+    schema_catalog: SchemaCatalog | None = None,
     preserve_source_sql: bool = False,
 ) -> tuple[str | None, str | None]:
     if backend in {"mysql", "postgres", "tsql", "oracle"}:
@@ -4759,10 +9503,88 @@ def _prepare_executable_sql_pair(
             _render_native_ast(standard_ast, target_dialect),
             _render_native_ast(student_ast, target_dialect),
         )
-    return (
-        transpile_to_sqlite(standard_sql, source_dialect=source_dialect),
-        transpile_to_sqlite(student_sql, source_dialect=source_dialect),
+    standard_source = _unqualify_sqlite_fixture_tables(
+        standard_sql,
+        standard_ast,
+        source_dialect=source_dialect,
+        schema_catalog=schema_catalog,
     )
+    student_source = _unqualify_sqlite_fixture_tables(
+        student_sql,
+        student_ast,
+        source_dialect=source_dialect,
+        schema_catalog=schema_catalog,
+    )
+    return (
+        transpile_to_sqlite(standard_source, source_dialect=source_dialect),
+        transpile_to_sqlite(student_source, source_dialect=source_dialect),
+    )
+
+
+def _unqualify_sqlite_fixture_tables(
+    sql: str,
+    ast: exp.Expression | None,
+    *,
+    source_dialect: str | None,
+    schema_catalog: SchemaCatalog | None,
+) -> str:
+    """Map declared schemas onto the sandbox's single physical namespace.
+
+    The mapping is allowed only when the authoritative catalog contains the
+    unqualified physical table.  Unknown qualifiers remain untouched so a bad
+    student reference still fails instead of being silently redirected.
+    """
+
+    if ast is None or schema_catalog is None:
+        return sql
+    render_ast = ast.copy()
+    changed = False
+    has_explicit_null_placement = bool(
+        re.search(r"(?is)\bNULLS\s+(?:FIRST|LAST)\b", sql)
+    )
+    for table in render_ast.find_all(exp.Table):
+        if not (table.args.get("db") or table.args.get("catalog")):
+            continue
+        if schema_catalog.table(str(table.name or "")) is None:
+            continue
+        table.set("db", None)
+        table.set("catalog", None)
+        changed = True
+    for select in render_ast.find_all(exp.Select):
+        order = select.args.get("order")
+        if not isinstance(order, exp.Order):
+            continue
+        distinct = select.args.get("distinct")
+        if isinstance(distinct, exp.Distinct) and distinct.args.get("on") is not None:
+            # DISTINCT ON lowering needs physical ORDER BY expressions;
+            # projection ordinals can erase a direction change.
+            continue
+        outputs: dict[str, list[int]] = {}
+        for index, projection in enumerate(select.expressions, start=1):
+            name = str(projection.alias_or_name or "").strip().lower()
+            if name:
+                outputs.setdefault(name, []).append(index)
+        for ordered in order.expressions:
+            expression = ordered.this if isinstance(ordered, exp.Ordered) else ordered
+            if not isinstance(expression, exp.Column) or expression.table:
+                continue
+            # SQLGlot cannot reliably round-trip ``NULLS FIRST/LAST`` when
+            # the key is rendered as a positional ORDER BY expression. Keep
+            # the named column for explicit NULL placement so SQLite executes
+            # the same ordering semantics as the source query.
+            if has_explicit_null_placement and isinstance(ordered, exp.Ordered):
+                continue
+            positions = outputs.get(str(expression.name or "").lower(), [])
+            if len(positions) != 1:
+                continue
+            expression.replace(exp.Literal.number(positions[0]))
+            changed = True
+    if not changed:
+        return sql
+    try:
+        return render_ast.sql(dialect=source_dialect)
+    except Exception:
+        return sql
 
 
 def _prepare_native_sql(sql: str) -> str:
@@ -4889,10 +9711,87 @@ def _detect_sqlite_unsupported_features(
     found: list[str] = []
     seen: set[str] = set()
     combined = "\n".join(item for item in sql_items if item)
+    grouping_extensions_lowerable = bool(
+        target_dialect == "postgres"
+        and all(
+            not re.search(
+                r"(?is)\b(?:ROLLUP|CUBE|GROUPING\s+SETS)\s*\(",
+                sql or "",
+            )
+            or _lower_simple_grouping_extensions(sql, dialect=target_dialect) is not None
+            for sql in sql_items
+        )
+    )
+    lateral_lowerable = all(
+        not re.search(r"(?is)\bLATERAL\b", sql or "")
+        or _lower_single_row_lateral_projection(
+            sql,
+            dialect=target_dialect,
+        ) is not None
+        for sql in sql_items
+    )
+    set_all_lowerable = all(
+        not re.search(r"(?is)\b(?:INTERSECT|EXCEPT)\s+ALL\b", sql or "")
+        or _lower_simple_set_all(sql, dialect=target_dialect) is not None
+        for sql in sql_items
+    )
     for feature, pattern in checks:
+        if (
+            feature in {"ROLLUP", "CUBE", "GROUPING_SETS"}
+            and grouping_extensions_lowerable
+        ):
+            continue
+        if feature == "LATERAL" and lateral_lowerable:
+            continue
+        if feature in {"INTERSECT_ALL", "EXCEPT_ALL"} and set_all_lowerable:
+            continue
         if feature not in seen and re.search(pattern, combined):
             found.append(feature)
             seen.add(feature)
+    has_unsupported_quantifier = False
+    for sql in sql_items:
+        quantified = re.findall(
+            r"(?is)(<=|>=|<>|!=|=|<|>)\s*(ALL|ANY|SOME)\s*\(",
+            sql or "",
+        )
+        if not quantified:
+            continue
+        safe_root_any = _safe_root_any_extreme_sql(sql, dialect=target_dialect)
+        safe_root_all = _safe_root_all_not_exists_sql(sql, dialect=target_dialect)
+        if any(
+            not (
+                operator == "=" and quantifier.upper() in {"ANY", "SOME"}
+            )
+            and not (
+                safe_root_any
+                and operator in {">", ">=", "<", "<="}
+                and quantifier.upper() in {"ANY", "SOME"}
+            )
+            and not (
+                safe_root_all
+                and quantifier.upper() == "ALL"
+            )
+            for operator, quantifier in quantified
+        ):
+            has_unsupported_quantifier = True
+            break
+    if has_unsupported_quantifier:
+        found.append("QUANTIFIED_SUBQUERY_COMPARISON")
+    if any(
+        re.search(r"(?is)\bGENERATE_SERIES\s*\(", sql or "")
+        and not _safe_bounded_generate_series_sql(
+            sql,
+            dialect=target_dialect,
+        )
+        for sql in sql_items
+    ):
+        found.append("POSTGRES_GENERATE_SERIES_UNBOUNDED")
+    if any(
+        re.search(r"(?is)\bEXTRACT\s*\(\s*EPOCH\s+FROM\b", sql or "")
+        and not _safe_static_epoch_extract_sql(sql, dialect=target_dialect)
+        for sql in sql_items
+    ):
+        found.append("POSTGRES_EXTRACT_EPOCH_DYNAMIC")
     if (
         target_dialect == "oracle"
         and re.search(r"(?is)(?:^|[^'])''(?:[^']|$)", combined)
@@ -5104,27 +10003,43 @@ def _collect_subqueries(ast: exp.Expression) -> list[exp.Expression]:
     Returns the inner Select of each subquery, in traversal order.
     """
     result: list[exp.Expression] = []
-    for node in ast.find_all(exp.Subquery):
-        inner = node.this
-        if isinstance(inner, exp.Select):
-            result.append(inner)
-    for node in ast.find_all(exp.Exists):
-        inner = node.this
-        if isinstance(inner, exp.Select):
+    seen: set[int] = set()
+    # ``find_all(Subquery)`` followed by ``find_all(Exists)`` does not preserve
+    # SQL traversal order.  In a predicate sequence such as ``IN(A) AND
+    # IN(B) AND NOT IN(C)`` -> ``IN(A) AND EXISTS(B) AND NOT IN(C)``, that
+    # split collection pairs B with C and manufactures unrelated nested
+    # literal/subquery diffs.  Walk both node kinds together so corresponding
+    # query blocks retain their source order.
+    for node in ast.walk():
+        if isinstance(node, exp.In) and isinstance(node.args.get("query"), exp.Subquery):
+            inner = node.args["query"].this
+        elif isinstance(node, exp.Subquery):
+            inner = node.this
+        elif isinstance(node, exp.Exists):
+            inner = node.this
+            if isinstance(inner, exp.Subquery):
+                inner = inner.this
+        else:
+            continue
+        if isinstance(inner, exp.Select) and id(inner) not in seen:
+            seen.add(id(inner))
             result.append(inner)
     return result
 
 
 def _subquery_is_correlated(node: exp.Expression) -> bool:
-    inner_tables = {str(t.name).lower().strip('"`[]') for t in node.find_all(exp.Table)}
-    for table in node.find_all(exp.Table):
-        if table.alias:
-            inner_tables.add(str(table.alias).lower().strip('"`[]'))
+    if not isinstance(node, exp.Select):
+        return False
+    # A physical table name and its alias are not interchangeable for scope
+    # resolution.  In ``FROM employee e`` the alias ``e`` is local and the
+    # outer query's alias with the same spelling remains visible only when the
+    # inner query uses a different alias (for example ``employee x``).
+    local_qualifiers = _select_scope_qualifiers(node)
     for col in node.find_all(exp.Column):
-        if col.table:
-            table_ref = str(col.table).lower().strip('"`[]')
-            if table_ref not in inner_tables:
-                return True
+        if col.find_ancestor(exp.Select) is not node:
+            continue
+        if col.table and _norm_name(col.table) not in local_qualifiers:
+            return True
     return False
 
 
@@ -5379,6 +10294,7 @@ def extract_ast_diffs(
     student_sql: str,
     dialect: str | None = None,
     schema_catalog: SchemaCatalog | None = None,
+    semantic_dialect: str | None = None,
 ) -> list[ASTDiffNode]:
     """Extract focused AST subtree differences used to drive counterexample data generation."""
     standard_ast = _parse_sql(standard_sql, dialect=dialect)
@@ -5386,20 +10302,30 @@ def extract_ast_diffs(
     if standard_ast is None or student_ast is None:
         return []
 
-    if (
-        _queries_are_supported_equivalent_rewrites(
-            standard_ast,
-            student_ast,
-            schema_catalog=schema_catalog,
-        )
-        or schema_catalog is not None
+    equivalent_rewrite = _queries_are_supported_equivalent_rewrites(
+        standard_ast,
+        student_ast,
+        schema_catalog=schema_catalog,
+        dialect=semantic_dialect or dialect,
+    )
+    schema_projection_identity = (
+        schema_catalog is not None
         and _schema_numeric_projection_identities_equivalent(
             standard_ast,
             student_ast,
             schema_catalog,
         )
-    ):
-        return []
+    )
+    if equivalent_rewrite or schema_projection_identity:
+        # Preserve explicitly changed output labels for CFG coverage while
+        # keeping alias omission as a proven row-value rewrite.
+        alias_diffs = [
+            diff
+            for diff in _projection_alias_ast_diffs(standard_ast, student_ast)
+            if (diff.extra or {}).get("standard_alias")
+            and (diff.extra or {}).get("student_alias")
+        ]
+        return alias_diffs
 
     diffs: list[ASTDiffNode] = []
     diffs.extend(_clause_ast_diffs(standard_ast, student_ast))
@@ -5468,6 +10394,40 @@ def extract_ast_diffs(
             continue
         seen.add(key)
         unique.append(diff)
+    nested_atomic_comparisons = [
+        diff
+        for diff in unique
+        if diff.diff_type in {"comparison_operator_changed", "literal_changed"}
+        and int((diff.extra or {}).get("subquery_depth") or 0) > 0
+        and isinstance(diff.standard_node, exp.Expression)
+        and isinstance(diff.student_node, exp.Expression)
+    ]
+    if len(nested_atomic_comparisons) == 1:
+        candidate = nested_atomic_comparisons[0]
+        replaced_sql = _mutate_by_node_replacement(
+            standard_ast,
+            candidate.standard_node,
+            candidate.student_node,
+        )
+        # Both strings are rendered from the ASTs parsed at the beginning of
+        # this function.  Parsing ``replaced_sql`` again is not idempotent for
+        # every sqlglot dialect construct; PostgreSQL UNNEST(generate_series)
+        # can acquire an extra EXPLODE wrapper on the second parse.  Comparing
+        # these same-generation canonical strings proves the replacement
+        # without introducing a parser-roundtrip difference.
+        contains_aggregate = any(
+            node.find(exp.AggFunc) is not None
+            for node in (candidate.standard_node, candidate.student_node)
+        )
+        if (
+            replaced_sql
+            and replaced_sql == _sql_of(student_ast)
+            and not contains_aggregate
+        ):
+            # Clause/projection/correlated-subquery summaries are containers
+            # around this one proven atomic edit. Keeping them would create
+            # unrelated worlds and duplicate mutation attribution.
+            unique = [candidate]
     if placement_diffs:
         dependent_types = {
             "where_changed",
@@ -5514,6 +10474,19 @@ def extract_ast_diffs(
             for diff in unique
             if diff.diff_type == "subquery_membership_key_changed"
         ]
+    if any(
+        diff.diff_type == "null_sensitive_antijoin_equivalence"
+        for diff in unique
+    ):
+        # The focused detector only emits after proving that replacing the
+        # root NOT IN/NOT EXISTS predicates makes the complete queries equal,
+        # including identical inner filters and correlation keys. Generic
+        # WHERE, projection and correlation diffs are dependent containers.
+        unique = [
+            diff
+            for diff in unique
+            if diff.diff_type == "null_sensitive_antijoin_equivalence"
+        ]
     return unique
 
 
@@ -5522,6 +10495,7 @@ def _queries_are_supported_equivalent_rewrites(
     student_ast: exp.Expression,
     *,
     schema_catalog: SchemaCatalog | None = None,
+    dialect: str | None = None,
 ) -> bool:
     """Recognize narrow, semantics-preserving rewrites before emitting noisy diffs."""
     return any((
@@ -5530,7 +10504,10 @@ def _queries_are_supported_equivalent_rewrites(
         _nullif_coalesce_case_equivalent(standard_ast, student_ast),
         _simple_searched_case_equivalent(standard_ast, student_ast),
         _is_true_filter_equivalent(standard_ast, student_ast),
+        _constant_true_filter_equivalent(standard_ast, student_ast),
         _in_list_or_equivalent(standard_ast, student_ast),
+        _singleton_equality_in_filter_equivalent(standard_ast, student_ast),
+        _comparison_operands_mirrored_equivalent(standard_ast, student_ast),
         _order_reference_equivalent(
             standard_ast,
             student_ast,
@@ -5546,21 +10523,155 @@ def _queries_are_supported_equivalent_rewrites(
             standard_ast,
             schema_catalog=schema_catalog,
         ),
+        _schema_complete_star_projection_equivalent(
+            standard_ast,
+            student_ast,
+            schema_catalog=schema_catalog,
+        ),
+        _standalone_literal_projection_equivalent(
+            standard_ast,
+            student_ast,
+            dialect=dialect,
+        ),
         _null_safe_equality_filter_equivalent(standard_ast, student_ast),
         _where_boolean_absorption_equivalent(standard_ast, student_ast),
         _between_closed_range_equivalent(standard_ast, student_ast),
         _global_extreme_comparison_equivalent(standard_ast, student_ast),
+        _simple_derived_table_inline_equivalent(standard_ast, student_ast),
+        _simple_derived_table_inline_equivalent(student_ast, standard_ast),
+        _single_row_lateral_projection_inline_equivalent(
+            standard_ast,
+            student_ast,
+            dialect=dialect,
+        ),
+        _single_row_lateral_projection_inline_equivalent(
+            student_ast,
+            standard_ast,
+            dialect=dialect,
+        ),
+        _named_window_inline_equivalent(standard_ast, student_ast),
+        _named_window_inline_equivalent(student_ast, standard_ast),
+        _statically_empty_scalar_subquery_null_equivalent(
+            standard_ast,
+            student_ast,
+        ),
+        _statically_empty_scalar_subquery_null_equivalent(
+            student_ast,
+            standard_ast,
+        ),
+        _simple_cte_dependency_chain_inline_equivalent(standard_ast, student_ast),
+        _simple_cte_dependency_chain_inline_equivalent(student_ast, standard_ast),
+        _single_row_aggregate_cte_scalar_equivalent(standard_ast, student_ast),
+        _single_row_aggregate_cte_scalar_equivalent(student_ast, standard_ast),
         _simple_cte_inline_equivalent(standard_ast, student_ast),
         _simple_cte_inline_equivalent(student_ast, standard_ast),
         _simple_in_join_equivalent(standard_ast, student_ast),
         _simple_in_join_equivalent(student_ast, standard_ast),
         _simple_not_exists_antijoin_equivalent(standard_ast, student_ast),
         _simple_not_exists_antijoin_equivalent(student_ast, standard_ast),
+        _strict_in_exists_filter_equivalent(standard_ast, student_ast),
+        _strict_in_exists_filter_equivalent(student_ast, standard_ast),
+        _schema_nonnull_in_exists_equivalent(
+            standard_ast,
+            student_ast,
+            schema_catalog=schema_catalog,
+        ),
+        _schema_nonnull_in_exists_equivalent(
+            student_ast,
+            standard_ast,
+            schema_catalog=schema_catalog,
+        ),
+        _query_null_filters_prove_in_exists_equivalent(
+            standard_ast,
+            student_ast,
+            schema_catalog=schema_catalog,
+        ),
+        _query_null_filters_prove_in_exists_equivalent(
+            student_ast,
+            standard_ast,
+            schema_catalog=schema_catalog,
+        ),
+        _equal_any_in_equivalent(standard_ast, student_ast),
+        _equal_any_in_equivalent(student_ast, standard_ast),
+        _root_any_extreme_filter_equivalent(standard_ast, student_ast),
+        _root_any_extreme_filter_equivalent(student_ast, standard_ast),
+        _root_all_extreme_filter_equivalent(
+            standard_ast,
+            student_ast,
+            schema_catalog=schema_catalog,
+        ),
+        _root_all_extreme_filter_equivalent(
+            student_ast,
+            standard_ast,
+            schema_catalog=schema_catalog,
+        ),
+        _strict_monotonic_recursive_union_modifier_equivalent(
+            standard_ast,
+            student_ast,
+        ),
+        _identical_except_branch_modifier_equivalent(
+            standard_ast,
+            student_ast,
+        ),
         _commutative_set_branch_permutation_equivalent(
             standard_ast,
             student_ast,
         ),
     ))
+
+
+_MIRRORED_COMPARISON_TYPES: dict[type[exp.Expression], type[exp.Expression]] = {
+    exp.GT: exp.LT,
+    exp.LT: exp.GT,
+    exp.GTE: exp.LTE,
+    exp.LTE: exp.GTE,
+    exp.EQ: exp.EQ,
+    exp.NEQ: exp.NEQ,
+}
+
+
+def _comparison_operands_mirrored_equivalent(
+    standard_ast: exp.Expression,
+    student_ast: exp.Expression,
+) -> bool:
+    """Recognize comparison operand/order mirrors without weakening 3VL.
+
+    ``a > 1`` and ``1 < a`` (and their equality counterparts) have the same
+    SQL truth value, including UNKNOWN.  Canonicalize only comparison nodes
+    and require the complete query trees to match afterward.  This avoids
+    treating unrelated boolean expressions, such as a projected predicate
+    versus ``predicate IS TRUE``, as equivalent.
+    """
+    if not isinstance(standard_ast, exp.Expression) or not isinstance(
+        student_ast, exp.Expression
+    ):
+        return False
+
+    def canonicalize(ast: exp.Expression) -> exp.Expression:
+        copied = ast.copy()
+        comparisons = tuple(
+            node
+            for node in copied.walk()
+            if type(node) in _MIRRORED_COMPARISON_TYPES
+            and isinstance(node.this, exp.Expression)
+            and isinstance(node.expression, exp.Expression)
+        )
+        for node in comparisons:
+            left = node.this
+            right = node.expression
+            left_sql = _sql_of(left)
+            right_sql = _sql_of(right)
+            if left_sql <= right_sql:
+                continue
+            operator = _MIRRORED_COMPARISON_TYPES[type(node)]
+            node.replace(operator(this=right.copy(), expression=left.copy()))
+        return copied
+
+    standard_canonical = canonicalize(standard_ast)
+    student_canonical = canonicalize(student_ast)
+    return _sql_of(standard_canonical) == _sql_of(student_canonical) and (
+        _sql_of(standard_ast) != _sql_of(student_ast)
+    )
 
 
 def _simple_join_using_on_equivalent(
@@ -5686,6 +10797,150 @@ def _simple_join_using_on_equivalent(
         if _unqualified_sql(using_select.args.get(key)) != _unqualified_sql(on_select.args.get(key)):
             return False
     return True
+
+
+def _schema_complete_star_projection_equivalent(
+    standard_ast: exp.Expression,
+    student_ast: exp.Expression,
+    *,
+    schema_catalog: SchemaCatalog | None,
+) -> bool:
+    """Recognize ``*`` versus the catalog's complete ordered column list."""
+    if schema_catalog is None:
+        return False
+    standard = _top_select(standard_ast)
+    student = _top_select(student_ast)
+    if not isinstance(standard, exp.Select) or not isinstance(student, exp.Select):
+        return False
+    if any(
+        list(ast.find_all(node_type))
+        for ast in (standard_ast, student_ast)
+        for node_type in (exp.CTE, exp.Subquery, exp.Union, exp.Intersect, exp.Except)
+    ):
+        return False
+    if any(select.args.get("joins") for select in (standard, student)):
+        return False
+    standard_source = _direct_from_table(standard)
+    student_source = _direct_from_table(student)
+    if not standard_source or not student_source:
+        return False
+    if (
+        standard_source.alias
+        or student_source.alias
+        or _norm_name(standard_source.name) != _norm_name(student_source.name)
+    ):
+        return False
+    table_schema = schema_catalog.table(standard_source.name)
+    if table_schema is None or not table_schema.columns:
+        return False
+
+    def projection_kind(
+        select: exp.Select,
+    ) -> tuple[str, tuple[str, ...]] | None:
+        expressions = list(select.expressions or ())
+        if len(expressions) == 1 and isinstance(expressions[0], exp.Star):
+            return "star", tuple()
+        columns: list[str] = []
+        for expression in expressions:
+            if isinstance(expression, exp.Alias) or not isinstance(expression, exp.Column):
+                return None
+            if expression.table:
+                return None
+            columns.append(_norm_name(expression.name))
+        return "columns", tuple(columns)
+
+    standard_projection = projection_kind(standard)
+    student_projection = projection_kind(student)
+    if standard_projection is None or student_projection is None:
+        return False
+    if {standard_projection[0], student_projection[0]} != {"star", "columns"}:
+        return False
+    explicit = (
+        standard_projection[1]
+        if standard_projection[0] == "columns"
+        else student_projection[1]
+    )
+    expected = tuple(
+        _norm_name(column.name)
+        for column in table_schema.columns.values()
+    )
+    if explicit != expected:
+        return False
+    for key in (
+        "distinct", "where", "group", "having", "order", "limit", "offset",
+        "qualify",
+    ):
+        if _unqualified_sql(standard.args.get(key)) != _unqualified_sql(
+            student.args.get(key)
+        ):
+            return False
+    return True
+
+
+def _standalone_literal_projection_equivalent(
+    standard_ast: exp.Expression,
+    student_ast: exp.Expression,
+    *,
+    dialect: str | None,
+) -> bool:
+    """Compare one standalone literal under the value-only judge contract."""
+    if not isinstance(standard_ast, exp.Select) or not isinstance(
+        student_ast, exp.Select
+    ):
+        return False
+    if standard_ast.args.get("from_") or student_ast.args.get("from_"):
+        return False
+    if len(standard_ast.expressions or ()) != 1 or len(student_ast.expressions or ()) != 1:
+        return False
+    standard_value = standard_ast.expressions[0]
+    student_value = student_ast.expressions[0]
+    if isinstance(standard_value, exp.Alias) or isinstance(student_value, exp.Alias):
+        return False
+
+    equivalent = False
+    if (
+        isinstance(standard_value, exp.Literal)
+        and isinstance(student_value, exp.Literal)
+        and not standard_value.is_string
+        and not student_value.is_string
+    ):
+        try:
+            equivalent = Decimal(str(standard_value.this)) == Decimal(
+                str(student_value.this)
+            )
+        except (ArithmeticError, ValueError):
+            equivalent = False
+    elif str(dialect or "").lower() in {"mysql", "sqlite"}:
+        boolean = (
+            standard_value
+            if isinstance(standard_value, exp.Boolean)
+            else student_value
+            if isinstance(student_value, exp.Boolean)
+            else None
+        )
+        numeric = (
+            student_value
+            if boolean is standard_value
+            else standard_value
+            if boolean is student_value
+            else None
+        )
+        if isinstance(boolean, exp.Boolean) and isinstance(numeric, exp.Literal) and not numeric.is_string:
+            try:
+                equivalent = Decimal(str(numeric.this)) == Decimal(
+                    1 if bool(boolean.this) else 0
+                )
+            except (ArithmeticError, ValueError):
+                equivalent = False
+    if not equivalent:
+        return False
+
+    standard_copy = standard_ast.copy()
+    student_copy = student_ast.copy()
+    placeholder = exp.Literal.number(0)
+    standard_copy.set("expressions", [placeholder.copy()])
+    student_copy.set("expressions", [placeholder.copy()])
+    return _sql_of(standard_copy) == _sql_of(student_copy)
 
 
 def _double_negation_equivalent(
@@ -5962,6 +11217,44 @@ def _in_list_or_equivalent(
     return bool((standard[1] or student[1]) and standard[0] == student[0])
 
 
+def _singleton_equality_in_filter_equivalent(
+    standard_ast: exp.Expression,
+    student_ast: exp.Expression,
+) -> bool:
+    """Recognize ``x = c`` and ``x IN (c)`` in a filtering context.
+
+    SQL's three-valued logic makes this rewrite safe where rows are filtered:
+    both forms retain exactly the rows for which the predicate is TRUE. It is
+    intentionally not applied to SELECT projections or multi-value IN lists.
+    """
+    filter_types = tuple(
+        item
+        for item in (exp.Where, exp.Having, getattr(exp, "Qualify", None))
+        if isinstance(item, type)
+    )
+
+    def normalized(ast: exp.Expression) -> tuple[str, bool]:
+        copied = ast.copy()
+        changed = False
+        for node in list(copied.find_all(exp.In)):
+            if node.args.get("query") is not None or len(node.expressions or ()) != 1:
+                continue
+            value = node.expressions[0]
+            if not isinstance(node.this, exp.Expression) or not isinstance(
+                value, (exp.Literal, exp.Null)
+            ):
+                continue
+            if not node.find_ancestor(*filter_types):
+                continue
+            node.replace(exp.EQ(this=node.this.copy(), expression=value.copy()))
+            changed = True
+        return _sql_of(copied), changed
+
+    standard = normalized(standard_ast)
+    student = normalized(student_ast)
+    return bool((standard[1] or student[1]) and standard[0] == student[0])
+
+
 def _is_true_filter_equivalent(
     standard_ast: exp.Expression,
     student_ast: exp.Expression,
@@ -5992,6 +11285,52 @@ def _is_true_filter_equivalent(
             if not isinstance(predicate, exp.Expression):
                 continue
             node.replace(predicate.copy())
+            changed = True
+        return _sql_of(copied), changed
+
+    standard = normalized(standard_ast)
+    student = normalized(student_ast)
+    return bool((standard[1] or student[1]) and standard[0] == student[0])
+
+
+def _constant_true_filter_equivalent(
+    standard_ast: exp.Expression,
+    student_ast: exp.Expression,
+) -> bool:
+    """Recognize adding/removing a side-effect-free constant TRUE filter.
+
+    ``WHERE 1 = 1`` (and the same restricted literal form with equal text or
+    numeric values) retains every row, including rows whose projected or
+    aggregated values are NULL.  The rule is deliberately limited to a
+    comparison of two non-NULL literals or the Boolean literal TRUE; columns,
+    functions, subqueries, and general constant folding stay on the normal
+    witness path.
+    """
+
+    def is_constant_true(node: exp.Expression | None) -> bool:
+        node = _unwrap_paren(node)
+        if isinstance(node, exp.Boolean):
+            return node.this is True
+        if not isinstance(node, exp.EQ):
+            return False
+        left = node.left
+        right = node.right
+        if not isinstance(left, exp.Literal) or not isinstance(right, exp.Literal):
+            return False
+        if left.is_string and right.is_string:
+            return _literal_value(left) == _literal_value(right)
+        if left.is_number and right.is_number:
+            return _literal_value(left) == _literal_value(right)
+        return False
+
+    def normalized(ast: exp.Expression) -> tuple[str, bool]:
+        copied = ast.copy()
+        changed = False
+        for select in copied.find_all(exp.Select):
+            where = select.args.get("where")
+            if not isinstance(where, exp.Where) or not is_constant_true(where.this):
+                continue
+            select.set("where", None)
             changed = True
         return _sql_of(copied), changed
 
@@ -6409,6 +11748,234 @@ def _set_operator_signature(ast: exp.Expression | None) -> tuple[tuple[str, str]
     )
 
 
+def _strict_monotonic_recursive_union_modifier_equivalent(
+    standard_ast: exp.Expression,
+    student_ast: exp.Expression,
+) -> bool:
+    """Prove UNION/UNION ALL equal for one bounded monotonic recurrence."""
+    if not (_is_recursive_ast(standard_ast) and _is_recursive_ast(student_ast)):
+        return False
+    standard_unions = list(standard_ast.find_all(exp.Union))
+    student_unions = list(student_ast.find_all(exp.Union))
+    if len(standard_unions) != 1 or len(student_unions) != 1:
+        return False
+    standard_union = standard_unions[0]
+    student_union = student_unions[0]
+    if {
+        _set_operator_modifier(standard_union),
+        _set_operator_modifier(student_union),
+    } != {"ALL", "DISTINCT"}:
+        return False
+    normalized = standard_ast.copy()
+    normalized_union = next(iter(normalized.find_all(exp.Union)), None)
+    if not isinstance(normalized_union, exp.Union):
+        return False
+    normalized_union.set("distinct", student_union.args.get("distinct"))
+    if _sql_of(normalized) != _sql_of(student_ast):
+        return False
+
+    cte = standard_union.find_ancestor(exp.CTE)
+    if not isinstance(cte, exp.CTE) or not cte.alias:
+        return False
+    cte_name = _norm_name(cte.alias)
+
+    def direct_tables(select: exp.Select) -> list[exp.Table]:
+        return [
+            table
+            for table in select.find_all(exp.Table)
+            if table.find_ancestor(exp.Select) is select
+        ]
+
+    left = standard_union.this
+    right = standard_union.expression
+    if not isinstance(left, exp.Select) or not isinstance(right, exp.Select):
+        return False
+    left_tables = direct_tables(left)
+    right_tables = direct_tables(right)
+    left_recursive = any(_norm_name(table.name) == cte_name for table in left_tables)
+    right_recursive = any(_norm_name(table.name) == cte_name for table in right_tables)
+    if left_recursive == right_recursive:
+        return False
+    anchor, recursive = (right, left) if left_recursive else (left, right)
+    anchor_tables = direct_tables(anchor)
+    recursive_tables = direct_tables(recursive)
+    if anchor_tables or len(recursive_tables) != 1:
+        return False
+    recursive_source = recursive_tables[0]
+    if _norm_name(recursive_source.name) != cte_name:
+        return False
+    if any(
+        select.args.get(key)
+        for select in (anchor, recursive)
+        for key in (
+            "joins", "group", "having", "order", "limit", "offset",
+            "qualify", "distinct", "with", "with_",
+        )
+    ):
+        return False
+    if len(anchor.expressions or ()) != 1 or len(recursive.expressions or ()) != 1:
+        return False
+    if any(
+        nested is not select
+        for select in (anchor, recursive)
+        for nested in select.find_all(exp.Select)
+    ):
+        return False
+
+    anchor_projection = anchor.expressions[0]
+    anchor_value_node = (
+        anchor_projection.this
+        if isinstance(anchor_projection, exp.Alias)
+        else anchor_projection
+    )
+    if not isinstance(anchor_value_node, exp.Literal) or anchor_value_node.is_string:
+        return False
+    anchor_value = _literal_value(anchor_value_node)
+    if not isinstance(anchor_value, (int, float, Decimal)) or isinstance(anchor_value, bool):
+        return False
+
+    cte_alias = cte.args.get("alias")
+    output_columns = (
+        list(cte_alias.args.get("columns") or ())
+        if isinstance(cte_alias, exp.TableAlias)
+        else []
+    )
+    if len(output_columns) == 1 and isinstance(output_columns[0], exp.Identifier):
+        state_name = _norm_name(output_columns[0].name)
+    else:
+        state_name = _norm_name(anchor_projection.alias_or_name)
+    if not state_name:
+        return False
+
+    recursive_projection = recursive.expressions[0]
+    step_expression = (
+        recursive_projection.this
+        if isinstance(recursive_projection, exp.Alias)
+        else recursive_projection
+    )
+    state_column: exp.Column | None = None
+    step: int | float | Decimal | None = None
+    if isinstance(step_expression, exp.Add):
+        operands = (step_expression.left, step_expression.right)
+        state_column = next(
+            (item for item in operands if isinstance(item, exp.Column)),
+            None,
+        )
+        step_node = next(
+            (item for item in operands if isinstance(item, exp.Literal)),
+            None,
+        )
+        step = _literal_value(step_node) if isinstance(step_node, exp.Literal) else None
+    elif (
+        isinstance(step_expression, exp.Sub)
+        and isinstance(step_expression.left, exp.Column)
+        and isinstance(step_expression.right, exp.Literal)
+    ):
+        state_column = step_expression.left
+        raw_step = _literal_value(step_expression.right)
+        step = -raw_step if isinstance(raw_step, (int, float, Decimal)) else None
+    if (
+        not isinstance(state_column, exp.Column)
+        or _norm_name(state_column.name) != state_name
+        or not isinstance(step, (int, float, Decimal))
+        or isinstance(step, bool)
+        or step == 0
+    ):
+        return False
+    source_refs = {
+        cte_name,
+        _norm_name(recursive_source.alias or ""),
+    }
+    if state_column.table and _norm_name(state_column.table) not in source_refs:
+        return False
+
+    where = recursive.args.get("where")
+    predicate = _unwrap_paren(where.this) if isinstance(where, exp.Where) else None
+    if not isinstance(predicate, (exp.LT, exp.LTE, exp.GT, exp.GTE)):
+        return False
+    if isinstance(predicate.left, exp.Column) and isinstance(predicate.right, exp.Literal):
+        bound_column = predicate.left
+        column_on_left = True
+    elif isinstance(predicate.right, exp.Column) and isinstance(predicate.left, exp.Literal):
+        bound_column = predicate.right
+        column_on_left = False
+    else:
+        return False
+    if _norm_name(bound_column.name) != state_name:
+        return False
+    if bound_column.table and _norm_name(bound_column.table) not in source_refs:
+        return False
+    increasing_bound = (
+        isinstance(predicate, (exp.LT, exp.LTE))
+        if column_on_left
+        else isinstance(predicate, (exp.GT, exp.GTE))
+    )
+    decreasing_bound = (
+        isinstance(predicate, (exp.GT, exp.GTE))
+        if column_on_left
+        else isinstance(predicate, (exp.LT, exp.LTE))
+    )
+    return bool((step > 0 and increasing_bound) or (step < 0 and decreasing_bound))
+
+
+def _identical_except_branch_modifier_equivalent(
+    standard_ast: exp.Expression,
+    student_ast: exp.Expression,
+) -> bool:
+    """Prove ``R EXCEPT ALL R`` equal to ``R EXCEPT R`` for a stable R.
+
+    Both forms are empty when the two operands denote the same deterministic
+    bag.  Keep the proof deliberately narrow: only the root modifier may
+    differ, each operand must be textually identical to its sibling, and the
+    branch may not contain operations whose repeated evaluation or row choice
+    can vary.  Function volatility is dialect/catalog dependent, so a
+    function call is conservatively treated as unknown rather than assumed
+    deterministic.
+    """
+    if not isinstance(standard_ast, exp.Except) or not isinstance(
+        student_ast, exp.Except
+    ):
+        return False
+    if {
+        _set_operator_modifier(standard_ast),
+        _set_operator_modifier(student_ast),
+    } != {"ALL", "DISTINCT"}:
+        return False
+
+    normalized = standard_ast.copy()
+    normalized.set("distinct", student_ast.args.get("distinct"))
+    if _sql_of(normalized) != _sql_of(student_ast):
+        return False
+
+    left = standard_ast.this
+    right = standard_ast.expression
+    if not isinstance(left, exp.Select) or not isinstance(right, exp.Select):
+        return False
+    if _sql_of(left) != _sql_of(right):
+        return False
+    if any(
+        select.args.get(key) is not None
+        for select in (left, right)
+        for key in ("order", "limit", "offset", "qualify", "with", "with_")
+    ):
+        return False
+    unstable_types = tuple(
+        node_type
+        for node_type in (
+            exp.Func,
+            exp.Window,
+            exp.Subquery,
+            getattr(exp, "TableSample", None),
+        )
+        if isinstance(node_type, type)
+    )
+    return not any(
+        isinstance(node, unstable_types)
+        for branch in (left, right)
+        for node in branch.walk()
+    )
+
+
 def _commutative_set_branch_permutation_equivalent(
     standard_ast: exp.Expression,
     student_ast: exp.Expression,
@@ -6659,6 +12226,433 @@ def _unqualified_sql(node: exp.Expression | None) -> str:
     for column in copied.find_all(exp.Column):
         column.set("table", None)
     return _sql_of(copied)
+
+
+def _simple_cte_dependency_chain_inline_equivalent(
+    cte_ast: exp.Expression,
+    inline_ast: exp.Expression,
+) -> bool:
+    """Collapse one side-effect-free ``SELECT *`` CTE dependency.
+
+    This only widens the existing single-CTE equivalence rule to the common
+    teaching form ``physical table -> passthrough CTE -> filtered CTE``.  The
+    passthrough must preserve every row and column and may only be consumed by
+    the second CTE.  The resulting query is still checked by
+    ``_simple_cte_inline_equivalent``; this helper does not independently
+    declare arbitrary CTE chains equivalent.
+    """
+    if list(inline_ast.find_all(exp.CTE)):
+        return False
+    copied = cte_ast.copy()
+    with_node = next(iter(copied.find_all(exp.With)), None)
+    ctes = list(with_node.expressions or ()) if isinstance(with_node, exp.With) else []
+    if len(ctes) != 2:
+        return False
+    passthrough, dependent = ctes
+    passthrough_select = (
+        passthrough.this
+        if isinstance(passthrough.this, exp.Select)
+        else None
+    )
+    dependent_select = (
+        dependent.this
+        if isinstance(dependent.this, exp.Select)
+        else None
+    )
+    if not isinstance(passthrough_select, exp.Select) or not isinstance(
+        dependent_select, exp.Select
+    ):
+        return False
+    passthrough_alias = _norm_name(passthrough.alias or "")
+    dependent_alias = _norm_name(dependent.alias or "")
+    if not passthrough_alias or not dependent_alias:
+        return False
+    declared_alias = passthrough.args.get("alias")
+    if isinstance(declared_alias, exp.TableAlias) and declared_alias.args.get("columns"):
+        return False
+    if (
+        len(passthrough_select.expressions or ()) != 1
+        or not isinstance(passthrough_select.expressions[0], exp.Star)
+        or any(
+            passthrough_select.args.get(key)
+            for key in (
+                "joins", "where", "group", "having", "order", "limit",
+                "offset", "qualify", "distinct", "with", "with_",
+            )
+        )
+    ):
+        return False
+    physical_source = _direct_from_table(passthrough_select)
+    dependent_source = _direct_from_table(dependent_select)
+    outer = _top_select(copied)
+    outer_source = _direct_from_table(outer)
+    if not physical_source or not dependent_source or not outer_source:
+        return False
+    if _norm_name(dependent_source.name) != passthrough_alias:
+        return False
+    if _norm_name(outer_source.name) != dependent_alias:
+        return False
+    references = [
+        table
+        for table in copied.find_all(exp.Table)
+        if _norm_name(table.name) == passthrough_alias
+    ]
+    if len(references) != 1 or references[0] is not dependent_source:
+        return False
+
+    replacement = physical_source.copy()
+    reference_name = _norm_name(dependent_source.alias or passthrough.alias or "")
+    if reference_name:
+        replacement.set(
+            "alias",
+            exp.TableAlias(this=exp.to_identifier(reference_name)),
+        )
+    dependent_source.replace(replacement)
+    with_node.set("expressions", [dependent])
+    return _simple_cte_inline_equivalent(copied, inline_ast)
+
+
+def _simple_derived_table_inline_equivalent(
+    derived_ast: exp.Expression,
+    inline_ast: exp.Expression,
+) -> bool:
+    """Recognize one projection-only derived table moved into its parent."""
+    if not isinstance(derived_ast, exp.Select) or not isinstance(inline_ast, exp.Select):
+        return False
+    if any(
+        derived_ast.args.get(key)
+        for key in (
+            "joins", "where", "group", "having", "order", "limit", "offset",
+            "qualify", "distinct", "with", "with_",
+        )
+    ):
+        return False
+    if any(
+        inline_ast.args.get(key)
+        for key in ("joins", "group", "having", "order", "limit", "offset", "qualify", "distinct", "with", "with_")
+    ):
+        return False
+    derived_from = derived_ast.args.get("from_") or derived_ast.args.get("from")
+    derived_source = derived_from.this if isinstance(derived_from, exp.From) else None
+    if not isinstance(derived_source, exp.Subquery) or not derived_source.alias:
+        return False
+    inner = derived_source.this
+    if not isinstance(inner, exp.Select):
+        return False
+    if any(
+        inner.args.get(key)
+        for key in (
+            "joins", "group", "having", "order", "limit", "offset", "qualify",
+            "distinct", "with", "with_",
+        )
+    ):
+        return False
+    if any(nested is not inner for nested in inner.find_all(exp.Select)):
+        return False
+    inner_source = _direct_from_table(inner)
+    inline_source = _direct_from_table(inline_ast)
+    if (
+        not inner_source
+        or not inline_source
+        or inner_source.alias
+        or inline_source.alias
+        or _norm_name(inner_source.name) != _norm_name(inline_source.name)
+    ):
+        return False
+    if _unqualified_sql(inner.args.get("where")) != _unqualified_sql(
+        inline_ast.args.get("where")
+    ):
+        return False
+
+    inner_projection: dict[str, exp.Column] = {}
+    for expression in inner.expressions or ():
+        if not isinstance(expression, exp.Column) or expression.table:
+            return False
+        name = _norm_name(expression.name)
+        if not name or name in inner_projection:
+            return False
+        inner_projection[name] = expression
+    if not inner_projection:
+        return False
+
+    derived_alias = _norm_name(derived_source.alias)
+    mapped_projection: list[str] = []
+    for expression in derived_ast.expressions or ():
+        if not isinstance(expression, exp.Column):
+            return False
+        if expression.table and _norm_name(expression.table) != derived_alias:
+            return False
+        mapped = inner_projection.get(_norm_name(expression.name))
+        if mapped is None:
+            return False
+        mapped_projection.append(_norm_name(mapped.name))
+    inline_projection: list[str] = []
+    for expression in inline_ast.expressions or ():
+        if not isinstance(expression, exp.Column) or expression.table:
+            return False
+        inline_projection.append(_norm_name(expression.name))
+    return bool(mapped_projection and mapped_projection == inline_projection)
+
+
+def _single_row_lateral_projection_inline_equivalent(
+    lateral_ast: exp.Expression,
+    inline_ast: exp.Expression,
+    *,
+    dialect: str | None = None,
+) -> bool:
+    """Compare the bounded scalar LATERAL form with its inline projection."""
+    if not isinstance(lateral_ast, exp.Select) or not isinstance(
+        inline_ast,
+        exp.Select,
+    ):
+        return False
+    if lateral_ast.find(exp.Lateral) is None or inline_ast.find(exp.Lateral):
+        return False
+    lowered_sql = _lower_single_row_lateral_projection(
+        _sql_of(lateral_ast, dialect=dialect),
+        dialect=dialect,
+    )
+    lowered = _parse_sql(lowered_sql, dialect=dialect) if lowered_sql else None
+    if not isinstance(lowered, exp.Select):
+        return False
+
+    def normalized(select: exp.Select) -> str | None:
+        copied = select.copy()
+        source = _direct_from_table(copied)
+        if not isinstance(source, exp.Table):
+            return None
+        source_refs = {
+            _norm_name(source.name),
+            _norm_name(source.alias_or_name),
+        }
+        for column in copied.find_all(exp.Column):
+            if _norm_name(column.table) in source_refs:
+                column.set("table", None)
+        source.set("alias", None)
+        return _sql_of(copied)
+
+    lowered_source = _direct_from_table(lowered)
+    inline_source = _direct_from_table(inline_ast)
+    if (
+        not isinstance(lowered_source, exp.Table)
+        or not isinstance(inline_source, exp.Table)
+        or _norm_name(lowered_source.name) != _norm_name(inline_source.name)
+    ):
+        return False
+    return normalized(lowered) == normalized(inline_ast)
+
+
+def _named_window_inline_equivalent(
+    named_ast: exp.Expression,
+    inline_ast: exp.Expression,
+) -> bool:
+    """Expand one unmodified named WINDOW and compare the complete AST."""
+    if not isinstance(named_ast, exp.Select) or not isinstance(inline_ast, exp.Select):
+        return False
+    copied = named_ast.copy()
+    definitions = list(copied.args.get("windows") or ())
+    if len(definitions) != 1 or inline_ast.args.get("windows"):
+        return False
+    definition = definitions[0]
+    if not isinstance(definition, exp.Window) or not isinstance(
+        definition.this, exp.Identifier
+    ):
+        return False
+    window_name = _norm_name(definition.this.name)
+    if not window_name or definition.args.get("alias") or definition.args.get("over"):
+        return False
+    references = [
+        node
+        for expression in copied.expressions or ()
+        for node in expression.walk()
+        if isinstance(node, exp.Window)
+        and node.find_ancestor(exp.Select) is copied
+    ]
+    if not references:
+        return False
+    for reference in references:
+        alias = reference.args.get("alias")
+        if not isinstance(alias, exp.Identifier) or _norm_name(alias.name) != window_name:
+            return False
+        if any(
+            reference.args.get(key)
+            for key in ("partition_by", "order", "spec", "first")
+        ):
+            return False
+        reference.set("alias", None)
+        for key in ("partition_by", "order", "spec", "first"):
+            value = definition.args.get(key)
+            if isinstance(value, list):
+                reference.set(key, [item.copy() for item in value])
+            elif isinstance(value, exp.Expression):
+                reference.set(key, value.copy())
+            elif value is not None:
+                reference.set(key, value)
+    copied.set("windows", None)
+    return _sql_of(copied) == _sql_of(inline_ast)
+
+
+def _statically_empty_scalar_subquery_null_equivalent(
+    scalar_ast: exp.Expression,
+    null_ast: exp.Expression,
+) -> bool:
+    """Replace one scalar subquery guarded by a numeric constant falsehood."""
+    if not isinstance(scalar_ast, exp.Select) or not isinstance(null_ast, exp.Select):
+        return False
+    subqueries = list(scalar_ast.find_all(exp.Subquery))
+    if len(subqueries) != 1:
+        return False
+    subquery = subqueries[0]
+    if len(scalar_ast.expressions or ()) != 1 or scalar_ast.expressions[0] is not subquery:
+        return False
+    inner = subquery.this
+    if not isinstance(inner, exp.Select):
+        return False
+    where = inner.args.get("where")
+    predicate = _unwrap_paren(where.this) if isinstance(where, exp.Where) else None
+    if not isinstance(predicate, exp.EQ):
+        return False
+    operands = (predicate.left, predicate.right)
+    if not all(
+        isinstance(item, exp.Literal) and not item.is_string
+        for item in operands
+    ):
+        return False
+    try:
+        left_value = Decimal(str(predicate.left.this))
+        right_value = Decimal(str(predicate.right.this))
+    except (ArithmeticError, ValueError):
+        return False
+    if left_value == right_value:
+        return False
+    copied = scalar_ast.copy()
+    copied_subquery = next(iter(copied.find_all(exp.Subquery)), None)
+    if not isinstance(copied_subquery, exp.Subquery):
+        return False
+    copied_subquery.replace(exp.Null())
+    return _sql_of(copied) == _sql_of(null_ast)
+
+
+def _single_row_aggregate_cte_scalar_equivalent(
+    cte_ast: exp.Expression,
+    scalar_ast: exp.Expression,
+) -> bool:
+    """Recognize one scalar aggregate CTE consumed as a CROSS JOIN value.
+
+    A SELECT containing one aggregate expression and no GROUP BY/HAVING is
+    guaranteed to yield exactly one row, including on empty input.  Therefore
+    one qualified reference to that value through an unconditional CROSS JOIN
+    is equivalent to the same SELECT used as a scalar subquery.  The rule is
+    intentionally implemented as an AST rewrite followed by full-query
+    equality so unrelated projection, filter, join, and subquery changes are
+    never hidden.
+    """
+    if not isinstance(cte_ast, exp.Select) or not isinstance(
+        scalar_ast, exp.Select
+    ):
+        return False
+    if list(scalar_ast.find_all(exp.CTE)):
+        return False
+
+    copied = cte_ast.copy()
+    with_clause = copied.args.get("with_") or copied.args.get("with")
+    if not isinstance(with_clause, exp.With) or with_clause.args.get("recursive"):
+        return False
+    ctes = list(with_clause.expressions or ())
+    if len(ctes) != 1:
+        return False
+    cte = ctes[0]
+    if cte.args.get("materialized") is not None:
+        return False
+    body = cte.this
+    if not isinstance(body, exp.Select) or len(body.expressions or ()) != 1:
+        return False
+    if any(
+        body.args.get(key)
+        for key in (
+            "group", "having", "qualify", "order", "limit", "offset",
+            "distinct", "with", "with_",
+        )
+    ):
+        return False
+
+    projected = body.expressions[0]
+    aggregate = projected.this if isinstance(projected, exp.Alias) else projected
+    if not isinstance(aggregate, exp.AggFunc) or aggregate.find(exp.Window):
+        return False
+
+    cte_alias = cte.args.get("alias")
+    if not isinstance(cte_alias, exp.TableAlias):
+        return False
+    cte_name = _norm_name(cte_alias.name)
+    declared_columns = list(cte_alias.args.get("columns") or ())
+    if declared_columns:
+        if len(declared_columns) != 1 or not isinstance(
+            declared_columns[0], exp.Identifier
+        ):
+            return False
+        output_name = _norm_name(declared_columns[0].name)
+    else:
+        output_name = _norm_name(projected.alias_or_name)
+    if not cte_name or not output_name:
+        return False
+
+    joins = list(copied.args.get("joins") or ())
+    matching_joins = [
+        join
+        for join in joins
+        if isinstance(join.this, exp.Table)
+        and _norm_name(join.this.name) == cte_name
+    ]
+    if len(matching_joins) != 1:
+        return False
+    cte_join = matching_joins[0]
+    join_kind = str(cte_join.args.get("kind") or "").upper()
+    if join_kind not in {"", "CROSS"} or any(
+        cte_join.args.get(key)
+        for key in ("side", "on", "using", "method")
+    ):
+        return False
+    joined_table = cte_join.this
+    reference_name = _norm_name(joined_table.alias or cte_name)
+    if not reference_name:
+        return False
+
+    # The CTE must be consumed only by this direct outer join.  A second table
+    # reference could multiply rows or place the value in another query scope.
+    cte_table_references = [
+        table
+        for table in copied.find_all(exp.Table)
+        if table.find_ancestor(exp.CTE) is None
+        and _norm_name(table.name) == cte_name
+    ]
+    if len(cte_table_references) != 1 or cte_table_references[0] is not joined_table:
+        return False
+
+    value_references: list[exp.Column] = []
+    for column in copied.find_all(exp.Column):
+        if column.find_ancestor(exp.CTE) is not None:
+            continue
+        table_name = _norm_name(column.table or "")
+        column_name = _norm_name(column.name)
+        if table_name in {reference_name, cte_name}:
+            if table_name != reference_name or column_name != output_name:
+                return False
+            value_references.append(column)
+        elif not table_name and column_name == output_name:
+            # An unqualified column could bind to either the physical source
+            # or the CTE.  Decline rather than make a scope guess.
+            return False
+    if len(value_references) != 1:
+        return False
+
+    scalar_body = body.copy()
+    scalar_body.set("expressions", [aggregate.copy()])
+    value_references[0].replace(exp.Subquery(this=scalar_body))
+    copied.set("joins", [join for join in joins if join is not cte_join])
+    copied.set("with_", None)
+    copied.set("with", None)
+    return _sql_of(copied) == _sql_of(scalar_ast)
 
 
 def _simple_cte_inline_equivalent(cte_ast: exp.Expression, inline_ast: exp.Expression) -> bool:
@@ -7308,11 +13302,28 @@ def _specialized_semantic_ast_diffs(
         diffs.append(_semantic_diff(
             "in_exists_equivalence", "SUBQUERY", standard_ast.find(exp.In), student_ast.find(exp.Exists), "subquery-exists",
         ))
-    if _not_in_not_exists_rewrite(standard_ast, student_ast) or _not_in_not_exists_rewrite(student_ast, standard_ast):
+    antijoin_metadata = _strict_in_exists_filter_metadata(
+        standard_ast,
+        student_ast,
+        allow_negated=True,
+    )
+    not_in_side = "standard"
+    if antijoin_metadata is None:
+        antijoin_metadata = _strict_in_exists_filter_metadata(
+            student_ast,
+            standard_ast,
+            allow_negated=True,
+        )
+        not_in_side = "student"
+    if antijoin_metadata is not None:
+        standard_node = standard_ast.find(exp.In) or standard_ast.find(exp.Exists)
+        student_node = student_ast.find(exp.In) or student_ast.find(exp.Exists)
         diffs.append(_semantic_diff(
-            "null_sensitive_antijoin_equivalence", "NULL", standard_ast.find(exp.In), student_ast.find(exp.Exists), "null-handling",
+            "null_sensitive_antijoin_equivalence", "NULL", standard_node, student_node, "null-handling",
             standard_query_sql=standard_sql,
             student_query_sql=student_sql,
+            **antijoin_metadata,
+            not_in_side=not_in_side,
         ))
 
     std_order = _result_order_clause(standard_ast)
@@ -7464,16 +13475,821 @@ def _in_exists_rewrite(
     }
 
 
-def _not_in_not_exists_rewrite(not_in_ast: exp.Expression, not_exists_ast: exp.Expression) -> bool:
-    in_node = not_in_ast.find(exp.In)
-    exists = not_exists_ast.find(exp.Exists)
-    if not isinstance(in_node, exp.In) or not isinstance(exists, exp.Exists):
+def _alias_insensitive_sql(node: exp.Expression | None) -> str:
+    """Render a narrow query shape without physical-table alias spelling."""
+    if not isinstance(node, exp.Expression):
+        return ""
+    copied = node.copy()
+    for table in copied.find_all(exp.Table):
+        table.set("alias", None)
+    for column in copied.find_all(exp.Column):
+        column.set("table", None)
+    return _sql_of(copied)
+
+
+def _strict_in_exists_filter_metadata(
+    in_ast: exp.Expression,
+    exists_ast: exp.Expression,
+    *,
+    allow_negated: bool = False,
+) -> dict[str, Any] | None:
+    """Describe one strict IN/EXISTS rewrite and its physical membership key.
+
+    Negated forms are deliberately opt-in: positive IN/EXISTS can be an
+    equivalence fast path, while NOT IN/NOT EXISTS need a NULL witness.
+    """
+    in_nodes = list(in_ast.find_all(exp.In))
+    exists_nodes = list(exists_ast.find_all(exp.Exists))
+    if len(in_nodes) != 1 or len(exists_nodes) != 1:
+        return None
+    in_node = in_nodes[0]
+    exists = exists_nodes[0]
+    in_negated = isinstance(in_node.parent, exp.Not)
+    exists_negated = isinstance(exists.parent, exp.Not)
+    if allow_negated:
+        if not (in_negated and exists_negated):
+            return None
+    elif in_negated or exists_negated:
+        return None
+
+    in_outer = in_node.find_ancestor(exp.Select)
+    exists_outer = exists.find_ancestor(exp.Select)
+    if (
+        not isinstance(in_outer, exp.Select)
+        or not isinstance(exists_outer, exp.Select)
+        or in_outer is not _top_select(in_ast)
+        or exists_outer is not _top_select(exists_ast)
+        or in_node.find_ancestor(exp.Where) is None
+        or exists.find_ancestor(exp.Where) is None
+        or not isinstance(in_node.this, exp.Column)
+    ):
+        return None
+    in_query = in_node.args.get("query")
+    in_inner = in_query.this if isinstance(in_query, exp.Subquery) else None
+    exists_inner = exists.this if isinstance(exists.this, exp.Select) else None
+    if not isinstance(in_inner, exp.Select) or not isinstance(exists_inner, exp.Select):
+        return None
+    if any(
+        select.args.get(key)
+        for select in (in_inner, exists_inner)
+        for key in (
+            "joins", "group", "having", "order", "limit", "offset", "qualify",
+            "distinct", "with", "with_",
+        )
+    ):
+        return None
+
+    in_source = _direct_from_table(in_inner)
+    exists_source = _direct_from_table(exists_inner)
+    in_outer_source = _direct_from_table(in_outer)
+    exists_outer_source = _direct_from_table(exists_outer)
+    if not all((in_source, exists_source, in_outer_source, exists_outer_source)):
+        return None
+    if (
+        _norm_name(in_source.name) != _norm_name(exists_source.name)
+        or _norm_name(in_outer_source.name) != _norm_name(exists_outer_source.name)
+    ):
+        return None
+
+    projected = in_inner.expressions[0] if len(in_inner.expressions or ()) == 1 else None
+    projected = projected.this if isinstance(projected, exp.Alias) else projected
+    exists_projection = (
+        exists_inner.expressions[0]
+        if len(exists_inner.expressions or ()) == 1
+        else None
+    )
+    exists_projection = (
+        exists_projection.this
+        if isinstance(exists_projection, exp.Alias)
+        else exists_projection
+    )
+    if not isinstance(projected, exp.Column) or not isinstance(
+        exists_projection, (exp.Literal, exp.Boolean, exp.Null)
+    ):
+        return None
+
+    in_outer_ref = _scope_column_ref(in_node.this, in_outer)
+    in_projected_ref = _scope_column_ref(projected, in_inner)
+    if in_outer_ref is None or in_projected_ref is None:
+        return None
+
+    inner_refs = _select_scope_qualifiers(exists_inner)
+    outer_refs = _select_scope_qualifiers(exists_outer)
+
+    def inner_ref(column: exp.Column) -> tuple[str, str] | None:
+        qualifier = _norm_name(column.table or "")
+        if qualifier and qualifier not in inner_refs:
+            return None
+        return _scope_column_ref(column, exists_inner)
+
+    def outer_ref(column: exp.Column) -> tuple[str, str] | None:
+        qualifier = _norm_name(column.table or "")
+        if not qualifier or qualifier not in outer_refs or qualifier in inner_refs:
+            return None
+        return _scope_column_ref(column, exists_outer)
+
+    where = exists_inner.args.get("where")
+    leaves = _flatten_and(where.this) if isinstance(where, exp.Where) else []
+    correlations: list[exp.EQ] = []
+    for leaf in leaves:
+        if not isinstance(leaf, exp.EQ):
+            continue
+        if not isinstance(leaf.left, exp.Column) or not isinstance(leaf.right, exp.Column):
+            continue
+        sides = (leaf.left, leaf.right)
+        local_columns = [column for column in sides if inner_ref(column) == in_projected_ref]
+        outer_columns = [column for column in sides if outer_ref(column) == in_outer_ref]
+        if (
+            len(local_columns) == 1
+            and len(outer_columns) == 1
+            and local_columns[0] is not outer_columns[0]
+        ):
+            correlations.append(leaf)
+    if len(correlations) != 1:
+        return None
+    correlation = correlations[0]
+    exists_remainder = tuple(
+        sorted(_unqualified_sql(leaf) for leaf in leaves if leaf is not correlation)
+    )
+    in_where = in_inner.args.get("where")
+    in_remainder = tuple(
+        sorted(
+            _unqualified_sql(leaf)
+            for leaf in (
+                _flatten_and(in_where.this)
+                if isinstance(in_where, exp.Where)
+                else []
+            )
+        )
+    )
+    if exists_remainder != in_remainder:
+        return None
+
+    require_inner_null = True
+    require_outer_null = False
+    in_where = in_inner.args.get("where")
+    if isinstance(in_where, exp.Where):
+        for leaf in _flatten_and(in_where.this):
+            is_not_null = (
+                isinstance(leaf, exp.Not)
+                and isinstance(leaf.this, exp.Is)
+                and isinstance(leaf.this.this, exp.Column)
+            )
+            is_null = isinstance(leaf, exp.Is) and isinstance(leaf.this, exp.Column)
+            checked = leaf.this if is_not_null else leaf if is_null else None
+            if not isinstance(checked, exp.Is):
+                continue
+            if _scope_column_ref(checked.this, in_inner) != in_projected_ref:
+                continue
+            if is_not_null:
+                require_inner_null = False
+                require_outer_null = True
+                break
+
+    in_copy = in_ast.copy()
+    exists_copy = exists_ast.copy()
+    copied_in = next(iter(in_copy.find_all(exp.In)), None)
+    copied_exists = next(iter(exists_copy.find_all(exp.Exists)), None)
+    if not isinstance(copied_in, exp.In) or not isinstance(copied_exists, exp.Exists):
+        return None
+    copied_in.replace(exp.Boolean(this=True))
+    copied_exists.replace(exp.Boolean(this=True))
+    if _alias_insensitive_sql(in_copy) != _alias_insensitive_sql(exists_copy):
+        return None
+
+    return {
+        "standard_source_table": in_outer_ref[0],
+        "standard_membership_table": in_projected_ref[0],
+        "standard_outer_column": in_outer_ref[1],
+        "standard_membership_column": in_projected_ref[1],
+        "in_query_negated": in_negated,
+        "exists_query_negated": exists_negated,
+        "require_inner_null": require_inner_null,
+        "require_outer_null": require_outer_null,
+    }
+
+
+def _strict_in_exists_filter_equivalent(
+    in_ast: exp.Expression,
+    exists_ast: exp.Expression,
+) -> bool:
+    """Prove one WHERE ``IN`` is the corresponding correlated ``EXISTS``."""
+    return _strict_in_exists_filter_metadata(in_ast, exists_ast) is not None
+
+
+def _schema_nonnull_in_exists_equivalent(
+    in_ast: exp.Expression,
+    exists_ast: exp.Expression,
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Prove the negated membership rewrite under non-NULL key constraints.
+
+    ``NOT IN`` and a correlated ``NOT EXISTS`` differ only on NULL paths when
+    their local filters and correlation key are otherwise identical.  If the
+    outer operand and the projected inner column are both declared NOT NULL,
+    that path is impossible and the rewrite is a schema-backed equivalence.
+    """
+    if schema_catalog is None:
         return False
-    return isinstance(in_node.parent, exp.Not) and isinstance(exists.parent, exp.Not) and _in_exists_rewrite(
+    metadata = _strict_in_exists_filter_metadata(
+        in_ast,
+        exists_ast,
+        allow_negated=True,
+    )
+    if metadata is None:
+        return False
+    outer = _catalog_column_schema(
+        str(metadata.get("standard_source_table") or ""),
+        str(metadata.get("standard_outer_column") or ""),
+        schema_catalog,
+    )
+    inner = _catalog_column_schema(
+        str(metadata.get("standard_membership_table") or ""),
+        str(metadata.get("standard_membership_column") or ""),
+        schema_catalog,
+    )
+    return bool(outer is not None and inner is not None and not outer.nullable and not inner.nullable)
+
+
+def _query_null_filters_prove_in_exists_equivalent(
+    in_ast: exp.Expression,
+    exists_ast: exp.Expression,
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Prove NULL-path absence from local ``IS`` predicates.
+
+    The physical schema is not the only source of nullability.  A root
+    ``outer_key IS NOT NULL`` predicate removes the outer UNKNOWN path, while
+    an inner ``projected_key IS NOT NULL`` predicate removes the inner-NULL
+    path.  Conversely, ``projected_key IS NULL`` on a declared NOT NULL column
+    makes the membership subquery empty and is also safe for this rewrite.
+    """
+    metadata = _strict_in_exists_filter_metadata(
+        in_ast,
+        exists_ast,
+        allow_negated=True,
+    )
+    if metadata is None:
+        return False
+    if schema_catalog is None:
+        return False
+
+    in_outer = in_ast.find(exp.Select)
+    in_node = next(iter(in_ast.find_all(exp.In)), None)
+    in_inner = (
+        in_node.args.get("query").this
+        if isinstance(in_node, exp.In)
+        and isinstance(in_node.args.get("query"), exp.Subquery)
+        else None
+    )
+    if not isinstance(in_outer, exp.Select) or not isinstance(in_inner, exp.Select):
+        return False
+    outer_ref = (
+        _norm_name(str(metadata.get("standard_source_table") or "")),
+        _norm_name(str(metadata.get("standard_outer_column") or "")),
+    )
+    inner_ref = (
+        _norm_name(str(metadata.get("standard_membership_table") or "")),
+        _norm_name(str(metadata.get("standard_membership_column") or "")),
+    )
+
+    def local_null_test(select: exp.Select, ref: tuple[str, str], *, want_null: bool) -> bool:
+        where = select.args.get("where")
+        if not isinstance(where, exp.Where):
+            return False
+        for node in where.find_all(exp.Is):
+            if (
+                node.find_ancestor(exp.Select) is not select
+                or not isinstance(node.this, exp.Column)
+                or _scope_column_ref(node.this, select) != ref
+                or not isinstance(node.expression, exp.Null)
+            ):
+                continue
+            is_null = not isinstance(node.parent, exp.Not)
+            if is_null == want_null:
+                return True
+        return False
+
+    outer_nonnull = local_null_test(in_outer, outer_ref, want_null=False)
+    inner_nonnull = local_null_test(in_inner, inner_ref, want_null=False)
+    inner_forced_null = local_null_test(in_inner, inner_ref, want_null=True)
+    inner_schema = _catalog_column_schema(inner_ref[0], inner_ref[1], schema_catalog)
+    if inner_forced_null and inner_schema is not None and not inner_schema.nullable:
+        return True
+    # The rewrite is NULL-safe when both possible sources of UNKNOWN are
+    # removed, regardless of whether each removal comes from schema or SQL.
+    outer_schema = _catalog_column_schema(outer_ref[0], outer_ref[1], schema_catalog)
+    return bool(
+        (outer_nonnull or (outer_schema is not None and not outer_schema.nullable))
+        and (inner_nonnull or (inner_schema is not None and not inner_schema.nullable))
+    )
+
+
+def _equal_any_in_equivalent(
+    any_ast: exp.Expression,
+    in_ast: exp.Expression,
+) -> bool:
+    """Normalize one SQL-standard ``x = ANY(subquery)`` to ``x IN``."""
+    any_nodes = list(any_ast.find_all(exp.Any))
+    in_nodes = list(in_ast.find_all(exp.In))
+    if len(any_nodes) != 1 or len(in_nodes) != 1:
+        return False
+    any_node = any_nodes[0]
+    comparison = any_node.parent
+    if (
+        not isinstance(comparison, exp.EQ)
+        or comparison.right is not any_node
+        or not isinstance(comparison.left, exp.Expression)
+        or not isinstance(any_node.this, exp.Subquery)
+    ):
+        return False
+    copied = any_ast.copy()
+    copied_any = next(iter(copied.find_all(exp.Any)), None)
+    copied_comparison = copied_any.parent if isinstance(copied_any, exp.Any) else None
+    if not isinstance(copied_any, exp.Any) or not isinstance(copied_comparison, exp.EQ):
+        return False
+    copied_comparison.replace(exp.In(
+        this=copied_comparison.left.copy(),
+        query=copied_any.this.copy(),
+    ))
+    return _sql_of(copied) == _sql_of(in_ast)
+
+
+def _root_any_extreme_filter_normalized(
+    ast: exp.Expression,
+) -> str | None:
+    """Normalize one safe root-WHERE ``ANY`` comparison to ``MIN/MAX``.
+
+    For filtering, the following SQL-standard identities hold even for an
+    empty or NULL-containing subquery result::
+
+        x >  ANY(S)  <=> x >  MIN(S)
+        x >= ANY(S)  <=> x >= MIN(S)
+        x <  ANY(S)  <=> x <  MAX(S)
+        x <= ANY(S)  <=> x <= MAX(S)
+
+    The scalar aggregate yields UNKNOWN where quantified comparison can yield
+    FALSE (empty input), but both rows are rejected by a root WHERE.  The
+    identity is deliberately kept out of projection and nested boolean
+    contexts, where that distinction is observable.
+    """
+    if not isinstance(ast, exp.Expression):
+        return None
+    if not isinstance(ast, exp.Select):
+        return None
+    any_nodes = list(ast.find_all(exp.Any))
+    if len(any_nodes) != 1 or list(ast.find_all(exp.All)):
+        return None
+    any_node = any_nodes[0]
+    comparison = any_node.parent
+    if not isinstance(comparison, (exp.GT, exp.GTE, exp.LT, exp.LTE)):
+        return None
+    if comparison.right is not any_node or not isinstance(comparison.left, exp.Column):
+        return None
+    where = ast.args.get("where")
+    if not isinstance(where, exp.Where) or _unwrap_paren(where.this) is not comparison:
+        return None
+    if not isinstance(any_node.this, exp.Subquery):
+        return None
+    inner = any_node.this.this
+    if not isinstance(inner, exp.Select) or len(inner.expressions or ()) != 1:
+        return None
+    if any(
+        inner.args.get(key)
+        for key in (
+            "group", "having", "qualify", "limit", "offset", "order",
+            "distinct", "with", "with_",
+        )
+    ):
+        return None
+    projected = inner.expressions[0]
+    projected = projected.this if isinstance(projected, exp.Alias) else projected
+    if not isinstance(projected, exp.Column):
+        return None
+    aggregate_type = {
+        exp.GT: exp.Min,
+        exp.GTE: exp.Min,
+        exp.LT: exp.Max,
+        exp.LTE: exp.Max,
+    }.get(type(comparison))
+    if aggregate_type is None:
+        return None
+    copied = ast.copy()
+    copied_any = next(iter(copied.find_all(exp.Any)), None)
+    if not isinstance(copied_any, exp.Any):
+        return None
+    copied_comparison = copied_any.parent
+    if not isinstance(copied_comparison, type(comparison)):
+        return None
+    copied_inner = copied_any.this.this
+    if not isinstance(copied_inner, exp.Select):
+        return None
+    copied_projected = copied_inner.expressions[0]
+    copied_projected = (
+        copied_projected.this
+        if isinstance(copied_projected, exp.Alias)
+        else copied_projected
+    )
+    copied_inner.set(
+        "expressions",
+        [aggregate_type(this=copied_projected.copy())],
+    )
+    copied_comparison.set(
+        "expression",
+        exp.Subquery(this=copied_inner.copy()),
+    )
+    return _sql_of(copied)
+
+
+def _root_any_extreme_filter_equivalent(
+    any_ast: exp.Expression,
+    extreme_ast: exp.Expression,
+) -> bool:
+    """Compare a root-WHERE quantified filter with its extreme aggregate."""
+    normalized_any = _root_any_extreme_filter_normalized(any_ast)
+    if normalized_any is None:
+        return False
+    return normalized_any == _sql_of(extreme_ast)
+
+
+_ROOT_QUANTIFIED_COMPARISON_TYPES = (
+    exp.EQ,
+    exp.NEQ,
+    exp.GT,
+    exp.GTE,
+    exp.LT,
+    exp.LTE,
+)
+
+
+def _root_all_filter_parts(
+    ast: exp.Expression,
+) -> tuple[
+    exp.Select,
+    exp.All,
+    exp.Expression,
+    exp.Select,
+    exp.Table,
+    exp.Table,
+    exp.Column,
+    exp.Column,
+] | None:
+    """Return the narrow root ``x OP ALL (SELECT y FROM table)`` shape.
+
+    The execution compatibility layer and the semantic rewrite recognizer
+    must agree on the exact query shape they are willing to lower.  Keeping
+    this guard in one place prevents a permissive renderer from silently
+    claiming support for ``ALL`` inside projections, boolean trees, joins, or
+    nested/correlated subqueries.
+    """
+    if not isinstance(ast, exp.Select):
+        return None
+    all_nodes = list(ast.find_all(exp.All))
+    if len(all_nodes) != 1:
+        return None
+    all_node = all_nodes[0]
+    comparison = all_node.parent
+    if not isinstance(comparison, _ROOT_QUANTIFIED_COMPARISON_TYPES):
+        return None
+    if comparison.right is not all_node:
+        return None
+
+    where = ast.args.get("where")
+    if not isinstance(where, exp.Where) or _unwrap_paren(where.this) is not comparison:
+        return None
+    left = _unwrap_paren(comparison.left)
+    if not isinstance(left, exp.Column):
+        return None
+
+    inner = all_node.this
+    if isinstance(inner, exp.Subquery):
+        inner = inner.this
+    if not isinstance(inner, exp.Select) or len(inner.expressions or ()) != 1:
+        return None
+
+    outer_from = ast.args.get("from_") or ast.args.get("from")
+    inner_from = inner.args.get("from_") or inner.args.get("from")
+    if not isinstance(outer_from, exp.From) or not isinstance(inner_from, exp.From):
+        return None
+    if len(outer_from.expressions or ()) > 1 or len(inner_from.expressions or ()) > 1:
+        return None
+    outer_table = _direct_from_table(ast)
+    inner_table = _direct_from_table(inner)
+    if outer_table is None or inner_table is None:
+        return None
+    if ast.args.get("joins") or inner.args.get("joins"):
+        return None
+
+    # There may be an inner WHERE filter, but no clause that changes the
+    # relation's cardinality/order semantics in a way the direct anti-match
+    # lowering would not preserve.
+    if any(
+        inner.args.get(key)
+        for key in (
+            "group", "having", "qualify", "limit", "offset", "order",
+            "distinct", "with", "with_",
+        )
+    ):
+        return None
+
+    projected = inner.expressions[0]
+    projected = projected.this if isinstance(projected, exp.Alias) else projected
+    if not isinstance(projected, exp.Column):
+        return None
+
+    # The bounded rewrite below only has two query blocks.  Rejecting any
+    # additional SELECT also rejects CTEs and nested predicates cleanly.
+    if len(list(ast.find_all(exp.Select))) != 2:
+        return None
+
+    def nearest_select(node: exp.Expression) -> exp.Select | None:
+        parent = node.parent
+        while parent is not None:
+            if isinstance(parent, exp.Select):
+                return parent
+            parent = parent.parent
+        return None
+
+    outer_names = {
+        _norm_name(str(outer_table.name or "")),
+        _norm_name(str(outer_table.alias or "")),
+    } - {""}
+    inner_names = {
+        _norm_name(str(inner_table.name or "")),
+        _norm_name(str(inner_table.alias or "")),
+    } - {""}
+    for column in ast.find_all(exp.Column):
+        qualifier = _norm_name(str(column.table or ""))
+        owner = nearest_select(column)
+        if owner is ast:
+            if qualifier and qualifier not in outer_names:
+                return None
+        elif owner is inner:
+            if qualifier and qualifier not in inner_names:
+                return None
+        else:
+            return None
+
+    if _norm_name(str(left.table or "")) not in outer_names | {""}:
+        return None
+    if _norm_name(str(projected.table or "")) not in inner_names | {""}:
+        return None
+    return (
+        ast,
+        all_node,
+        comparison,
+        inner,
+        outer_table,
+        inner_table,
+        left,
+        projected,
+    )
+
+
+def _fresh_all_alias(ast: exp.Expression, base: str) -> str:
+    used = {
+        _norm_name(str(table.alias_or_name or table.name or ""))
+        for table in ast.find_all(exp.Table)
+    }
+    candidate = base
+    serial = 1
+    while _norm_name(candidate) in used:
+        serial += 1
+        candidate = f"{base}_{serial}"
+    return candidate
+
+
+def _root_all_not_exists_filter_ast(
+    ast: exp.Expression,
+) -> exp.Expression | None:
+    """Lower one bounded root ``ALL`` filter to an anti-match ``NOT EXISTS``.
+
+    In a root ``WHERE`` clause, a comparison is accepted only when it is TRUE
+    for every member of the subquery.  A violating member is one for which the
+    comparison is not TRUE, including FALSE and UNKNOWN.  The latter is
+    important for NULL members and is why the generated predicate uses
+    ``NOT ((comparison) IS TRUE)`` rather than ordinary boolean negation.
+    """
+    parts = _root_all_filter_parts(ast)
+    if parts is None:
+        return None
+    _, _, _, _, _, _, _, _ = parts
+    copied = ast.copy()
+    copied_all = next(iter(copied.find_all(exp.All)), None)
+    if not isinstance(copied_all, exp.All):
+        return None
+    copied_comparison = copied_all.parent
+    if not isinstance(copied_comparison, _ROOT_QUANTIFIED_COMPARISON_TYPES):
+        return None
+    copied_inner = copied_all.this
+    if isinstance(copied_inner, exp.Subquery):
+        copied_inner = copied_inner.this
+    if not isinstance(copied_inner, exp.Select):
+        return None
+    copied_outer_table = _direct_from_table(copied)
+    copied_inner_table = _direct_from_table(copied_inner)
+    if copied_outer_table is None or copied_inner_table is None:
+        return None
+
+    outer_alias = _fresh_all_alias(copied, "__phase1_all_outer")
+    inner_alias = _fresh_all_alias(copied, "__phase1_all_inner")
+    # The second alias is chosen after the first is not yet present in the AST;
+    # the bases are distinct, so collision is still deterministic.  Explicitly
+    # avoid equality for defensive clarity when a caller uses unusual names.
+    if _norm_name(inner_alias) == _norm_name(outer_alias):
+        inner_alias = _fresh_all_alias(copied, "__phase1_all_inner_2")
+
+    old_outer_names = {
+        _norm_name(str(copied_outer_table.name or "")),
+        _norm_name(str(copied_outer_table.alias or "")),
+    } - {""}
+    old_inner_names = {
+        _norm_name(str(copied_inner_table.name or "")),
+        _norm_name(str(copied_inner_table.alias or "")),
+    } - {""}
+    copied_outer_table.set(
+        "alias",
+        exp.TableAlias(this=exp.to_identifier(outer_alias)),
+    )
+    copied_inner_table.set(
+        "alias",
+        exp.TableAlias(this=exp.to_identifier(inner_alias)),
+    )
+
+    def nearest_select(node: exp.Expression) -> exp.Select | None:
+        parent = node.parent
+        while parent is not None:
+            if isinstance(parent, exp.Select):
+                return parent
+            parent = parent.parent
+        return None
+
+    for column in copied.find_all(exp.Column):
+        owner = nearest_select(column)
+        qualifier = _norm_name(str(column.table or ""))
+        if owner is copied and qualifier in old_outer_names:
+            column.set("table", exp.to_identifier(outer_alias))
+        elif owner is copied_inner and qualifier in old_inner_names:
+            column.set("table", exp.to_identifier(inner_alias))
+
+    projected = copied_inner.expressions[0]
+    projected = projected.this if isinstance(projected, exp.Alias) else projected
+    if not isinstance(projected, exp.Column):
+        return None
+    projected_value = projected.copy()
+    projected_value.set("table", exp.to_identifier(inner_alias))
+    left = _unwrap_paren(copied_comparison.left).copy()
+    if not isinstance(left, exp.Column):
+        return None
+    left.set("table", exp.to_identifier(outer_alias))
+    violating_comparison = type(copied_comparison)(
+        this=left,
+        expression=projected_value,
+    )
+    is_true = exp.Is(
+        this=exp.Paren(this=violating_comparison),
+        expression=exp.Boolean(this=True),
+    )
+    violating = exp.Not(this=exp.Paren(this=is_true))
+    existing_where = copied_inner.args.get("where")
+    if isinstance(existing_where, exp.Where):
+        inner_predicate = exp.and_(existing_where.this.copy(), violating)
+    else:
+        inner_predicate = violating
+    copied_inner.set("expressions", [exp.Literal.number(1)])
+    copied_inner.set("where", exp.Where(this=inner_predicate))
+    copied_comparison.replace(
+        exp.Not(this=exp.Exists(this=copied_inner))
+    )
+    return copied
+
+
+def _root_all_not_exists_filter_normalized(
+    ast: exp.Expression,
+) -> str | None:
+    rewritten = _root_all_not_exists_filter_ast(ast)
+    return _sql_of(rewritten, dialect="sqlite") if rewritten is not None else None
+
+
+def _safe_root_all_not_exists_sql(
+    sql: str,
+    *,
+    dialect: str | None = None,
+) -> bool:
+    tree = _parse_sql(sql, dialect=dialect)
+    return bool(
+        isinstance(tree, exp.Expression)
+        and _root_all_not_exists_filter_ast(tree) is not None
+    )
+
+
+def _canonical_root_rewrite_sql(ast: exp.Expression) -> str:
+    """Compare narrow root rewrites without treating local aliases as edits."""
+    copied = ast.copy()
+    for table in copied.find_all(exp.Table):
+        table.set("alias", None)
+    for column in copied.find_all(exp.Column):
+        column.set("table", None)
+    return _sql_of(copied)
+
+
+def _root_all_extreme_filter_rewrite_ast(
+    ast: exp.Expression,
+    schema_catalog: SchemaCatalog | None,
+) -> exp.Expression | None:
+    """Build the schema-proven ``ALL`` to ``MAX/MIN`` root filter rewrite."""
+    if schema_catalog is None:
+        return None
+    parts = _root_all_filter_parts(ast)
+    if parts is None:
+        return None
+    root, _, comparison, inner, outer_table, inner_table, left, projected = parts
+    if _norm_name(str(outer_table.name or "")) != _norm_name(str(inner_table.name or "")):
+        return None
+    if _norm_name(str(left.name or "")) != _norm_name(str(projected.name or "")):
+        return None
+    if inner.args.get("where"):
+        return None
+    column_schema = _catalog_column_schema(
+        str(inner_table.name),
+        str(projected.name),
+        schema_catalog,
+    )
+    if column_schema is None or column_schema.nullable:
+        return None
+    aggregate_type = {
+        exp.GT: exp.Max,
+        exp.GTE: exp.Max,
+        exp.LT: exp.Min,
+        exp.LTE: exp.Min,
+    }.get(type(comparison))
+    if aggregate_type is None:
+        return None
+
+    copied = root.copy()
+    copied_all = next(iter(copied.find_all(exp.All)), None)
+    if not isinstance(copied_all, exp.All):
+        return None
+    copied_comparison = copied_all.parent
+    if not isinstance(copied_comparison, _ROOT_QUANTIFIED_COMPARISON_TYPES):
+        return None
+    copied_inner = copied_all.this
+    if isinstance(copied_inner, exp.Subquery):
+        copied_inner = copied_inner.this
+    if not isinstance(copied_inner, exp.Select):
+        return None
+    copied_projected = copied_inner.expressions[0]
+    copied_projected = (
+        copied_projected.this
+        if isinstance(copied_projected, exp.Alias)
+        else copied_projected
+    )
+    if not isinstance(copied_projected, exp.Column):
+        return None
+    copied_inner.set(
+        "expressions",
+        [aggregate_type(this=copied_projected.copy())],
+    )
+    copied_comparison.set(
+        "expression",
+        exp.Subquery(this=copied_inner.copy()),
+    )
+    return copied
+
+
+def _root_all_extreme_filter_normalized(
+    ast: exp.Expression,
+    schema_catalog: SchemaCatalog | None = None,
+) -> str | None:
+    rewritten = _root_all_extreme_filter_rewrite_ast(ast, schema_catalog)
+    return _sql_of(rewritten) if rewritten is not None else None
+
+
+def _root_all_extreme_filter_equivalent(
+    all_ast: exp.Expression,
+    extreme_ast: exp.Expression,
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    rewritten = _root_all_extreme_filter_rewrite_ast(all_ast, schema_catalog)
+    if rewritten is None:
+        return False
+    return (
+        _canonical_root_rewrite_sql(rewritten)
+        == _canonical_root_rewrite_sql(extreme_ast)
+        and _canonical_root_rewrite_sql(all_ast)
+        != _canonical_root_rewrite_sql(extreme_ast)
+    )
+
+
+def _not_in_not_exists_rewrite(not_in_ast: exp.Expression, not_exists_ast: exp.Expression) -> bool:
+    return _strict_in_exists_filter_metadata(
         not_in_ast,
         not_exists_ast,
         allow_negated=True,
-    )
+    ) is not None
 
 
 def _select_projection_repr(ast: exp.Expression) -> str:
@@ -7838,6 +14654,54 @@ def _function_argument_ast_diffs(
             if std_columns == stu_columns and not isinstance(std_func, exp.GroupConcat):
                 continue
         diff_type = "aggregate_argument_changed" if is_aggregate else "function_argument_changed"
+        standard_select = _nearest_select(std_func)
+        student_select = _nearest_select(stu_func)
+        standard_source = (
+            _direct_from_table(standard_select)
+            if isinstance(standard_select, exp.Select)
+            else None
+        )
+        student_source = (
+            _direct_from_table(student_select)
+            if isinstance(student_select, exp.Select)
+            else None
+        )
+        aggregate_context = {
+            "standard_query_sql": _sql_of(standard_select or standard_ast),
+            "student_query_sql": _sql_of(student_select or student_ast),
+            "standard_source_table": (
+                standard_source.name if isinstance(standard_source, exp.Table) else ""
+            ),
+            "student_source_table": (
+                student_source.name if isinstance(student_source, exp.Table) else ""
+            ),
+            "standard_aggregate_function": (
+                _function_name(std_func).upper() if is_aggregate else ""
+            ),
+            "student_aggregate_function": (
+                _function_name(stu_func).upper() if is_aggregate else ""
+            ),
+            "standard_aggregate_argument": (
+                _sql_of(std_func.this) if is_aggregate and std_func.this is not None else "*"
+            ),
+            "student_aggregate_argument": (
+                _sql_of(stu_func.this) if is_aggregate and stu_func.this is not None else "*"
+            ),
+            "standard_group_columns": (
+                [sql for sql, _ in _group_by_items(standard_ast)] if is_aggregate else []
+            ),
+            "student_group_columns": (
+                [sql for sql, _ in _group_by_items(student_ast)] if is_aggregate else []
+            ),
+            "standard_aggregate_distinct": (
+                bool(std_func.args.get("distinct") or isinstance(std_func.this, exp.Distinct))
+                if is_aggregate else False
+            ),
+            "student_aggregate_distinct": (
+                bool(stu_func.args.get("distinct") or isinstance(stu_func.this, exp.Distinct))
+                if is_aggregate else False
+            ),
+        }
         diffs.append(ASTDiffNode(
             clause_category="AGGREGATE" if is_aggregate else "FUNCTION",
             diff_type=diff_type,
@@ -7852,6 +14716,7 @@ def _function_argument_ast_diffs(
                 "student_args": stu_args,
                 "standard_sql": _function_sql(std_func),
                 "student_sql": _function_sql(stu_func),
+                **aggregate_context,
             },
         ))
     return diffs
@@ -7986,6 +14851,43 @@ def _order_by_items(ast: exp.Expression) -> list[tuple[str, bool, exp.Expression
     return items
 
 
+def _order_key_source_table(ast: exp.Expression, index: int) -> str:
+    """Resolve a qualified ORDER BY key to its physical table.
+
+    ``_direct_from_table`` identifies the first FROM source, which is useful
+    for unqualified keys but wrong for a joined query such as
+    ``FROM people JOIN poker_player ... ORDER BY poker_player.earnings``.
+    Witness materialization and semantic validation need the table that owns
+    the changed key, so use the column qualifier/alias when one is present and
+    fall back to the direct source only for genuinely unqualified keys.
+    """
+    select = _top_select(ast)
+    if not isinstance(select, exp.Select):
+        return ""
+    items = _order_by_items(ast)
+    if index < 0 or index >= len(items):
+        return ""
+    expression = items[index][2]
+    expression = expression.this if isinstance(expression, exp.Ordered) else expression
+    column = expression if isinstance(expression, exp.Column) else expression.find(exp.Column)
+    tables: dict[str, str] = {}
+    for table in select.find_all(exp.Table):
+        name = str(table.name or "").strip()
+        if not name:
+            continue
+        canonical = name.lower()
+        tables[canonical] = name
+        alias = str(table.alias or "").strip()
+        if alias:
+            tables[alias.lower()] = name
+    if isinstance(column, exp.Column):
+        qualifier = str(column.table or "").strip()
+        if qualifier:
+            return tables.get(qualifier.lower(), qualifier).lower()
+    direct = _direct_from_table(select)
+    return str(direct.name or "").lower() if isinstance(direct, exp.Table) else ""
+
+
 def _order_by_ast_diffs(
     standard_ast: exp.Expression,
     student_ast: exp.Expression,
@@ -7994,14 +14896,26 @@ def _order_by_ast_diffs(
     stu_items = _order_by_items(student_ast)
     std_sig = [(sql, desc) for sql, desc, _ in std_items]
     stu_sig = [(sql, desc) for sql, desc, _ in stu_items]
-    if std_sig == stu_sig:
-        return []
+    std_nulls = [
+        bool(item.args.get("nulls_first"))
+        if item.args.get("nulls_first") is not None else not desc
+        for _sql, desc, item in std_items
+    ]
+    stu_nulls = [
+        bool(item.args.get("nulls_first"))
+        if item.args.get("nulls_first") is not None else not desc
+        for _sql, desc, item in stu_items
+    ]
     diff_type = None
-    if len(std_sig) > len(stu_sig) and std_sig[:len(stu_sig)] == stu_sig:
+    if std_sig == stu_sig:
+        if std_nulls == stu_nulls:
+            return []
+        diff_type = "order_nulls_changed"
+    if diff_type is None and len(std_sig) > len(stu_sig) and std_sig[:len(stu_sig)] == stu_sig:
         diff_type = "order_by_tiebreaker_missing"
-    elif len(stu_sig) > len(std_sig) and stu_sig[:len(std_sig)] == std_sig:
+    elif diff_type is None and len(stu_sig) > len(std_sig) and stu_sig[:len(std_sig)] == std_sig:
         diff_type = "order_by_key_added"
-    elif (
+    elif diff_type is None and (
         len(std_sig) == len(stu_sig)
         and all(a[0] == b[0] for a, b in zip(std_sig, stu_sig))
         and any(a[1] != b[1] for a, b in zip(std_sig, stu_sig))
@@ -8011,7 +14925,37 @@ def _order_by_ast_diffs(
         return []
     std_order = _result_order_clause(standard_ast)
     stu_order = _result_order_clause(student_ast)
+    if diff_type == "order_direction_changed":
+        changed_index = next(
+            (
+                index
+                for index, (standard, student) in enumerate(zip(std_sig, stu_sig))
+                if standard[0] == student[0] and standard[1] != student[1]
+            ),
+            0,
+        )
+    elif diff_type == "order_nulls_changed":
+        changed_index = next(
+            (
+                index
+                for index, (standard, student) in enumerate(zip(std_sig, stu_sig))
+                if standard[0] == student[0]
+                and index < len(std_nulls)
+                and index < len(stu_nulls)
+                and std_nulls[index] != stu_nulls[index]
+            ),
+            0,
+        )
+    elif diff_type == "order_by_tiebreaker_missing":
+        changed_index = len(stu_sig)
+    elif diff_type == "order_by_key_added":
+        changed_index = len(std_sig)
+    else:
+        changed_index = 0
+    source_table = _order_key_source_table(standard_ast, changed_index)
     source = _direct_from_table(_top_select(standard_ast)) if _top_select(standard_ast) else None
+    if not source_table and isinstance(source, exp.Table):
+        source_table = str(source.name or "").lower()
     return [ASTDiffNode(
         clause_category="ORDER BY",
         diff_type=diff_type,
@@ -8024,7 +14968,9 @@ def _order_by_ast_diffs(
             "student_keys": stu_sig,
             "standard_order_keys": tuple(std_sig),
             "student_order_keys": tuple(stu_sig),
-            "standard_source_table": source.name if isinstance(source, exp.Table) else "",
+            "standard_nulls_first": tuple(std_nulls),
+            "student_nulls_first": tuple(stu_nulls),
+            "standard_source_table": source_table,
         },
     )]
 
@@ -8477,17 +15423,42 @@ def _comparison_ast_diffs(
     for idx, item in enumerate(stu_comparisons):
         stu_by_col.setdefault(_norm_name(item["column"]), []).append((idx, item))
     stu_matched: set[int] = set()  # indices of student comparisons already paired
+    std_matches: dict[int, tuple[int, dict[str, Any]]] = {}
+    # Reserve exact body matches globally before pairing any fallback.  This
+    # prevents an earlier unmatched standard predicate from consuming a
+    # later student predicate that belongs to an unchanged repeated column.
+    for std_index, std in enumerate(std_comparisons):
+        std_sql_key = re.sub(r"\s+", "", str(std.get("sql") or "").lower())
+        for idx, cand in stu_by_col.get(_norm_name(std["column"]), []):
+            if idx in stu_matched:
+                continue
+            cand_sql_key = re.sub(r"\s+", "", str(cand.get("sql") or "").lower())
+            if cand_sql_key == std_sql_key:
+                std_matches[std_index] = (idx, cand)
+                stu_matched.add(idx)
+                break
 
     diffs: list[ASTDiffNode] = []
-    for std in std_comparisons:
-        candidates = stu_by_col.get(_norm_name(std["column"]), [])
-        # Pick the first *unmatched* candidate to avoid double-pairing (BUG-2 fix).
-        stu: dict[str, Any] | None = None
-        stu_idx: int | None = None
-        for idx, cand in candidates:
-            if idx not in stu_matched:
-                stu, stu_idx = cand, idx
-                break
+    for std_index, std in enumerate(std_comparisons):
+        matched = std_matches.get(std_index)
+        stu: dict[str, Any] | None = matched[1] if matched else None
+        stu_idx: int | None = matched[0] if matched else None
+        if stu is None:
+            # Positional fallback is safe only when both blocks have the same
+            # number of comparable predicates.  With unequal counts, leave
+            # the unmatched node as missing/added rather than pairing it with
+            # a semantically different repeated column.
+            remaining_student = [
+                (idx, cand)
+                for idx, cand in stu_by_col.get(_norm_name(std["column"]), [])
+                if idx not in stu_matched
+            ]
+            if (
+                len(std_comparisons) == len(stu_comparisons)
+                and len(remaining_student) == 1
+            ):
+                stu_idx, stu = remaining_student[0]
+                stu_matched.add(stu_idx)
         if stu is None:
             diffs.append(ASTDiffNode(
                 clause_category="PREDICATE",
@@ -8663,6 +15634,19 @@ def _comparison_ast_diffs(
                 },
             ))
             continue
+        # A comparison nested under HAVING is still discovered by the shared
+        # predicate pass.  Preserve that clause context instead of labelling
+        # every literal/operator edit as ``where``; otherwise an aggregate
+        # threshold mutation receives a HAVING summary plus a WHERE atomic
+        # obligation, breaking the one-mutation evidence chain and attribution.
+        std_node_context = std.get("node")
+        context_node = std_node_context
+        while isinstance(context_node, exp.Expression) and context_node.parent is not None:
+            if isinstance(context_node.parent, exp.Having):
+                break
+            context_node = context_node.parent
+        predicate_kp = "having" if isinstance(context_node.parent, exp.Having) else "where"
+        predicate_clause = "HAVING" if predicate_kp == "having" else "PREDICATE"
         if (std["op"] != stu["op"]
                 or std.get("value") != stu.get("value")
                 or std.get("high") != stu.get("high")
@@ -8676,12 +15660,12 @@ def _comparison_ast_diffs(
             else:
                 diff_type = "literal_changed"
             diffs.append(ASTDiffNode(
-                clause_category="PREDICATE",
+                clause_category=predicate_clause,
                 diff_type=diff_type,
                 target_column=std["column"],
                 standard_node=std.get("node"),
                 student_node=stu.get("node"),
-                knowledge_point_id="where",
+                knowledge_point_id=predicate_kp,
                 extra={
                     "column": std["column"],
                     "standard_op": std["op"],
@@ -8698,6 +15682,7 @@ def _comparison_ast_diffs(
                     "student_values": stu_values,
                     "standard_sql": std["sql"],
                     "student_sql": stu["sql"],
+                    "predicate_clause": predicate_clause,
                 }
             ))
         if stu["op"] in {"EQ", "NEQ"} and stu.get("value_is_null"):
@@ -8853,6 +15838,40 @@ def _predicate_negation_ast_diffs(
     generic comparison pass intentionally does not inspect them.
     """
     diffs: list[ASTDiffNode] = []
+
+    def paired_nodes(
+        standard_nodes: list[exp.Expression],
+        student_nodes: list[exp.Expression],
+    ) -> list[tuple[exp.Expression, exp.Expression]]:
+        """Pair unchanged predicate bodies before using positional fallback."""
+        remaining_student = list(student_nodes)
+        pairs: list[tuple[exp.Expression, exp.Expression]] = []
+        for standard_node in standard_nodes:
+            standard_key = re.sub(r"\s+", "", _sql_of(standard_node).lower())
+            exact_index = next(
+                (
+                    index
+                    for index, student_node in enumerate(remaining_student)
+                    if re.sub(r"\s+", "", _sql_of(student_node).lower())
+                    == standard_key
+                ),
+                None,
+            )
+            if exact_index is None:
+                continue
+            pairs.append((standard_node, remaining_student.pop(exact_index)))
+        # A single changed body can still carry a polarity change.  Only use a
+        # fallback when it is unambiguous; never pair B with C merely because
+        # an intermediate IN was rewritten as EXISTS.
+        if len(standard_nodes) - len(pairs) == 1 and len(remaining_student) == 1:
+            standard_node = next(
+                node for node in standard_nodes if all(node is not pair[0] for pair in pairs)
+            )
+            student_node = remaining_student[0]
+            if _extract_column_name(standard_node) == _extract_column_name(student_node):
+                pairs.append((standard_node, student_node))
+        return pairs
+
     specs = (
         (exp.In, "IN", "in_predicate_negation_changed", "in-list"),
         (exp.Is, "NULL", "null_predicate_negation_changed", "null-handling"),
@@ -8860,7 +15879,7 @@ def _predicate_negation_ast_diffs(
     for node_type, clause, diff_type, kp_id in specs:
         standard_nodes = list(standard_ast.find_all(node_type))
         student_nodes = list(student_ast.find_all(node_type))
-        for standard_node, student_node in zip(standard_nodes, student_nodes):
+        for standard_node, student_node in paired_nodes(standard_nodes, student_nodes):
             standard_negated = _is_directly_negated(standard_node)
             student_negated = _is_directly_negated(student_node)
             if standard_negated == student_negated:
@@ -9435,15 +16454,41 @@ def _window_ast_diffs(
                 },
             ))
     if len(std_windows) != len(stu_windows):
+        # A window can disappear when a CASE branch or projection is removed.
+        # Preserve the surviving OVER topology on the count-level diff so the
+        # witness planner can still materialize partition/order/tie paths.  The
+        # previous count-only payload left every field empty, which made the
+        # validator report ``window_table_missing`` even when the base table
+        # and an executable window were present.
+        std_reference = std_windows[0] if std_windows else None
+        stu_reference = stu_windows[0] if stu_windows else None
+        std_source, _ = (
+            _window_source_selects(standard_ast, std_reference)
+            if std_reference is not None
+            else (None, None)
+        )
+        stu_source, _ = (
+            _window_source_selects(student_ast, stu_reference)
+            if stu_reference is not None
+            else (None, None)
+        )
         diffs.append(ASTDiffNode(
             clause_category="WINDOW",
             diff_type="window_over_changed",
-            standard_node=std_windows[0] if std_windows else None,
-            student_node=stu_windows[0] if stu_windows else None,
+            standard_node=std_reference,
+            student_node=stu_reference,
             knowledge_point_id="window-row-number",
             extra={
                 "standard_count": len(std_windows),
                 "student_count": len(stu_windows),
+                "standard_over": _window_spec(std_reference) if std_reference is not None else {},
+                "student_over": _window_spec(stu_reference) if stu_reference is not None else {},
+                "standard_window_source_table": (
+                    std_source.name if isinstance(std_source, exp.Table) else ""
+                ),
+                "student_window_source_table": (
+                    stu_source.name if isinstance(stu_source, exp.Table) else ""
+                ),
                 "standard_sql": " | ".join(_sql_of(node) for node in std_windows),
                 "student_sql": " | ".join(_sql_of(node) for node in stu_windows),
             },
@@ -9609,6 +16654,17 @@ def _case_ast_diffs(
                 standard_source.name if isinstance(standard_source, exp.Table) else ""
             ),
         }
+        standard_predicates = tuple(case_metadata["standard_case_when_predicates"])
+        student_predicates = tuple(case_metadata["student_case_when_predicates"])
+        # The unchanged WHEN branches do not need to be re-covered for a
+        # single-branch mutation. Record the branch indexes that were removed
+        # (or changed) so the semantic validator can require the causal path
+        # instead of every unrelated CASE branch.
+        case_metadata["required_case_branch_indexes"] = tuple(
+            index
+            for index, predicate in enumerate(standard_predicates)
+            if index >= len(student_predicates) or predicate != student_predicates[index]
+        )
         diffs = [ASTDiffNode(
             clause_category="CASE",
             diff_type="case_changed",
@@ -9990,6 +17046,7 @@ def _generation_tactics_from_ast_diffs(ast_diffs: list[ASTDiffNode]) -> list[dic
         "order_by_changed": "ordered_compare_probe",
         "order_by_tiebreaker_missing": "ordered_tie_probe",
         "order_direction_changed": "ordered_compare_probe",
+        "order_nulls_changed": "ordered_compare_probe",
         "order_by_key_added": "ordered_tie_probe",
         "limit_changed": "limit_row_count_probe",
         "set_operator_changed": "set_operator_overlap_probe",
@@ -12216,14 +19273,21 @@ def _materialize_declared_join_witness(
                                  if _norm_name(name) == _norm_name(right_column)), None)
             if not left_actual or not right_actual:
                 continue
-            right_values = {row.get(right_actual) for row in right_rows}
+            # The final dangling-row probe may have put NULL on the right
+            # endpoint.  NULL never matches an equality JOIN, so do not let
+            # set iteration select it as the preserved matched key.
+            right_values = [
+                row.get(right_actual)
+                for row in right_rows
+                if row.get(right_actual) is not None
+            ]
             # Preserve the first existing match and make the final left row
             # unambiguously absent from the right endpoint.
             if right_values:
                 if left_rows:
-                    left_rows[0][left_actual] = next(iter(right_values))
+                    left_rows[0][left_actual] = right_values[0]
                     unique_value = 900000 + len(left_rows)
-                    while unique_value in right_values:
+                    while unique_value in set(right_values):
                         unique_value += 1
                     left_rows[-1][left_actual] = unique_value
 
@@ -13771,7 +20835,14 @@ def _correlation_refs(
     comparison: exp.Expression,
     inner: exp.Select,
 ) -> tuple[tuple[str, str], tuple[str, str]] | None:
-    """Resolve one local/outer column pair across every ancestor scope."""
+    """Resolve one local/outer column pair across every ancestor scope.
+
+    The returned references intentionally use physical table names so they can
+    address fixture rows.  Scope classification is performed separately using
+    visible qualifiers; this is essential for self-correlations such as
+    ``FROM employee x WHERE x.dept = employee.dept`` where both sides map to
+    the same physical table but belong to different query blocks.
+    """
     columns = [
         side
         for side in (comparison.left, comparison.right)
@@ -13780,20 +20851,25 @@ def _correlation_refs(
     if len(columns) != 2:
         return None
     ancestors = _ancestor_selects(inner)
-    for inner_column, outer_column in (columns, reversed(columns)):
-        inner_ref = _column_ref_in_select(inner_column, inner)
-        if inner_ref is None:
+    local_candidates: list[tuple[exp.Column, tuple[str, str]]] = []
+    outer_candidates: list[tuple[exp.Column, tuple[str, str]]] = []
+    for column in columns:
+        local_ref = _scope_column_ref(column, inner)
+        if local_ref is not None:
+            local_candidates.append((column, local_ref))
             continue
         outer_ref = next(
             (
                 ref
                 for ancestor in ancestors
-                if (ref := _column_ref_in_select(outer_column, ancestor)) is not None
+                if (ref := _scope_column_ref(column, ancestor)) is not None
             ),
             None,
         )
-        if outer_ref is not None and outer_ref != inner_ref:
-            return outer_ref, inner_ref
+        if outer_ref is not None:
+            outer_candidates.append((column, outer_ref))
+    if len(local_candidates) == 1 and len(outer_candidates) == 1:
+        return outer_candidates[0][1], local_candidates[0][1]
     return None
 
 
@@ -13958,6 +21034,242 @@ def _materialize_correlated_key_drift_witness(
                 used_student_values.add(candidate)
         return True
     return False
+
+
+def _materialize_correlated_scalar_aggregate_key_drift_witness(
+    data: dict[str, list[dict[str, Any]]],
+    standard_sql: str,
+    student_sql: str,
+    ast_diffs: list[ASTDiffNode],
+    *,
+    schema_catalog: SchemaCatalog | None = None,
+) -> bool:
+    """Create a standard-only scalar aggregate path for a wrong outer key.
+
+    The ordinary correlation materializer proves key overlap, which is enough
+    for EXISTS but not for ``salary > (SELECT AVG(...))``: a one-row group has
+    the same value as the outer row.  This bounded form creates exactly two
+    rows in the standard group and keeps the student's changed outer key
+    absent from that group.  It accepts one direct aggregate, one correlation
+    link and no grouped/limited inner query; broader shapes remain undecided.
+    """
+    diff = next(
+        (
+            item
+            for item in ast_diffs
+            if item.diff_type == "correlated_predicate_changed"
+            and item.extra.get("query_scope") == "nested_correlation"
+        ),
+        None,
+    )
+    if diff is None:
+        return False
+    metadata = diff.extra
+    standard_outer = (
+        _norm_name(str(metadata.get("standard_source_table") or "")),
+        _norm_name(str(metadata.get("standard_outer_column") or "")),
+    )
+    standard_inner = (
+        _norm_name(str(metadata.get("standard_membership_table") or "")),
+        _norm_name(str(metadata.get("standard_membership_column") or "")),
+    )
+    student_outer = (
+        _norm_name(str(metadata.get("student_source_table") or "")),
+        _norm_name(str(metadata.get("student_outer_column") or "")),
+    )
+    student_inner = (
+        _norm_name(str(metadata.get("student_membership_table") or "")),
+        _norm_name(str(metadata.get("student_membership_column") or "")),
+    )
+    if (
+        not all((*standard_outer, *standard_inner, *student_outer, *student_inner))
+        or standard_inner != student_inner
+        or standard_outer == student_outer
+        or _catalog_has_unary_unique_key(schema_catalog, standard_inner)
+    ):
+        return False
+
+    standard_ast = _parse_sql(standard_sql)
+    student_ast = _parse_sql(student_sql)
+    if standard_ast is None or student_ast is None:
+        return False
+    standard_links = [
+        item
+        for item in _correlated_subquery_links(standard_ast)
+        if item[0] == standard_outer and item[1] == standard_inner
+    ]
+    student_links = [
+        item
+        for item in _correlated_subquery_links(student_ast)
+        if item[0] == student_outer and item[1] == student_inner
+    ]
+    if len(standard_links) != 1 or len(student_links) != 1:
+        return False
+    inner_select = standard_links[0][2]
+    if any(
+        inner_select.args.get(key) is not None
+        for key in (
+            "group", "having", "qualify", "order", "limit", "offset",
+            "distinct", "with", "with_",
+        )
+    ) or inner_select.args.get("joins"):
+        return False
+    aggregate_nodes = [
+        node
+        for node in inner_select.find_all(exp.Avg, exp.Sum, exp.Min, exp.Max)
+        if node.find_ancestor(exp.Select) is inner_select
+    ]
+    if len(aggregate_nodes) != 1:
+        return False
+    aggregate = aggregate_nodes[0]
+    if aggregate.find(exp.Window) is not None or aggregate.args.get("distinct"):
+        return False
+    measure = aggregate.find(exp.Column)
+    if not isinstance(measure, exp.Column):
+        return False
+
+    subquery = next(
+        (
+            node
+            for node in standard_ast.find_all(exp.Subquery)
+            if node.this is inner_select
+        ),
+        None,
+    )
+    if not isinstance(subquery, exp.Subquery):
+        return False
+    comparison = subquery.find_ancestor(
+        exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE
+    )
+    if not isinstance(comparison, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)):
+        return False
+    parts = _comparison_subquery_parts(comparison)
+    if parts is None or parts[0] is not subquery:
+        return False
+    outer_column = parts[1]
+    outer_select = comparison.find_ancestor(exp.Select)
+    if not isinstance(outer_select, exp.Select):
+        return False
+    outer_measure_ref = _scope_column_ref(outer_column, outer_select)
+    measure_ref = _scope_column_ref(measure, inner_select)
+    if outer_measure_ref is None or measure_ref is None:
+        return False
+
+    standard_outer_actual = _actual_data_ref(data, standard_outer)
+    standard_inner_actual = _actual_data_ref(data, standard_inner)
+    student_outer_actual = _actual_data_ref(data, student_outer)
+    outer_measure_actual = _actual_data_ref(data, outer_measure_ref)
+    measure_actual = _actual_data_ref(data, measure_ref)
+    if not all(
+        (
+            standard_outer_actual,
+            standard_inner_actual,
+            student_outer_actual,
+            outer_measure_actual,
+            measure_actual,
+        )
+    ):
+        return False
+    outer_rows, outer_key_column = standard_outer_actual
+    inner_rows, inner_key_column = standard_inner_actual
+    wrong_outer_rows, wrong_outer_column = student_outer_actual
+    measure_outer_rows, outer_measure_column = outer_measure_actual
+    measure_rows, measure_column = measure_actual
+    if (
+        not outer_rows
+        or len(inner_rows) < 2
+        or not wrong_outer_rows
+        or not measure_outer_rows
+        or len(measure_rows) < 2
+        or outer_rows is not measure_outer_rows
+        or inner_rows is not measure_rows
+    ):
+        return False
+    if inner_key_column == measure_column:
+        return False
+    if outer_rows is wrong_outer_rows and wrong_outer_column == outer_measure_column:
+        return False
+    if outer_rows is inner_rows and outer_key_column == outer_measure_column:
+        return False
+
+    operator = type(comparison).__name__.upper()
+    outer_on_left = comparison.left is outer_column
+    if not outer_on_left:
+        operator = {
+            "GT": "LT",
+            "GTE": "LTE",
+            "LT": "GT",
+            "LTE": "GTE",
+            "EQ": "EQ",
+            "NEQ": "NEQ",
+        }[operator]
+    shared_measure = outer_rows is inner_rows and outer_measure_column == measure_column
+
+    def aggregate_values() -> tuple[Any, Any, Any] | None:
+        """Return outer value and two aggregate-measure values."""
+        if not shared_measure:
+            outer_value = {
+                "GT": 60, "GTE": 60, "LT": 40, "LTE": 40,
+                "EQ": 50, "NEQ": 60,
+            }[operator]
+            if isinstance(aggregate, exp.Avg):
+                return outer_value, 40, 60
+            if isinstance(aggregate, exp.Sum):
+                return outer_value, 20, 30
+            if isinstance(aggregate, exp.Max):
+                return outer_value, 50, 40
+            return outer_value, 50, 60
+        if isinstance(aggregate, exp.Avg):
+            if operator == "EQ":
+                return 50, 50, 50
+            return (40, 40, 60) if operator in {"LT", "LTE"} else (60, 60, 40)
+        if isinstance(aggregate, exp.Sum):
+            if operator == "EQ":
+                return 50, 50, 0
+            if operator in {"LT", "LTE"}:
+                return 40, 40, 20
+            return 60, 60, -20 if operator in {"GT", "GTE"} else 10
+        if isinstance(aggregate, exp.Max):
+            if operator == "GT":
+                return None
+            if operator in {"GTE", "EQ"}:
+                return 50, 50, 40
+            return 40, 40, 60
+        if operator == "LT":
+            return None
+        if operator in {"LTE", "EQ"}:
+            return 50, 50, 60
+        return 60, 60, 40
+
+    values = aggregate_values()
+    if values is None:
+        return False
+    outer_value, first_measure, second_measure = values
+
+    wrong_value = wrong_outer_rows[0].get(wrong_outer_column)
+    if wrong_value is None:
+        wrong_value = _seed_value(wrong_outer_column, 0)
+    anchor = _counter_value(inner_key_column, wrong_value)
+    while anchor is None or anchor == wrong_value:
+        anchor = _counter_value(inner_key_column, anchor)
+
+    with write_owner("materializer:correlated_scalar_aggregate_key_drift"):
+        _set_select_local_literal_predicates(data, inner_select, 0)
+        _set_select_local_literal_predicates(data, inner_select, 1)
+        _set_select_local_literal_predicates(data, outer_select, 0)
+        outer_rows[0][outer_key_column] = anchor
+        inner_rows[0][inner_key_column] = anchor
+        inner_rows[1][inner_key_column] = anchor
+        wrong_outer_rows[0][wrong_outer_column] = wrong_value
+        for index, row in enumerate(inner_rows[2:], start=2):
+            candidate = row.get(inner_key_column)
+            while candidate is None or candidate in {anchor, wrong_value}:
+                candidate = _counter_value(inner_key_column, candidate)
+            row[inner_key_column] = candidate
+        measure_outer_rows[0][outer_measure_column] = outer_value
+        measure_rows[0][measure_column] = first_measure
+        measure_rows[1][measure_column] = second_measure
+    return True
 
 
 def _correlated_local_true_value(
@@ -14330,6 +21642,45 @@ def _direct_select_tables(select: exp.Select) -> dict[str, str]:
         if table.alias:
             aliases[_norm_name(table.alias)] = name
     return aliases
+
+
+def _select_scope_bindings(select: exp.Select) -> dict[str, str]:
+    """Map SQL-visible table qualifiers to physical table names.
+
+    ``_direct_select_tables`` is intentionally permissive for legacy fixture
+    lookup and exposes both a table name and its alias.  Scope analysis needs
+    the stricter SQL rule: once a table has an alias, that alias is the local
+    qualifier and the original table name is no longer a local binding.
+    """
+    bindings: dict[str, str] = {}
+    for table in select.find_all(exp.Table):
+        if table.find_ancestor(exp.Select) is not select:
+            continue
+        physical = _norm_name(table.name)
+        qualifier = _norm_name(table.alias or table.name)
+        if physical and qualifier:
+            bindings[qualifier] = physical
+    return bindings
+
+
+def _select_scope_qualifiers(select: exp.Select) -> set[str]:
+    return set(_select_scope_bindings(select))
+
+
+def _scope_column_ref(
+    column: exp.Column,
+    select: exp.Select,
+) -> tuple[str, str] | None:
+    """Resolve a column only against qualifiers local to ``select``."""
+    bindings = _select_scope_bindings(select)
+    qualifier = _norm_name(column.table or "")
+    if qualifier:
+        table_name = bindings.get(qualifier)
+        return (table_name, _norm_name(column.name)) if table_name else None
+    physical_tables = list(dict.fromkeys(bindings.values()))
+    if len(physical_tables) != 1:
+        return None
+    return physical_tables[0], _norm_name(column.name)
 
 
 def _column_ref_in_select(
@@ -15932,12 +23283,15 @@ def _execute_sqlite(
         conn.create_function("DATEADD", 3, _sql_date_add)
         conn.create_function("DATEDIFF", 2, _sql_date_diff_mysql)
         conn.create_function("DATEDIFF", 3, _sql_date_diff)
+        conn.create_function("PG_INTERVAL_ADD", 3, _sql_pg_interval_add)
         conn.create_function("GETDATE", 0, lambda: "2024-02-01")
         conn.create_function("NOW", 0, lambda: "2024-02-01 00:00:00")
         conn.create_function("LEFT", 2, lambda value, size: str(value or "")[:max(0, int(size or 0))])
         conn.create_function("RIGHT", 2, lambda value, size: str(value or "")[-max(0, int(size or 0)):])
         conn.create_function("LEN", 1, lambda value: len(str(value or "")))
         conn.create_function("CONCAT", -1, lambda *values: "".join("" if value is None else str(value) for value in values))
+        conn.create_function("LPAD", 3, _sql_lpad)
+        conn.create_function("TRANSLATE", 3, _sql_translate)
         conn.create_function("IF", 3, lambda condition, yes, no: yes if condition else no)
         conn.create_function("REGEXP_LIKE", -1, sql_regexp_like)
         conn.create_function("REGEXP", 2, sql_regexp)
@@ -16207,6 +23561,870 @@ def _paired_query_blocks(
             scope = f"nested:{nested_index}"
         pairs.append((scope, standard_query, student_query))
     return pairs
+
+
+@dataclass
+class _Phase1ScopeDescriptor:
+    """Internal, non-serializable description of one real query block.
+
+    ``exp.Subquery`` is a wrapper and also happens to subclass ``exp.Query``
+    in sqlglot.  The scope contract deliberately records the wrapped SELECT
+    or set operation instead, otherwise one SQL subquery would become two
+    diagnostic scopes.
+    """
+
+    side: str
+    node: exp.Expression = field(repr=False)
+    scope_id: str
+    scope_kind: str
+    scope_label: str
+    structural_path: tuple[tuple[str, str, int | None], ...]
+    structural_key: str
+    parent_scope_id: str | None
+    lexical_depth: int
+    metadata_complete: bool = True
+    cte_name: str = ""
+    cte_index: int | None = None
+    cte_recursive: bool = False
+    derived_alias: str = ""
+    is_set_container: bool = False
+    correlation_allowed: bool = False
+    is_correlated: bool = False
+
+
+def _is_scope_query_node(node: Any) -> bool:
+    return isinstance(node, (exp.Select, exp.SetOperation))
+
+
+def _scope_text(value: Any, limit: int = 128) -> str:
+    return re.sub(r"[\x00-\x1f\x7f]+", "", str(value or "").strip())[:limit]
+
+
+def _scope_structural_path(
+    node: exp.Expression,
+) -> tuple[tuple[str, str, int | None], ...]:
+    key = _query_block_scope_key(node) if isinstance(node, exp.Query) else ()
+    raw_path = key[1] if len(key) > 1 and isinstance(key[1], tuple) else ()
+    return tuple(raw_path[-_MAX_SCOPE_PATH_DEPTH:])
+
+
+def _nearest_retained_scope(
+    node: exp.Expression | None,
+    descriptors_by_node: dict[int, _Phase1ScopeDescriptor],
+    *,
+    include_self: bool = True,
+) -> _Phase1ScopeDescriptor | None:
+    current = node if include_self else (node.parent if node is not None else None)
+    while isinstance(current, exp.Expression):
+        descriptor = descriptors_by_node.get(id(current))
+        if descriptor is not None:
+            return descriptor
+        current = current.parent
+    return None
+
+
+def _scope_wrapper(node: exp.Expression) -> exp.Expression | None:
+    """Return the AST construct that gives *node* its query-block role."""
+    parent = node.parent
+    if isinstance(parent, (exp.CTE, exp.Subquery, exp.Exists)):
+        return parent
+    if isinstance(parent, exp.SetOperation):
+        return parent
+    return parent if isinstance(parent, exp.Expression) else None
+
+
+def _subquery_wrapper_is_derived(wrapper: exp.Subquery) -> bool:
+    current: exp.Expression | None = wrapper.parent
+    while isinstance(current, exp.Expression):
+        if isinstance(current, (exp.From, exp.Join)):
+            return True
+        if isinstance(current, (exp.Select, exp.SetOperation, exp.Where, exp.Having)):
+            return False
+        current = current.parent
+    return False
+
+
+def _subquery_wrapper_is_lateral(wrapper: exp.Subquery) -> bool:
+    current: exp.Expression | None = wrapper.parent
+    while isinstance(current, exp.Expression):
+        if isinstance(current, exp.Lateral):
+            return True
+        if isinstance(current, (exp.Select, exp.SetOperation, exp.From)):
+            return False
+        current = current.parent
+    return False
+
+
+def _scope_role(
+    node: exp.Expression,
+    root: exp.Expression,
+) -> tuple[str, str, int | None, bool, str, bool]:
+    """Return kind, CTE name/index/recursion, derived alias and lateral flag."""
+    if node is root:
+        return "ROOT", "", None, False, "", False
+    wrapper = _scope_wrapper(node)
+    if isinstance(wrapper, exp.CTE) and wrapper.this is node:
+        with_node = wrapper.parent if isinstance(wrapper.parent, exp.With) else None
+        ctes = list(with_node.expressions or ()) if isinstance(with_node, exp.With) else []
+        index = next((i for i, item in enumerate(ctes) if item is wrapper), None)
+        return (
+            "CTE",
+            _scope_text(wrapper.alias),
+            index,
+            bool(with_node.args.get("recursive")) if isinstance(with_node, exp.With) else False,
+            "",
+            False,
+        )
+    if isinstance(wrapper, exp.Subquery) and wrapper.this is node:
+        if _subquery_wrapper_is_derived(wrapper):
+            return (
+                "DERIVED",
+                "",
+                None,
+                False,
+                _scope_text(wrapper.alias),
+                _subquery_wrapper_is_lateral(wrapper),
+            )
+        return "SUBQUERY", "", None, False, "", True
+    if isinstance(wrapper, exp.Exists) and wrapper.this is node:
+        return "SUBQUERY", "", None, False, "", True
+    if isinstance(wrapper, exp.SetOperation):
+        return "SET_BRANCH", "", None, False, "", False
+    return "UNKNOWN", "", None, False, "", False
+
+
+def _collect_phase1_scopes(
+    ast: exp.Expression,
+    side: str,
+    limitations: set[str],
+) -> tuple[list[_Phase1ScopeDescriptor], dict[int, _Phase1ScopeDescriptor], bool]:
+    query_nodes: list[exp.Expression] = []
+    scan_truncated = False
+    for index, node in enumerate(ast.walk()):
+        if index >= _MAX_SCOPE_AST_NODES_SCANNED:
+            scan_truncated = True
+            limitations.add(f"{side} AST scope scan limit reached")
+            break
+        if _is_scope_query_node(node):
+            query_nodes.append(node)
+
+    if len(query_nodes) > _MAX_SCOPE_NODES:
+        query_nodes = query_nodes[:_MAX_SCOPE_NODES]
+        scan_truncated = True
+        limitations.add(f"{side} query scope limit reached")
+
+    descriptors: list[_Phase1ScopeDescriptor] = []
+    descriptors_by_node: dict[int, _Phase1ScopeDescriptor] = {}
+    used_scope_ids: set[str] = set()
+    for node in query_nodes:
+        kind, cte_name, cte_index, cte_recursive, derived_alias, lateral = _scope_role(
+            node,
+            ast,
+        )
+        raw_scope_key = _query_block_scope_key(node)
+        raw_scope_path = (
+            raw_scope_key[1]
+            if len(raw_scope_key) > 1 and isinstance(raw_scope_key[1], tuple)
+            else ()
+        )
+        if len(raw_scope_path) > _MAX_SCOPE_PATH_DEPTH:
+            scan_truncated = True
+            limitations.add(f"{side} query scope path depth limit reached")
+        structural_path = _scope_structural_path(node)
+        structural_key = json.dumps(
+            structural_path,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        if node is ast:
+            scope_id = f"{side}:root"
+            scope_label = "root"
+        else:
+            digest = hashlib.sha256(structural_key.encode("utf-8")).hexdigest()[:16]
+            scope_id = f"{side}:scope:{digest}"
+            label_detail = cte_name or derived_alias or digest[:8]
+            scope_label = f"{kind.lower()}:{label_detail}"
+        if scope_id in used_scope_ids:
+            # A cryptographic collision or a repeated, truncated AST path must
+            # not collapse two scopes.  Do not invent a suffix whose meaning
+            # could vary with traversal order; retain the first and mark the
+            # contract partial.
+            scan_truncated = True
+            limitations.add(f"{side} duplicate structural scope identity rejected")
+            continue
+        used_scope_ids.add(scope_id)
+        parent = _nearest_retained_scope(
+            node,
+            descriptors_by_node,
+            include_self=False,
+        )
+        lexical_depth = (parent.lexical_depth + 1) if parent is not None else 0
+        descriptor = _Phase1ScopeDescriptor(
+            side=side,
+            node=node,
+            scope_id=scope_id,
+            scope_kind=kind,
+            scope_label=scope_label,
+            structural_path=structural_path,
+            structural_key=structural_key,
+            parent_scope_id=parent.scope_id if parent is not None else None,
+            lexical_depth=lexical_depth,
+            metadata_complete=kind != "UNKNOWN",
+            cte_name=cte_name,
+            cte_index=cte_index,
+            cte_recursive=cte_recursive,
+            derived_alias=derived_alias,
+            is_set_container=isinstance(node, exp.SetOperation),
+            correlation_allowed=(kind == "SUBQUERY" or (kind == "DERIVED" and lateral)),
+        )
+        if kind == "SET_BRANCH" and parent is not None:
+            descriptor.correlation_allowed = parent.correlation_allowed
+        if kind == "UNKNOWN":
+            limitations.add(f"{side} query scope kind is not provable: {scope_id}")
+        descriptors.append(descriptor)
+        descriptors_by_node[id(node)] = descriptor
+
+    if not descriptors or descriptors[0].node is not ast:
+        scan_truncated = True
+        limitations.add(f"{side} root query scope missing")
+    return descriptors, descriptors_by_node, scan_truncated
+
+
+def _scope_edge(
+    edge_type: str,
+    source: str,
+    target: str,
+    evidence_ref: str,
+) -> dict[str, Any]:
+    return {
+        "edge_type": edge_type,
+        "source_scope_id": source,
+        "target_scope_id": target,
+        "evidence_refs": [evidence_ref],
+    }
+
+
+def _merge_scope_edges(edges: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, str, str], set[str]] = {}
+    for edge in edges:
+        key = (
+            str(edge.get("edge_type") or ""),
+            str(edge.get("source_scope_id") or ""),
+            str(edge.get("target_scope_id") or ""),
+        )
+        if not all(key):
+            continue
+        merged.setdefault(key, set()).update(
+            str(item)
+            for item in (edge.get("evidence_refs") or ())
+            if item
+        )
+    return [
+        {
+            "edge_type": edge_type,
+            "source_scope_id": source,
+            "target_scope_id": target,
+            "evidence_refs": sorted(refs),
+        }
+        for (edge_type, source, target), refs in sorted(merged.items())
+    ]
+
+
+def _scope_parent_chain(
+    descriptor: _Phase1ScopeDescriptor,
+    descriptors_by_id: dict[str, _Phase1ScopeDescriptor],
+    *,
+    include_self: bool = True,
+) -> list[_Phase1ScopeDescriptor]:
+    result: list[_Phase1ScopeDescriptor] = []
+    current: _Phase1ScopeDescriptor | None = descriptor if include_self else (
+        descriptors_by_id.get(descriptor.parent_scope_id or "")
+    )
+    while current is not None and len(result) <= _MAX_SCOPE_PATH_DEPTH:
+        result.append(current)
+        current = descriptors_by_id.get(current.parent_scope_id or "")
+    return result
+
+
+def _direct_scope_tables_and_qualifiers(
+    ast: exp.Expression,
+    descriptors_by_node: dict[int, _Phase1ScopeDescriptor],
+) -> tuple[
+    dict[str, list[exp.Table]],
+    dict[str, dict[str, int]],
+]:
+    tables: dict[str, list[exp.Table]] = defaultdict(list)
+    qualifiers: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    bounded_nodes = []
+    for index, node in enumerate(ast.walk()):
+        if index >= _MAX_SCOPE_AST_NODES_SCANNED:
+            break
+        bounded_nodes.append(node)
+    for table in (node for node in bounded_nodes if isinstance(node, exp.Table)):
+        descriptor = _nearest_retained_scope(table, descriptors_by_node)
+        if descriptor is None:
+            continue
+        tables[descriptor.scope_id].append(table)
+        qualifier = _norm_name(table.alias or table.name)
+        if qualifier:
+            qualifiers[descriptor.scope_id][qualifier] += 1
+    # A derived table's alias belongs to the consuming scope, not to its body.
+    for wrapper in (node for node in bounded_nodes if isinstance(node, exp.Subquery)):
+        alias = _norm_name(wrapper.alias or "")
+        if not alias or not _subquery_wrapper_is_derived(wrapper):
+            continue
+        consumer = _nearest_retained_scope(
+            wrapper,
+            descriptors_by_node,
+            include_self=False,
+        )
+        if consumer is not None:
+            qualifiers[consumer.scope_id][alias] += 1
+    return tables, qualifiers
+
+
+def _visible_cte_candidates(
+    consumer: _Phase1ScopeDescriptor,
+    table_name: str,
+    descriptors: list[_Phase1ScopeDescriptor],
+    descriptors_by_id: dict[str, _Phase1ScopeDescriptor],
+) -> list[tuple[int, _Phase1ScopeDescriptor]]:
+    ancestors = _scope_parent_chain(consumer, descriptors_by_id)
+    owner_distance = {
+        item.scope_id: index for index, item in enumerate(ancestors)
+    }
+    candidates: list[tuple[int, _Phase1ScopeDescriptor]] = []
+    for producer in descriptors:
+        if producer.scope_kind != "CTE" or _norm_name(producer.cte_name) != table_name:
+            continue
+        owner = producer.parent_scope_id or ""
+        if owner not in owner_distance:
+            continue
+        # Inside one WITH list only earlier CTEs are visible.  A recursive WITH
+        # additionally makes the current producer visible to itself.  This is
+        # AST order/flag evidence, not a name-based dependency guess.
+        if consumer.scope_kind == "CTE" and consumer.parent_scope_id == owner:
+            producer_index = producer.cte_index
+            consumer_index = consumer.cte_index
+            if producer_index is None or consumer_index is None:
+                continue
+            if producer_index > consumer_index:
+                continue
+            if producer_index == consumer_index and not producer.cte_recursive:
+                continue
+        candidates.append((owner_distance[owner], producer))
+    if not candidates:
+        return []
+    nearest = min(distance for distance, _ in candidates)
+    return [item for item in candidates if item[0] == nearest]
+
+
+def _scope_cte_edges(
+    ast: exp.Expression,
+    descriptors: list[_Phase1ScopeDescriptor],
+    descriptors_by_node: dict[int, _Phase1ScopeDescriptor],
+    limitations: set[str],
+) -> list[dict[str, Any]]:
+    descriptors_by_id = {item.scope_id: item for item in descriptors}
+    tables, _ = _direct_scope_tables_and_qualifiers(ast, descriptors_by_node)
+    edges: list[dict[str, Any]] = []
+    for consumer in descriptors:
+        for table in tables.get(consumer.scope_id, ()):
+            name = _norm_name(table.name)
+            candidates = _visible_cte_candidates(
+                consumer,
+                name,
+                descriptors,
+                descriptors_by_id,
+            )
+            if len(candidates) == 1:
+                producer = candidates[0][1]
+                edges.append(_scope_edge(
+                    "CTE_FEEDS",
+                    producer.scope_id,
+                    consumer.scope_id,
+                    "AST_VISIBLE_CTE_REFERENCE",
+                ))
+            elif len(candidates) > 1:
+                consumer.metadata_complete = False
+                limitations.add(
+                    f"ambiguous visible CTE reference in {consumer.scope_id}"
+                )
+    return edges
+
+
+def _scope_correlation_edges(
+    ast: exp.Expression,
+    descriptors: list[_Phase1ScopeDescriptor],
+    descriptors_by_node: dict[int, _Phase1ScopeDescriptor],
+    limitations: set[str],
+) -> list[dict[str, Any]]:
+    descriptors_by_id = {item.scope_id: item for item in descriptors}
+    _, qualifiers = _direct_scope_tables_and_qualifiers(ast, descriptors_by_node)
+    columns: dict[str, list[exp.Column]] = defaultdict(list)
+    for index, node in enumerate(ast.walk()):
+        if index >= _MAX_SCOPE_AST_NODES_SCANNED:
+            break
+        if not isinstance(node, exp.Column):
+            continue
+        column = node
+        descriptor = _nearest_retained_scope(column, descriptors_by_node)
+        if descriptor is not None:
+            columns[descriptor.scope_id].append(column)
+
+    edges: list[dict[str, Any]] = []
+    for descriptor in descriptors:
+        local = qualifiers.get(descriptor.scope_id, {})
+        outer_targets: set[str] = set()
+        saw_unresolved_outer_qualifier = False
+        for column in columns.get(descriptor.scope_id, ()):
+            qualifier = _norm_name(column.table or "")
+            if not qualifier or qualifier in local:
+                continue
+            if not descriptor.correlation_allowed:
+                saw_unresolved_outer_qualifier = True
+                continue
+            for outer in _scope_parent_chain(
+                descriptor,
+                descriptors_by_id,
+                include_self=False,
+            ):
+                count = qualifiers.get(outer.scope_id, {}).get(qualifier, 0)
+                if count == 1:
+                    outer_targets.add(outer.scope_id)
+                    break
+                if count > 1:
+                    saw_unresolved_outer_qualifier = True
+                    limitations.add(
+                        f"ambiguous correlated qualifier in {descriptor.scope_id}"
+                    )
+                    break
+                # A CTE producer is a lexical correlation boundary.  Its body
+                # may correlate internally, but it cannot capture tables from
+                # the statement that consumes the CTE.
+                if outer.scope_kind == "CTE":
+                    break
+            else:
+                saw_unresolved_outer_qualifier = True
+
+        for target in sorted(outer_targets):
+            descriptor.is_correlated = True
+            edges.append(_scope_edge(
+                "CORRELATED_TO",
+                descriptor.scope_id,
+                target,
+                "AST_QUALIFIED_OUTER_REFERENCE",
+            ))
+        if saw_unresolved_outer_qualifier:
+            descriptor.metadata_complete = False
+            if descriptor.correlation_allowed:
+                limitations.add(
+                    f"outer qualifier could not be proven in {descriptor.scope_id}"
+                )
+            elif descriptor.scope_kind == "DERIVED":
+                limitations.add(
+                    f"non-lateral derived outer reference not linked in {descriptor.scope_id}"
+                )
+    return edges
+
+
+def _scope_for_diff_node(
+    node: Any,
+    descriptors_by_node: dict[int, _Phase1ScopeDescriptor],
+    descriptors: list[_Phase1ScopeDescriptor] | None = None,
+) -> _Phase1ScopeDescriptor | None:
+    if not isinstance(node, exp.Expression):
+        return None
+    # Wrapper-level diffs semantically belong to the wrapped producer/query.
+    if isinstance(node, (exp.CTE, exp.Subquery, exp.Exists)):
+        inner = node.this
+        if isinstance(inner, exp.Expression):
+            descriptor = _nearest_retained_scope(inner, descriptors_by_node)
+            if descriptor is not None:
+                return descriptor
+            node = inner
+    descriptor = _nearest_retained_scope(node, descriptors_by_node)
+    if descriptor is not None or not descriptors:
+        return descriptor
+
+    # ``extract_ast_diffs`` intentionally parses its own immutable AST pair,
+    # while execution uses the dialect resolver's ASTs.  Object identity is
+    # therefore normally different even though the complete structural path
+    # is the same.  Match that full path only when it names exactly one
+    # retained query block; never fall back to rendered SQL or a query name.
+    current: exp.Expression | None = node
+    while isinstance(current, exp.Expression) and not _is_scope_query_node(current):
+        current = current.parent
+    if not isinstance(current, exp.Expression):
+        return None
+    structural_key = json.dumps(
+        _scope_structural_path(current),
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    candidates = [
+        item for item in descriptors if item.structural_key == structural_key
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _legacy_scope_fallback(
+    label: str,
+    descriptors: list[_Phase1ScopeDescriptor],
+) -> _Phase1ScopeDescriptor | None:
+    raw_label = str(label or "").strip().lower()
+    normalized = _norm_name(raw_label)
+    if normalized == "root":
+        candidates = [item for item in descriptors if item.scope_kind == "ROOT"]
+    elif raw_label.startswith("cte:"):
+        name = _norm_name(raw_label.split(":", 1)[1])
+        candidates = [
+            item for item in descriptors
+            if item.scope_kind == "CTE" and _norm_name(item.cte_name) == name
+        ]
+    else:
+        # ``nested:N``, ``nested_correlation`` and ``subquery`` do not encode
+        # a structural path.  Mapping them in a multi-scope query would be a
+        # name/ordinal guess, so intentionally leave them unresolved.
+        candidates = []
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _conceptual_scope_id(descriptor: _Phase1ScopeDescriptor) -> str:
+    if descriptor.scope_kind == "ROOT" and not descriptor.structural_path:
+        return "paired:root"
+    digest = hashlib.sha256(
+        descriptor.structural_key.encode("utf-8")
+    ).hexdigest()[:16]
+    return f"paired:scope:{digest}"
+
+
+def _scope_diff_bindings(
+    ast_diffs: list[ASTDiffNode],
+    by_side: dict[str, list[_Phase1ScopeDescriptor]],
+    by_side_node: dict[str, dict[int, _Phase1ScopeDescriptor]],
+    limitations: set[str],
+) -> tuple[list[dict[str, Any]], bool]:
+    bindings: list[dict[str, Any]] = []
+    truncated = False
+    structural_by_side = {
+        side: {
+            item.structural_key: item
+            for item in descriptors
+        }
+        for side, descriptors in by_side.items()
+    }
+
+    def paired_descriptor(
+        side: str,
+        descriptor: _Phase1ScopeDescriptor,
+    ) -> _Phase1ScopeDescriptor | None:
+        other_side = "student" if side == "standard" else "standard"
+        candidate = structural_by_side[other_side].get(descriptor.structural_key)
+        if candidate is None or candidate.scope_kind != descriptor.scope_kind:
+            return None
+        return candidate
+
+    for index, diff in enumerate(ast_diffs):
+        if index >= _MAX_SCOPE_DIFFS:
+            truncated = True
+            limitations.add("AST diff scope scan limit reached")
+            break
+        diff_id = stable_diff_id(diff, index)
+        exact: dict[str, _Phase1ScopeDescriptor] = {}
+        for side, node in (
+            ("standard", diff.standard_node),
+            ("student", diff.student_node),
+        ):
+            descriptor = _scope_for_diff_node(
+                node,
+                by_side_node[side],
+                by_side[side],
+            )
+            if descriptor is not None:
+                exact[side] = descriptor
+
+        # When only one side has the changed/removed AST node, an identical
+        # structural path on the other parsed tree is a proof-quality pairing.
+        if len(exact) == 1:
+            known_side, known = next(iter(exact.items()))
+            other_side = "student" if known_side == "standard" else "standard"
+            paired = paired_descriptor(known_side, known)
+            if paired is not None:
+                exact[other_side] = paired
+
+        statuses: dict[str, str] = {}
+        for side, descriptor in exact.items():
+            evidence_node = (
+                diff.standard_node if side == "standard" else diff.student_node
+            )
+            identity_match = _scope_for_diff_node(
+                evidence_node,
+                by_side_node[side],
+            )
+            if identity_match is descriptor:
+                statuses[side] = "EXACT_AST_ANCESTOR"
+            elif isinstance(evidence_node, exp.Expression):
+                statuses[side] = "EXACT_AST_PATH"
+            else:
+                statuses[side] = "EXACT_PAIRED_AST_PATH"
+
+        if not exact:
+            # With exactly one query block on a side, there is no competing
+            # scope and root attribution is proven by elimination.
+            for side, descriptors in by_side.items():
+                if len(descriptors) == 1:
+                    exact[side] = descriptors[0]
+                    # ``EXACT`` is the frozen consumer-level status.  The
+                    # proof here is elimination: this side has exactly one
+                    # retained query block, so no competing scope exists.
+                    statuses[side] = "EXACT"
+
+        conceptual_ids = {
+            _conceptual_scope_id(descriptor)
+            for side, descriptor in exact.items()
+            if paired_descriptor(side, descriptor) is not None
+        }
+        conceptual_scope_id = (
+            next(iter(conceptual_ids)) if len(conceptual_ids) == 1 else None
+        )
+        if exact and (
+            conceptual_scope_id is None
+            or any(
+                paired_descriptor(side, descriptor) is None
+                for side, descriptor in exact.items()
+            )
+        ):
+            conceptual_scope_id = None
+            limitations.add(f"diff conceptual scope unresolved: {diff_id}")
+
+        if not exact:
+            legacy_label = str((diff.extra or {}).get("query_scope") or "")
+            for side, descriptors in by_side.items():
+                fallback = _legacy_scope_fallback(legacy_label, descriptors)
+                if fallback is not None:
+                    bindings.append({
+                        "diff_id": diff_id,
+                        "side": side,
+                        "scope_id": fallback.scope_id,
+                        "binding_status": "FALLBACK_LABEL",
+                    })
+            limitations.add(f"diff scope unresolved: {diff_id}")
+            continue
+
+        for side, descriptor in sorted(exact.items()):
+            if len(bindings) >= _MAX_SCOPE_DIFF_BINDINGS:
+                truncated = True
+                limitations.add("diff scope binding limit reached")
+                return bindings, truncated
+            bindings.append({
+                "diff_id": diff_id,
+                "side": side,
+                "scope_id": descriptor.scope_id,
+                "binding_status": statuses.get(side, "EXACT_AST_ANCESTOR"),
+                **(
+                    {"conceptual_scope_id": conceptual_scope_id}
+                    if conceptual_scope_id is not None
+                    else {}
+                ),
+            })
+    return bindings, truncated
+
+
+def _build_phase1_scope_metadata(
+    standard_ast: exp.Expression,
+    student_ast: exp.Expression,
+    ast_diffs: list[ASTDiffNode],
+) -> dict[str, Any]:
+    """Build bounded, deterministic, AST-proven Phase 1 scope evidence.
+
+    No edge is inferred from rendered SQL or from a human-facing scope label.
+    CTE name lookup is used only after lexical visibility and WITH-list order
+    have been proven from the AST.  Missing proof degrades the contract to
+    ``PARTIAL`` and records a limitation instead of fabricating an edge.
+    """
+
+    limitations: set[str] = set()
+    standard, standard_by_node, standard_truncated = _collect_phase1_scopes(
+        standard_ast,
+        "standard",
+        limitations,
+    )
+    student, student_by_node, student_truncated = _collect_phase1_scopes(
+        student_ast,
+        "student",
+        limitations,
+    )
+    by_side = {"standard": standard, "student": student}
+    by_side_node = {
+        "standard": standard_by_node,
+        "student": student_by_node,
+    }
+
+    parent_edges: list[dict[str, Any]] = []
+    composition_edges: list[dict[str, Any]] = []
+    for descriptors in by_side.values():
+        by_id = {item.scope_id: item for item in descriptors}
+        for descriptor in descriptors:
+            parent = by_id.get(descriptor.parent_scope_id or "")
+            if parent is None:
+                continue
+            parent_edges.append(_scope_edge(
+                "PARENT",
+                descriptor.scope_id,
+                parent.scope_id,
+                "AST_ANCESTRY",
+            ))
+            if descriptor.scope_kind == "DERIVED":
+                composition_edges.append(_scope_edge(
+                    "DERIVED_FEEDS",
+                    descriptor.scope_id,
+                    parent.scope_id,
+                    "AST_FROM_SUBQUERY",
+                ))
+            if descriptor.scope_kind == "SET_BRANCH" and isinstance(
+                parent.node,
+                exp.SetOperation,
+            ):
+                composition_edges.append(_scope_edge(
+                    "SET_MEMBER_OF",
+                    descriptor.scope_id,
+                    parent.scope_id,
+                    "AST_SET_OPERAND",
+                ))
+
+    composition_edges.extend(_scope_cte_edges(
+        standard_ast,
+        standard,
+        standard_by_node,
+        limitations,
+    ))
+    composition_edges.extend(_scope_cte_edges(
+        student_ast,
+        student,
+        student_by_node,
+        limitations,
+    ))
+    composition_edges.extend(_scope_correlation_edges(
+        standard_ast,
+        standard,
+        standard_by_node,
+        limitations,
+    ))
+    composition_edges.extend(_scope_correlation_edges(
+        student_ast,
+        student,
+        student_by_node,
+        limitations,
+    ))
+
+    parent_edges = _merge_scope_edges(parent_edges)
+    composition_edges = _merge_scope_edges(composition_edges)
+    edge_truncated = False
+    if len(parent_edges) > _MAX_SCOPE_EDGES:
+        parent_edges = parent_edges[:_MAX_SCOPE_EDGES]
+        edge_truncated = True
+        limitations.add("parent scope edge limit reached")
+    if len(composition_edges) > _MAX_SCOPE_EDGES:
+        composition_edges = composition_edges[:_MAX_SCOPE_EDGES]
+        edge_truncated = True
+        limitations.add("composition scope edge limit reached")
+
+    diff_bindings, binding_truncated = _scope_diff_bindings(
+        ast_diffs,
+        by_side,
+        by_side_node,
+        limitations,
+    )
+
+    # Pairing is descriptive only.  The side-aware IDs remain distinct, so
+    # equal CTE aliases or equal column names can never merge two scopes.
+    standard_paths = {item.structural_key: item for item in standard}
+    student_paths = {item.structural_key: item for item in student}
+    paired_ids: dict[str, str] = {}
+    conceptual_ids: dict[str, str] = {}
+    conceptual_scopes: list[dict[str, Any]] = []
+    for structural_key in sorted(set(standard_paths) & set(student_paths)):
+        left = standard_paths[structural_key]
+        right = student_paths[structural_key]
+        if left.scope_kind != right.scope_kind:
+            continue
+        conceptual_id = _conceptual_scope_id(left)
+        paired_ids[left.scope_id] = right.scope_id
+        paired_ids[right.scope_id] = left.scope_id
+        conceptual_ids[left.scope_id] = conceptual_id
+        conceptual_ids[right.scope_id] = conceptual_id
+        conceptual_scopes.append({
+            "conceptual_scope_id": conceptual_id,
+            "scope_kind": left.scope_kind,
+            "standard_scope_id": left.scope_id,
+            "student_scope_id": right.scope_id,
+            "pairing_status": "EXACT_AST_PATH",
+        })
+
+    scope_rows: list[dict[str, Any]] = []
+    for descriptor in sorted(
+        standard + student,
+        key=lambda item: (item.side, item.lexical_depth, item.scope_id),
+    ):
+        row: dict[str, Any] = {
+            "scope_id": descriptor.scope_id,
+            "side": descriptor.side,
+            "scope_kind": descriptor.scope_kind,
+            "scope_label": descriptor.scope_label,
+            "parent_scope_id": descriptor.parent_scope_id,
+            "lexical_depth": descriptor.lexical_depth,
+            "metadata_complete": descriptor.metadata_complete,
+            "is_set_container": descriptor.is_set_container,
+            "is_correlated": descriptor.is_correlated,
+            "structural_path": [
+                {"node": item[0], "arg": item[1], "index": item[2]}
+                for item in descriptor.structural_path
+            ],
+        }
+        if descriptor.cte_name:
+            row["cte_name"] = descriptor.cte_name
+            row["cte_index"] = descriptor.cte_index
+            row["cte_recursive"] = descriptor.cte_recursive
+        if descriptor.derived_alias:
+            row["derived_alias"] = descriptor.derived_alias
+        if descriptor.scope_id in paired_ids:
+            row["paired_scope_id"] = paired_ids[descriptor.scope_id]
+            row["conceptual_scope_id"] = conceptual_ids[descriptor.scope_id]
+        scope_rows.append(row)
+
+    truncated = any((
+        standard_truncated,
+        student_truncated,
+        edge_truncated,
+        binding_truncated,
+    ))
+    status = "COMPLETE" if not limitations and not truncated else "PARTIAL"
+    return {
+        "schema_version": _SCOPE_METADATA_VERSION,
+        "status": status,
+        "scopes": scope_rows,
+        "conceptual_scopes": conceptual_scopes,
+        "parent_edges": parent_edges,
+        "composition_edges": composition_edges,
+        "diff_bindings": sorted(
+            diff_bindings,
+            key=lambda item: (
+                item["diff_id"],
+                item["side"],
+                item["scope_id"],
+            ),
+        ),
+        "limitations": sorted(limitations),
+        "counts": {
+            "scopes": len(scope_rows),
+            "conceptual_scopes": len(conceptual_scopes),
+            "parent_edges": len(parent_edges),
+            "composition_edges": len(composition_edges),
+            "diff_bindings": len(diff_bindings),
+        },
+        "truncated": truncated,
+    }
 
 
 def _collect_mutation_test_results(
@@ -17042,7 +25260,23 @@ def _prepare_mutation_sql(
     allowed_tables: Iterable[str] | None = None,
 ) -> str | None:
     if backend == "sqlite":
-        return transpile_to_sqlite(sql)
+        catalog = _MUTATION_SCHEMA_CATALOG.get()
+        if catalog is None and allowed_tables:
+            # Direct unit-level mutation calls do not have a catalog context.
+            # A minimal physical-table catalog is sufficient for namespace
+            # mapping; column validation has already happened in the primary
+            # execution path.
+            catalog = SchemaCatalog.from_legacy({
+                str(table): ["id"] for table in allowed_tables
+            })
+        mutation_ast = _parse_sql(sql, dialect=sql_dialect)
+        fixture_sql = _unqualify_sqlite_fixture_tables(
+            sql,
+            mutation_ast,
+            source_dialect=sql_dialect,
+            schema_catalog=catalog,
+        )
+        return transpile_to_sqlite(fixture_sql, source_dialect=sql_dialect)
     try:
         statements = sqlglot.transpile(
             sql,
@@ -17540,17 +25774,29 @@ def _run_correlated_predicate_mutation(
         item
         for item in diffs
         if item.diff_type == "correlated_predicate_changed"
-        and item.extra.get("query_scope") == "nested_correlation"
+        and item.extra.get("query_scope") in {None, "nested_correlation"}
         and isinstance(item.standard_node, exp.Expression)
         and isinstance(item.student_node, exp.Expression)
     ]
     if len(focused) != 1:
         return None
     diff = focused[0]
+    standard_target = diff.standard_node
+    student_target = diff.student_node
+    # EXISTS polarity is represented by a parent NOT node. Replacing only the
+    # EXISTS child would leave NOT EXISTS in place and falsely report a repair.
+    if isinstance(student_target.parent, exp.Not) and not isinstance(
+        standard_target.parent, exp.Not
+    ):
+        student_target = student_target.parent
+    elif isinstance(standard_target.parent, exp.Not) and not isinstance(
+        student_target.parent, exp.Not
+    ):
+        standard_target = standard_target.parent
     replacement_sql = _mutate_by_node_replacement(
         student_ast,
-        diff.student_node,
-        diff.standard_node,
+        student_target,
+        standard_target,
     )
     if replacement_sql is None:
         return None
@@ -17569,7 +25815,12 @@ def _run_correlated_predicate_mutation(
         sql_dialect=sql_dialect,
         native_executor_url=native_executor_url,
         execution_session=execution_session,
-        action="restore_correlated_comparison",
+        action=(
+            "restore_correlated_predicate"
+            if student_target is not diff.student_node
+            or standard_target is not diff.standard_node
+            else "restore_correlated_comparison"
+        ),
         mutation_scope=["CORRELATED SUBQUERY"],
         query_scope="nested_correlation",
     )
@@ -18690,6 +26941,169 @@ def _rewrite_similar_to(sql: str) -> str:
     return pattern.sub(replace, sql)
 
 
+def _rewrite_sqlite_date_compat(sql: str) -> str:
+    """Translate bounded teaching-date idioms emitted by SQLGlot."""
+
+    trunc_pattern = re.compile(
+        r"(?is)\b(?:TIMESTAMP_TRUNC|DATE_TRUNC)\s*\(\s*"
+        r"(?P<value>(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)"
+        r"(?:\s*\.\s*(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*))?)\s*,\s*"
+        r"(?P<unit>'?(?:YEAR|MONTH|DAY)'?)\s*\)"
+    )
+
+    def replace_trunc(match: re.Match) -> str:
+        unit = match.group("unit").strip("'").lower()
+        modifier = {
+            "year": "start of year",
+            "month": "start of month",
+            "day": "start of day",
+        }[unit]
+        return f"DATE({match.group('value')}, '{modifier}')"
+
+    sql = trunc_pattern.sub(replace_trunc, sql)
+    interval_pattern = re.compile(
+        r"(?is)(?P<value>(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)"
+        r"(?:\s*\.\s*(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*))?)\s*"
+        r"(?P<sign>[+-])\s*INTERVAL\s*'(?P<count>\d+)'?\s*"
+        r"(?P<unit>YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)S?'?"
+    )
+
+    def replace_interval(match: re.Match) -> str:
+        sign = "+" if match.group("sign") == "+" else "-"
+        modifier = f"{sign}{match.group('count')} {match.group('unit').lower()}"
+        return f"DATE({match.group('value')}, '{modifier}')"
+
+    sql = interval_pattern.sub(replace_interval, sql)
+    # PostgreSQL date subtraction returns elapsed days.  SQLite subtracting
+    # date strings coerces both to their leading year, so use Julian days.
+    sql = re.sub(
+        r"(?is)DATE\s*\(\s*\(\s*DATE\s*\((?P<base>[^,()]+),\s*"
+        r"(?P<modifier>'[^']+')\)\s*\)\s*\)\s*-\s*"
+        r"DATE\s*\(\s*(?P<right>[^()]+)\s*\)",
+        lambda match: (
+            f"(JULIANDAY(DATE({match.group('base')}, {match.group('modifier')})) "
+            f"- JULIANDAY(DATE({match.group('right')})))"
+        ),
+        sql,
+    )
+    return sql
+
+
+def _unwrap_sqlite_interval_expression(node: exp.Expression) -> exp.Expression:
+    """Remove harmless parentheses before recognizing an interval operand."""
+
+    while isinstance(node, exp.Paren) and isinstance(node.this, exp.Expression):
+        node = node.this
+    return node
+
+
+def _sqlite_interval_amount(
+    node: exp.Expression,
+) -> tuple[exp.Expression, str] | None:
+    """Return a numeric amount expression and normalized unit for an interval.
+
+    SQLGlot renders PostgreSQL literals such as ``INTERVAL '30 minutes'`` as
+    ``INTERVAL '30' MINUTES``.  Work from its AST instead of trying to cover
+    every spacing/pluralization variant with a regular expression.  The small
+    amount grammar deliberately covers only the bounded teaching forms used by
+    the SQLite compatibility sandbox: a literal interval, or an interval
+    multiplied by one row expression.
+    """
+
+    candidate = _unwrap_sqlite_interval_expression(node)
+    if isinstance(candidate, exp.Interval):
+        literal = candidate.this
+        unit_node = candidate.args.get("unit")
+        if not isinstance(literal, exp.Literal) or unit_node is None:
+            return None
+        raw_amount = str(literal.this or "").strip()
+        if not re.fullmatch(r"[+-]?\d+(?:\.\d+)?", raw_amount):
+            return None
+        amount = exp.Literal.number(raw_amount)
+        unit = str(getattr(unit_node, "this", unit_node) or "").lower()
+        unit = unit.rstrip("s")
+        if unit not in {"year", "quarter", "month", "week", "day", "hour", "minute", "second"}:
+            return None
+        return amount, unit
+    if not isinstance(candidate, exp.Mul):
+        return None
+    left_interval = _sqlite_interval_amount(candidate.left)
+    right_interval = _sqlite_interval_amount(candidate.right)
+    if left_interval is not None and right_interval is None:
+        amount, unit = left_interval
+        return exp.Mul(this=candidate.right.copy(), expression=amount), unit
+    if right_interval is not None and left_interval is None:
+        amount, unit = right_interval
+        return exp.Mul(this=candidate.left.copy(), expression=amount), unit
+    return None
+
+
+def _is_sqlite_temporal_expression(node: exp.Expression) -> bool:
+    """Recognize the temporal nodes produced by this compatibility rewrite."""
+
+    node = _unwrap_sqlite_interval_expression(node)
+    return isinstance(node, exp.Date) or (
+        isinstance(node, exp.Anonymous)
+        and str(node.this or "").upper() == "PG_INTERVAL_ADD"
+    )
+
+
+def _rewrite_sqlite_interval_arithmetic(sql: str) -> str:
+    """Lower bounded PostgreSQL interval arithmetic to registered SQLite UDFs.
+
+    SQLite has no interval value type, so expressions such as
+    ``starttime + slots * INTERVAL '30 minutes'`` cannot be made reliable with
+    a text substitution.  The UDF receives the evaluated amount and preserves
+    the data-dependent multiplier.  Date subtraction is made explicit through
+    ``JULIANDAY`` only when an interval/date expression proves it is temporal;
+    ordinary numeric subtraction remains untouched.
+    """
+
+    try:
+        tree = sqlglot.parse_one(sql, read="sqlite", error_level=ErrorLevel.IGNORE)
+    except Exception:
+        return sql
+    if tree is None:
+        return sql
+
+    def replace_interval_addition(node: exp.Expression) -> exp.Expression:
+        if not isinstance(node, (exp.Add, exp.Sub)):
+            return node
+        interval = _sqlite_interval_amount(node.right)
+        if interval is None:
+            return node
+        amount, unit = interval
+        if isinstance(node, exp.Sub):
+            amount = exp.Neg(this=amount)
+        return exp.Anonymous(
+            this="PG_INTERVAL_ADD",
+            expressions=[node.left.copy(), amount, exp.Literal.string(unit)],
+        )
+
+    tree = tree.transform(replace_interval_addition)
+
+    def replace_temporal_subtraction(node: exp.Expression) -> exp.Expression:
+        if not isinstance(node, exp.Sub):
+            return node
+        if not (
+            _is_sqlite_temporal_expression(node.left)
+            or _is_sqlite_temporal_expression(node.right)
+        ):
+            return node
+        return exp.Sub(
+            this=exp.Anonymous(this="JULIANDAY", expressions=[node.left.copy()]),
+            expression=exp.Anonymous(
+                this="JULIANDAY", expressions=[node.right.copy()]
+            ),
+        )
+
+    tree = tree.transform(replace_temporal_subtraction)
+    try:
+        return tree.sql(dialect="sqlite")
+    except Exception:
+        return sql
+
+
 def _sqlite_compat(sql: str) -> str:
     sql = sql.rstrip().rstrip(";")
     sql = re.sub(r"\bISNULL\s*\(", "IFNULL(", sql, flags=re.IGNORECASE)
@@ -18719,6 +27133,10 @@ def _sqlite_compat(sql: str) -> str:
     sql = re.sub(r"(?is)\s+OPTION\s*\(\s*MAXRECURSION\s+\d+\s*\)\s*$", "", sql)
     sql = re.sub(r"(?is)^\s*SELECT\s+WITH\s+TIES\s+", "SELECT ", sql)
     sql = re.sub(r"(?is)(\bLIMIT\s+\d+)\s+WITH\s+TIES\b", r"\1", sql)
+    sql = _rewrite_sqlite_date_compat(sql)
+    sql = _rewrite_bounded_generate_series(sql)
+    sql = _rewrite_static_epoch_extract(sql)
+    sql = _rewrite_sqlite_interval_arithmetic(sql)
     sql = _rewrite_similar_to(sql)
     sql = _rewrite_bare_offset(sql)
     sql = _rewrite_parenthesized_union(sql)
@@ -18789,6 +27207,16 @@ def _rewrite_parenthesized_union(sql: str) -> str:
 
 
 def _rewrite_quantified_subqueries(sql: str) -> str:
+    tree = _parse_sql(sql)
+    normalized = (
+        _root_any_extreme_filter_normalized(tree)
+        if isinstance(tree, exp.Expression)
+        else None
+    )
+    if normalized is None and isinstance(tree, exp.Expression):
+        normalized = _root_all_not_exists_filter_normalized(tree)
+    if normalized is not None:
+        sql = normalized
     pattern = re.compile(
         r"(?is)([A-Za-z_][A-Za-z0-9_\\.]*|\"[^\"]+\")\s*(<=|>=|<>|!=|=|<|>)\s*"
         r"(ALL|ANY|SOME)\s*\(\s*SELECT\s+([A-Za-z_][A-Za-z0-9_\\.]*|\"[^\"]+\")\s+FROM\s+(.+?)\)",
@@ -18797,12 +27225,13 @@ def _rewrite_quantified_subqueries(sql: str) -> str:
     def repl(match: re.Match) -> str:
         left, op, quantifier, selected, tail = match.groups()
         quantifier = quantifier.upper()
-        aggregate = _quantifier_aggregate(op, quantifier)
-        if aggregate is None:
-            if op == "=" and quantifier in {"ANY", "SOME"}:
-                return f"{left} IN (SELECT {selected} FROM {tail})"
-            return match.group(0)
-        return f"{left} {op} (SELECT {aggregate}({selected}) FROM {tail})"
+        if op == "=" and quantifier in {"ANY", "SOME"}:
+            return f"{left} IN (SELECT {selected} FROM {tail})"
+        # MIN/MAX substitution is not generally semantics preserving.  ALL
+        # over an empty set is TRUE, and NULL members keep quantified results
+        # UNKNOWN even when an extreme aggregate yields a concrete value.
+        # Unsupported comparisons must reach the backend capability boundary.
+        return match.group(0)
 
     previous = None
     current = sql
@@ -18812,18 +27241,187 @@ def _rewrite_quantified_subqueries(sql: str) -> str:
     return current
 
 
-def _quantifier_aggregate(op: str, quantifier: str) -> str | None:
-    if quantifier == "ALL":
-        if op in {">", ">="}:
-            return "MAX"
-        if op in {"<", "<="}:
-            return "MIN"
-    if quantifier in {"ANY", "SOME"}:
-        if op in {">", ">="}:
-            return "MIN"
-        if op in {"<", "<="}:
-            return "MAX"
-    return None
+def _safe_root_any_extreme_sql(
+    sql: str,
+    *,
+    dialect: str | None = None,
+) -> bool:
+    """Return whether SQLite may execute this quantified filter via MIN/MAX."""
+    tree = _parse_sql(sql, dialect=dialect)
+    return bool(
+        isinstance(tree, exp.Expression)
+        and _root_any_extreme_filter_normalized(tree) is not None
+    )
+
+
+def _literal_datetime_value(node: exp.Expression | None) -> datetime | None:
+    while isinstance(node, exp.Cast):
+        node = node.this
+    if not isinstance(node, exp.Literal) or not node.is_string:
+        return None
+    return _coerce_datetime(node.this)
+
+
+def _safe_static_epoch_extract_sql(
+    sql: str,
+    *,
+    dialect: str | None = None,
+) -> bool:
+    """Prove all PostgreSQL EPOCH extracts are static timestamp differences."""
+    tree = _parse_sql(sql, dialect=dialect)
+    if not isinstance(tree, exp.Expression):
+        return False
+    epoch_extracts = [
+        node
+        for node in tree.find_all(exp.Extract)
+        if str(getattr(node.this, "this", node.this) or "").upper() == "EPOCH"
+    ]
+    if not epoch_extracts:
+        return False
+    for extract in epoch_extracts:
+        expression = _unwrap_sqlite_interval_expression(extract.expression)
+        if not isinstance(expression, exp.Sub):
+            return False
+        if (
+            _literal_datetime_value(expression.left) is None
+            or _literal_datetime_value(expression.right) is None
+        ):
+            return False
+    return True
+
+
+def _rewrite_static_epoch_extract(sql: str) -> str:
+    """Fold a proven static PostgreSQL timestamp difference to exact seconds."""
+    timestamp = (
+        r"(?:CAST\s*\(\s*)?'(?P<{name}>[^']+)'"
+        r"(?:\s+AS\s+TIMESTAMP\s*\))?"
+    )
+    pattern = re.compile(
+        r"(?is)EXTRACT\s*\(\s*EPOCH\s+FROM\s*\(\s*"
+        + timestamp.format(name="start")
+        + r"\s*-\s*"
+        + timestamp.format(name="end")
+        + r"\s*\)\s*\)"
+    )
+
+    def replace(match: re.Match) -> str:
+        start = _coerce_datetime(match.group("start"))
+        end = _coerce_datetime(match.group("end"))
+        if start is None or end is None:
+            return match.group(0)
+        seconds = (start - end).total_seconds()
+        return str(int(seconds)) if seconds.is_integer() else repr(seconds)
+
+    return pattern.sub(replace, sql)
+
+
+def _bounded_generate_series_size(
+    node: exp.Expression,
+) -> tuple[int, str, int] | None:
+    start = _literal_datetime_value(node.args.get("start"))
+    end = _literal_datetime_value(node.args.get("end"))
+    step = node.args.get("step")
+    if start is None or end is None or end < start or not isinstance(step, exp.Interval):
+        return None
+    amount = step.this
+    unit_node = step.args.get("unit")
+    if not isinstance(amount, exp.Literal):
+        return None
+    try:
+        count = int(str(amount.this))
+    except (TypeError, ValueError):
+        return None
+    unit = str(getattr(unit_node, "this", unit_node) or "").upper()
+    if count <= 0 or unit not in {"DAY", "MONTH", "YEAR"}:
+        return None
+    if unit == "DAY":
+        size = (end - start).days // count + 1
+    else:
+        # SQLite's month/year modifier has rollover behavior for dates after
+        # day 28. Keep this compatibility proof to the stable calendar subset.
+        if start.day > 28 or end.day > 28:
+            return None
+        months = (end.year - start.year) * 12 + end.month - start.month
+        divisor = count if unit == "MONTH" else count * 12
+        size = months // divisor + 1
+    if not 1 <= size <= _MAX_SQLITE_GENERATE_SERIES_ROWS:
+        return None
+    return count, unit, size
+
+
+def _safe_bounded_generate_series_sql(
+    sql: str,
+    *,
+    dialect: str | None = None,
+) -> bool:
+    """Prove one literal PostgreSQL date series is bounded and rewritable."""
+    tree = _parse_sql(sql, dialect=dialect)
+    if not isinstance(tree, exp.Expression):
+        return False
+    series_type = getattr(exp, "ExplodingGenerateSeries", None)
+    if series_type is None:
+        return False
+    series_nodes = list(tree.find_all(series_type))
+    if len(series_nodes) != 1:
+        return False
+    series = series_nodes[0]
+    select = series.find_ancestor(exp.Select)
+    if not isinstance(select, exp.Select) or len(select.expressions or ()) != 1:
+        return False
+    if any(
+        select.args.get(key)
+        for key in (
+            "from", "from_", "joins", "where", "group", "having",
+            "qualify", "limit", "offset", "order", "with", "with_",
+        )
+    ):
+        return False
+    projection = select.expressions[0]
+    projection = projection.this if isinstance(projection, exp.Alias) else projection
+    if isinstance(projection, exp.Cast):
+        projection = projection.this
+    if projection is not series:
+        return False
+    return _bounded_generate_series_size(series) is not None
+
+
+def _rewrite_bounded_generate_series(sql: str) -> str:
+    """Translate one already-proven literal date series to a local SQLite CTE."""
+    pattern = re.compile(
+        r"(?is)\bSELECT\s+"
+        r"(?P<date>DATE\s*\(\s*)?"
+        r"UNNEST\s*\(\s*GENERATE_SERIES\s*\(\s*"
+        r"(?:CAST\s*\(\s*)?'(?P<start>[^']+)'(?:\s+AS\s+TIMESTAMP\s*\))?\s*,\s*"
+        r"(?:CAST\s*\(\s*)?'(?P<end>[^']+)'(?:\s+AS\s+TIMESTAMP\s*\))?\s*,\s*"
+        r"INTERVAL\s*'(?P<count>\d+)'\s*(?P<unit>DAY|MONTH|YEAR)\s*"
+        r"\)\s*\)\s*(?P<date_close>\))?\s+AS\s+"
+        r"(?P<alias>\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)"
+        r"(?=\s*(?:\)|;|$))",
+    )
+
+    def replace(match: re.Match) -> str:
+        if bool(match.group("date")) != bool(match.group("date_close")):
+            return match.group(0)
+        count = int(match.group("count"))
+        unit = match.group("unit").lower()
+        start = match.group("start").replace("'", "''")
+        end = match.group("end").replace("'", "''")
+        output = 'DATE("__value")' if match.group("date") else '"__value"'
+        modifier = f"+{count} {unit}"
+        return (
+            'WITH RECURSIVE "__phase1_series"("__value", "__step") AS ('
+            f"SELECT DATETIME('{start}'), 0 "
+            f"WHERE DATETIME('{start}') <= DATETIME('{end}') "
+            "UNION ALL "
+            f"SELECT DATETIME(\"__value\", '{modifier}'), \"__step\" + 1 "
+            'FROM "__phase1_series" '
+            f"WHERE DATETIME(\"__value\", '{modifier}') <= DATETIME('{end}') "
+            f'AND "__step" + 1 < {_MAX_SQLITE_GENERATE_SERIES_ROWS}'
+            f") SELECT {output} AS {match.group('alias')} "
+            'FROM "__phase1_series"'
+        )
+
+    return pattern.sub(replace, sql)
 
 
 def _mentions_sys_views(*sqls: str) -> bool:
@@ -18877,13 +27475,13 @@ def _sql_date_add(part: Any, amount: Any, value: Any) -> str | None:
         count = int(amount)
     except (TypeError, ValueError):
         return None
-    normalized = str(part or "").lower()
+    normalized = str(part or "").lower().rstrip("s")
     if normalized in {"year", "quarter", "month"}:
         months = count * (12 if normalized == "year" else 3 if normalized == "quarter" else 1)
         month_index = parsed.year * 12 + parsed.month - 1 + months
         year, month_zero = divmod(month_index, 12)
         month = month_zero + 1
-        day = min(parsed.day, 28)
+        day = min(parsed.day, calendar.monthrange(year, month)[1])
         result = parsed.replace(year=year, month=month, day=day)
     else:
         units = {
@@ -18896,6 +27494,12 @@ def _sql_date_add(part: Any, amount: Any, value: Any) -> str | None:
         result = parsed + units.get(normalized, timedelta(days=count))
     has_time = any((result.hour, result.minute, result.second, result.microsecond))
     return result.strftime("%Y-%m-%d %H:%M:%S" if has_time else "%Y-%m-%d")
+
+
+def _sql_pg_interval_add(value: Any, amount: Any, unit: Any) -> str | None:
+    """SQLite UDF for the finite PostgreSQL interval forms we deliberately support."""
+
+    return _sql_date_add(unit, amount, value)
 
 
 def _sql_date_diff(part: Any, start: Any, end: Any) -> int | None:
@@ -18915,6 +27519,35 @@ def _sql_date_diff(part: Any, start: Any, end: Any) -> int | None:
 
 def _sql_date_diff_mysql(end: Any, start: Any) -> int | None:
     return _sql_date_diff("day", start, end)
+
+
+def _sql_lpad(value: Any, size: Any, fill: Any) -> str | None:
+    if value is None or size is None or fill is None:
+        return None
+    try:
+        target = max(0, int(size))
+    except (TypeError, ValueError):
+        return None
+    text = str(value)
+    if len(text) >= target:
+        return text[:target]
+    padding = str(fill)
+    if not padding:
+        return text
+    needed = target - len(text)
+    return (padding * ((needed + len(padding) - 1) // len(padding)))[:needed] + text
+
+
+def _sql_translate(value: Any, source: Any, replacement: Any) -> str | None:
+    if value is None or source is None or replacement is None:
+        return None
+    source_text = str(source)
+    replacement_text = str(replacement)
+    mapping = {
+        character: replacement_text[index] if index < len(replacement_text) else ""
+        for index, character in enumerate(source_text)
+    }
+    return "".join(mapping.get(character, character) for character in str(value))
 
 
 def _width_bucket(value: Any, minimum: Any, maximum: Any, buckets: Any) -> int:
@@ -19389,7 +28022,11 @@ def _apply_logical_operator_probe(
     student_where = student_ast.find(exp.Where) if student_ast else None
     if not standard_where or not student_where:
         return
-    if _apply_logical_tree_counterexample_probe(
+    # Prefer the complete four-row truth table when one query uses AND and the
+    # other OR.  The single-row tree counterexample is useful for precedence
+    # changes, but if it runs first it leaves the semantic validator with only
+    # one assignment and prevents a 100% obligation proof.
+    if _apply_compound_logic_truth_table_probe(
         data,
         standard_ast,
         student_ast,
@@ -19397,7 +28034,7 @@ def _apply_logical_operator_probe(
         student_where,
     ):
         return
-    if _apply_compound_logic_truth_table_probe(
+    if _apply_logical_tree_counterexample_probe(
         data,
         standard_ast,
         student_ast,
@@ -20737,6 +29374,7 @@ def _apply_recursive_cte_hierarchy(
     data: dict[str, list[dict[str, Any]]],
     schema: dict[str, list[str]],
     cte: exp.CTE,
+    query_ast: exp.Expression | None = None,
 ) -> None:
     cte_name = _norm_name(cte.alias or "")
     set_node = _set_operator_node(cte.this if isinstance(cte.this, exp.Expression) else None)
@@ -20744,6 +29382,25 @@ def _apply_recursive_cte_hierarchy(
     if not cte_name or not isinstance(recursive_branch, exp.Expression):
         return
     aliases = _table_aliases(recursive_branch)
+    output_sources = _recursive_cte_output_sources(cte, set_node)
+    anchor_branch = set_node.this if isinstance(set_node, (exp.Union, exp.Intersect, exp.Except)) else None
+    anchor_select = (
+        anchor_branch
+        if isinstance(anchor_branch, exp.Select)
+        else anchor_branch.find(exp.Select)
+        if isinstance(anchor_branch, exp.Expression)
+        else None
+    )
+    anchor_constraints = (
+        _recursive_select_literal_constraints(anchor_select)
+        if isinstance(anchor_select, exp.Select)
+        else []
+    )
+    outer_constraints = _recursive_outer_literal_constraints(
+        query_ast,
+        cte_name,
+        output_sources,
+    )
 
     for comparison in recursive_branch.find_all(exp.EQ):
         left = comparison.left
@@ -20764,9 +29421,170 @@ def _apply_recursive_cte_hierarchy(
         lookup = _column_lookup(schema.get(table_actual, list(data[table_actual][0])))
         child_actual = lookup.get(_norm_name(base_column.name))
         ancestor_actual = lookup.get(_norm_name(ancestor_column.name))
+        if ancestor_actual is None and aliases.get(
+            _norm_name(ancestor_column.table or ""),
+            _norm_name(ancestor_column.table or ""),
+        ) == cte_name:
+            # A recursive CTE can rename its anchor projection, for example
+            # ``recommenders(recommender, member) AS (SELECT recommendedby,
+            # memid ...)``.  The recursive join references ``recommender``
+            # while the physical table owns ``recommendedby``.  Without this
+            # mapping the safety pass leaves seed self-links in place and an
+            # identity query can recurse forever.
+            ancestor_actual = lookup.get(
+                output_sources.get(_norm_name(ancestor_column.name), "")
+            )
         if not child_actual or not ancestor_actual:
             continue
         rows = data[table_actual]
+        # Keep literal anchors executable after the generic probes have made
+        # their topology changes.  This is intentionally limited to direct
+        # equality predicates; compound predicates remain for the normal
+        # bounded execution path.
+        actual_lookup = _column_lookup(schema.get(table_actual, list(rows[0])))
+        anchor_values: dict[str, list[Any]] = defaultdict(list)
+        for constrained_table, constrained_column, value in anchor_constraints:
+            if _norm_name(constrained_table) != _norm_name(table_actual):
+                continue
+            actual_column = actual_lookup.get(_norm_name(constrained_column))
+            if actual_column and value not in anchor_values[actual_column]:
+                anchor_values[actual_column].append(value)
+        for constrained_column, values in outer_constraints.items():
+            actual_column = actual_lookup.get(_norm_name(constrained_column))
+            if not actual_column:
+                continue
+            for value in values:
+                if value not in anchor_values[actual_column]:
+                    anchor_values[actual_column].append(value)
+        for column, values in anchor_values.items():
+            if values:
+                rows[0][column] = values[0]
+        id_actual = _primary_key_candidate(
+            schema.get(table_actual, list(rows[0])),
+            table_actual,
+        )
+        if id_actual and _norm_name(child_actual) == _norm_name(id_actual):
+            parent_actual = next(
+                (
+                    column
+                    for column in rows[0]
+                    if any(
+                        token in _norm_name(column)
+                        for token in (
+                            "parent", "manager", "boss", "supervisor",
+                            "reports_to", "recommendedby", "recommender",
+                        )
+                    )
+                    and _norm_name(column) != _norm_name(id_actual)
+                ),
+                None,
+            )
+            if parent_actual:
+                preferred_ids = list(anchor_values.get(id_actual, ()))
+                preferred_ids.extend(
+                    value
+                    for value in anchor_values.get(ancestor_actual, ())
+                    if value not in preferred_ids
+                )
+                used_ids: set[Any] = set()
+                id_values: list[Any] = []
+                for value in preferred_ids:
+                    if value is not None and value not in used_ids:
+                        id_values.append(value)
+                        used_ids.add(value)
+                for index in range(len(rows)):
+                    candidate = (
+                        1000 + index
+                        if _is_numeric_column(id_actual)
+                        else f"__recursive_id_{index}__"
+                    )
+                    while candidate in used_ids:
+                        candidate = (
+                            candidate + 1
+                            if isinstance(candidate, int)
+                            else f"{candidate}_next"
+                        )
+                    id_values.append(candidate)
+                    used_ids.add(candidate)
+                    if len(id_values) >= len(rows):
+                        break
+                for index, row in enumerate(rows):
+                    row[id_actual] = id_values[index]
+                if anchor_values.get(id_actual):
+                    # Ancestor traversal projects the relationship column and
+                    # joins it back to the physical key, for example:
+                    #
+                    #   SELECT recommendedby FROM members WHERE memid = 27
+                    #   UNION ALL
+                    #   SELECT m.recommendedby
+                    #   FROM cte r JOIN members m ON m.memid = r.recommendedby
+                    #
+                    # The literal row must point *forward* to its parent.  A
+                    # root-first chain would make the anchor project NULL and
+                    # leave the recursive query empty after its outer join.
+                    for index, row in enumerate(rows):
+                        row[parent_actual] = (
+                            id_values[index + 1]
+                            if index + 1 < len(rows)
+                            else None
+                        )
+                else:
+                    rows[0][parent_actual] = None
+                    for index in range(1, len(rows)):
+                        rows[index][parent_actual] = id_values[index - 1]
+                return
+        if _norm_name(child_actual) == _norm_name(ancestor_actual):
+            # A recursive branch such as
+            # ``members.recommendedby = recs.recommender`` while projecting
+            # ``members.recommendedby`` repeats the same state forever under
+            # UNION ALL as soon as one non-NULL match exists.  Keep the
+            # physical anchor row, but make the recursive state terminal.
+            # This prevents a generated self-loop from being mistaken for a
+            # valid witness and keeps execution within the bounded guard.
+            for row in rows:
+                row[child_actual] = None
+            return
+        if id_actual and _norm_name(ancestor_actual) == _norm_name(id_actual):
+            # Preserve a literal anchor and any outer CTE filters on the
+            # recursive output.  The normal hierarchy shape is a bounded
+            # parent chain: root -> child -> grandchild.
+            preferred_ids = list(anchor_values.get(id_actual, ()))
+            for value in anchor_values.get(ancestor_actual, ()):
+                if value not in preferred_ids:
+                    preferred_ids.append(value)
+            used_ids: set[Any] = set()
+            id_values: list[Any] = []
+            for value in preferred_ids:
+                if value is not None and value not in used_ids:
+                    id_values.append(value)
+                    used_ids.add(value)
+            for index in range(len(rows)):
+                candidate = (
+                    1000 + index
+                    if _is_numeric_column(id_actual)
+                    else f"__recursive_id_{index}__"
+                )
+                while candidate in used_ids:
+                    candidate = (
+                        candidate + 1
+                        if isinstance(candidate, int)
+                        else f"{candidate}_next"
+                    )
+                id_values.append(candidate)
+                used_ids.add(candidate)
+                if len(id_values) >= len(rows):
+                    break
+            for index, row in enumerate(rows):
+                row[ancestor_actual] = id_values[index]
+                anchor_parent = anchor_values.get(child_actual, ())
+                row[child_actual] = (
+                    anchor_parent[0]
+                    if index == 0 and anchor_parent
+                    else None
+                    if index == 0
+                    else id_values[index - 1]
+                )
+            return
         for index, row in enumerate(rows):
             if _is_numeric_column(ancestor_actual):
                 row[ancestor_actual] = 1000 + index
@@ -20803,6 +29621,116 @@ def _apply_recursive_cte_hierarchy(
         return
 
 
+def _recursive_cte_output_sources(
+    cte: exp.CTE,
+    set_node: exp.Expression,
+) -> dict[str, str]:
+    """Map explicit recursive CTE output names to simple anchor columns.
+
+    Only direct column projections are mapped.  Computed anchor values have no
+    safe physical-column counterpart, so the hierarchy materializer leaves
+    those cases to the regular bounded execution guard.
+    """
+
+    alias = cte.args.get("alias")
+    output_columns = list(getattr(alias, "args", {}).get("columns") or ())
+    anchor = set_node.this if isinstance(set_node, (exp.Union, exp.Intersect, exp.Except)) else None
+    anchor_select = anchor if isinstance(anchor, exp.Select) else (
+        anchor.find(exp.Select) if isinstance(anchor, exp.Expression) else None
+    )
+    if not isinstance(anchor_select, exp.Select):
+        return {}
+    if not output_columns:
+        output_columns = [
+            expression.this if isinstance(expression, exp.Alias) else expression
+            for expression in (anchor_select.expressions or ())
+        ]
+    sources: dict[str, str] = {}
+    for output, projection in zip(output_columns, anchor_select.expressions or ()):
+        expression = projection.this if isinstance(projection, exp.Alias) else projection
+        output_name = (
+            str(output.this)
+            if isinstance(output, exp.Identifier)
+            else output.name
+            if isinstance(output, exp.Column)
+            else str(output or "")
+        )
+        if isinstance(expression, exp.Column) and output_name:
+            sources[_norm_name(output_name)] = _norm_name(expression.name)
+    return sources
+
+
+def _recursive_select_literal_constraints(
+    select: exp.Select | None,
+) -> list[tuple[str, str, Any]]:
+    """Collect direct ``column = literal`` predicates from one SELECT block."""
+    if not isinstance(select, exp.Select):
+        return []
+    aliases = _table_aliases(select)
+    constraints: list[tuple[str, str, Any]] = []
+    for where in select.find_all(exp.Where):
+        if where.find_ancestor(exp.Select) is not select:
+            continue
+        for comparison in where.find_all(exp.EQ):
+            column = comparison.left if isinstance(comparison.left, exp.Column) else (
+                comparison.right if isinstance(comparison.right, exp.Column) else None
+            )
+            literal = comparison.right if column is comparison.left else comparison.left
+            if not isinstance(column, exp.Column) or not isinstance(literal, exp.Literal):
+                continue
+            value = _literal_value(literal)
+            table_name = aliases.get(
+                _norm_name(column.table or ""),
+                _norm_name(column.table or ""),
+            )
+            if not table_name:
+                direct_tables = {
+                    _norm_name(table.name)
+                    for table in select.find_all(exp.Table)
+                    if table.name
+                }
+                if len(direct_tables) == 1:
+                    table_name = next(iter(direct_tables))
+            if table_name:
+                constraints.append((table_name, _norm_name(column.name), value))
+    return constraints
+
+
+def _recursive_outer_literal_constraints(
+    query_ast: exp.Expression | None,
+    cte_name: str,
+    output_sources: dict[str, str],
+) -> dict[str, list[Any]]:
+    """Map simple outer CTE literal filters back to physical columns."""
+    if not isinstance(query_ast, exp.Expression) or not output_sources:
+        return {}
+    aliases = _table_aliases(query_ast)
+    result: dict[str, list[Any]] = defaultdict(list)
+    for where in query_ast.find_all(exp.Where):
+        if where.find_ancestor(exp.CTE) is not None:
+            continue
+        for comparison in where.find_all(exp.EQ):
+            column = comparison.left if isinstance(comparison.left, exp.Column) else (
+                comparison.right if isinstance(comparison.right, exp.Column) else None
+            )
+            literal = comparison.right if column is comparison.left else comparison.left
+            if not isinstance(column, exp.Column) or not isinstance(literal, exp.Literal):
+                continue
+            resolved_table = aliases.get(
+                _norm_name(column.table or ""),
+                _norm_name(column.table or ""),
+            )
+            if resolved_table and resolved_table != cte_name:
+                continue
+            source_column = output_sources.get(_norm_name(column.name))
+            if not source_column:
+                continue
+            value = _literal_value(literal)
+            if value not in result[source_column]:
+                result[source_column].append(value)
+    return dict(result)
+
+
 def _apply_recursive_cte_safety(
     data: dict[str, list[dict[str, Any]]],
     schema: dict[str, list[str]],
@@ -20813,7 +29741,7 @@ def _apply_recursive_cte_safety(
         if not ast or not _is_recursive_ast(ast):
             continue
         for cte in ast.find_all(exp.CTE):
-            _apply_recursive_cte_hierarchy(data, schema, cte)
+            _apply_recursive_cte_hierarchy(data, schema, cte, query_ast=ast)
 
 
 def _apply_recursive_set_duplicate_probe(
@@ -21372,6 +30300,12 @@ def _comparison_adapter_constraints(obligations):
 
 
 def _apply_null_probe_adapter(data, schema, standard_sql, student_sql, ast_diffs):
+    # A SQL-shape fallback must not invent a NULL witness when the structural
+    # layer already proved the complete query pair equivalent.  In particular,
+    # NOT NULL membership keys make NOT IN/NOT EXISTS equivalent, and writing a
+    # NULL here would violate the schema and manufacture a false counterexample.
+    if not ast_diffs:
+        return
     _apply_not_in_null_probe(data, standard_sql, student_sql, ast_diffs)
 
 
@@ -22048,6 +30982,7 @@ LEGACY_PROBE_REGISTRY.register(
             "order_by_tiebreaker_missing",
             "order_by_key_added",
             "order_direction_changed",
+            "order_nulls_changed",
         }),
         clauses=frozenset({"ORDER BY"}),
         knowledge_points=frozenset({"order-by"}),

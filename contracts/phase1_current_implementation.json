@@ -1,0 +1,1879 @@
+{
+  "schema_version": "phase1.current-implementation.v1",
+  "contract_kind": "CURRENT_IMPLEMENTATION",
+  "as_of": "2026-08-26",
+  "git_head": "d29a5f6",
+  "source_documents": [
+    "docs/23-Phase1-dev_v4-当前能力范围与CFG.md",
+    "docs/34-Phase1-支持契约与验收术语.md",
+    "docs/35-Phase1-真实代码能力盘点.md"
+  ],
+  "formalization_layer_aliases": {
+    "EXECUTOR": "ENGINE",
+    "RESOURCES": "RESOURCE"
+  },
+  "cfg_grammar_artifact": "contracts/phase1_cfg_grammar.json",
+  "cfg_implementation_boundary": {
+    "grammar_artifact": "contracts/phase1_cfg_grammar.json",
+    "start_symbol": "Submission",
+    "query_start_symbol": "Query",
+    "submission_shape": ["Query", "Query", "SchemaText"],
+    "parser_predicate": "parser.ok && parser.single_statement && parser.query_only",
+    "structural_predicate": "parser.ok && ir.ok && astdiff.representable",
+    "semantic_predicate": "PolicyScope && parser.ok && ir.ok && schema.ok && witness.ok && engine.ok && resources.ok",
+    "cfg_acceptance_does_not_imply": ["SCHEMA", "WITNESS", "ENGINE", "RESOURCE", "VERDICT"],
+    "unrepresentable_or_unsupported_is": "fail_closed"
+  },
+  "formalization_constraints": {
+    "PARSER_CONSTRAINT": [
+      {
+        "id": "parser.strict_single_dql",
+        "source_capability_id": "parser.strict_single_dql",
+        "machine_predicate": "parser.ok && parser.single_statement && parser.query_only",
+        "meaning": "输入必须可解析为单条查询语句，且不得包含 DML/DDL 或多语句副作用。"
+      },
+      {
+        "id": "parser.dialect_resolution",
+        "source_capability_id": "parser.dialect_resolution",
+        "machine_predicate": "parser.ok && parser.dialect_resolved && policy.allow_dialect",
+        "meaning": "方言解析必须成功，并且解析出的方言在当前 PolicyScope 允许集合内。"
+      }
+    ],
+    "SCHEMA": [
+      {
+        "id": "schema.native_identifier_spelling",
+        "source_capability_id": "schema.compact_and_catalog",
+        "machine_predicate": "schema.catalog_authoritative && schema.replayable && native.fixture_identifiers.preserve_source_spelling",
+        "meaning": "原生 fixture 必须保留权威 schema 的表/列拼写；不能通过静默改名改变 SQL 名称解析。"
+      }
+    ],
+    "ENGINE": [
+      {
+        "id": "engine.mysql8046_linux_identifier_profile",
+        "source_capability_id": "executor.native_vendor_runners",
+        "machine_predicate": "engine.mysql.version == '8.0.46' && engine.mysql.lower_case_table_names == 0 && engine.mysql.fixture_identifier_policy == 'preserve_source_spelling'",
+        "meaning": "MySQL 原生目标固定为 8.0.46 Linux 标识符模式；不匹配时只能报告 ENGINE_GAP，不能降级或归一化 SQL。"
+      }
+    ]
+  },
+  "status_legend": {
+    "TARGET": "产品希望支持，但当前代码尚未形成实现。",
+    "IMPLEMENTED": "代码路径已存在，能够在受限输入下运行；尚未满足全局冻结证据要求。",
+    "VERIFIED": "已经通过公开回归和冻结门禁，且没有未解释失败。",
+    "OUT_OF_SCOPE": "当前产品契约明确不承诺。",
+    "ENGINE_GAP": "契约允许，但所需原生执行器、驱动或连接不可用。",
+    "INPUT_GAP": "SQL/schema pair 无法在声明的 schema 或引擎标识符语义下 replay。",
+    "UNDECIDED": "现有有限证据无法给出可靠确定结论。"
+  },
+  "verdict_mapping": {
+    "source_of_truth": "sql-edu-backend/core/phase1_verdict.py",
+    "gold_verdicts": [
+      "EQUIVALENT",
+      "NOT_EQUIVALENT",
+      "UNDECIDED",
+      "ENGINE_GAP",
+      "INPUT_GAP"
+    ],
+    "production_failure_projection": {
+      "WRONG": {
+        "status": "SUPPORTED",
+        "equivalence_conclusion": "NOT_EQUIVALENT"
+      },
+      "INPUT_ERROR": {
+        "status": "INPUT_GAP",
+        "equivalence_conclusion": "UNDECIDED"
+      },
+      "UNSUPPORTED": {
+        "status": "KNOWN_GAP",
+        "equivalence_conclusion": "UNDECIDED"
+      },
+      "SECURITY_REJECTED": {
+        "status": "KNOWN_GAP",
+        "equivalence_conclusion": "UNDECIDED"
+      },
+      "ENGINE_GAP": {
+        "status": "ENGINE_GAP",
+        "equivalence_conclusion": "UNDECIDED"
+      },
+      "ENGINE_ERROR": {
+        "status": "ENGINE_GAP",
+        "equivalence_conclusion": "UNDECIDED"
+      },
+      "TIMEOUT": {
+        "status": "ENGINE_GAP",
+        "equivalence_conclusion": "UNDECIDED"
+      },
+      "UNDECIDED": {
+        "status": "KNOWN_GAP",
+        "equivalence_conclusion": "UNDECIDED"
+      }
+    },
+    "student_wrong_rule": "status == SUPPORTED && equivalence_conclusion == NOT_EQUIVALENT && judge_status == WRONG",
+    "fail_closed_rule": "No other production status may produce a determinate student verdict."
+  },
+  "scope_model": {
+    "relation": "FrozenPairScope ⊆ RunnableScope ⊆ PolicyScope",
+    "PolicyScope": {
+      "definition": "课程和 Phase 1 政策允许检查的 SQL pair、schema、dialect、版本和资源边界集合。",
+      "machine_predicate": "policy.allow_input && policy.allow_dialect && policy.allow_feature && policy.allow_resource_bound"
+    },
+    "RunnableScope": {
+      "definition": "输入已经通过 strict parser、IR/ASTDiff、schema qualification、witness planning、执行器可达性和资源门禁。",
+      "machine_predicate": "PolicyScope && parser.ok && ir.ok && schema.ok && witness.ok && engine.ok && resources.ok"
+    },
+    "FrozenPairScope": {
+      "definition": "当前 freeze runner 实际生成并保存 mutation row 与 equivalence control 的 family 集合。",
+      "machine_predicate": "PolicyScope && mutation.generated && equivalence_control.generated",
+      "known_limitation": "当前 runner 尚未把 parser、IR、schema、witness validator、engine 和资源状态全部作为同一门禁。"
+    }
+  },
+  "databases": {
+    "business": {
+      "dialect": "mysql",
+      "version": "8.0.46",
+      "purpose": "应用持久化",
+      "is_phase1_judge_engine": false
+    },
+    "phase1_judge": {
+      "sqlite": {
+        "purpose": "bounded compatibility execution",
+        "native_semantics_claim": false
+      },
+      "native_targets": {
+        "mysql": "8.0.46",
+        "postgres": "16.10",
+        "tsql": "SQL Server 2022-CU20-ubuntu-22.04",
+        "oracle": "Oracle Free 23.7"
+      },
+      "native_engine_profiles": {
+        "mysql": {
+          "image": "mysql:8.0.46",
+          "server_variables": {
+            "lower_case_table_names": 0
+          },
+          "fixture_identifier_policy": "preserve_source_spelling",
+          "unquoted_table_lookup": "case_sensitive",
+          "quoted_table_lookup": "exact"
+        }
+      }
+    }
+  },
+  "capabilities": [
+    {
+      "id": "parser.strict_single_dql",
+      "layer": "CFG_PARSER",
+      "name": "严格单条 DQL 解析",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "single_statement",
+        "query_only"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_with_input_boundary",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/sql_dialect_resolver.py",
+          "line": 310,
+          "symbol": "parse_single_query"
+        },
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 8606,
+          "symbol": "_parse_sql_strict"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_sql_cfg_coverage.py",
+        "sql-edu-backend/tests/test_witness_generation_foundation.py"
+      ],
+      "evidence": [
+        "data_construct_test/outputs/phase1_cfg_fragment_capability.json",
+        "docs/35-Phase1-真实代码能力盘点.md#3-cfg--parser"
+      ],
+      "limits": [
+        "拒绝多语句、DML 和无法表示为 exp.Query 的输入",
+        "SQLGlot + 手写方言规则，不是独立 CFG 生成器"
+      ],
+      "known_failures": [
+        "有限 CFG case 中存在 engine gap",
+        "全 SQL 语言覆盖未被证明"
+      ]
+    },
+    {
+      "id": "parser.dialect_resolution",
+      "layer": "CFG_PARSER",
+      "name": "声明/检测方言解析",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "dialect_alias",
+        "dialect_feature_detection",
+        "dialect_conflict"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_with_declared_version",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/sql_dialect_resolver.py",
+          "line": 383,
+          "symbol": "resolve_sql_dialect"
+        },
+        {
+          "path": "sql-edu-backend/core/sql_dialect_resolver.py",
+          "line": 567,
+          "symbol": "resolve_sql_dialect_or_raise"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_parseval_data_generator.py",
+        "sql-edu-backend/tests/test_phase1_dialect_semantics.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#3-cfg--parser"
+      ],
+      "limits": [
+        "regex 特征只能提供识别线索",
+        "识别成功不授予 IR、witness 或原生执行能力"
+      ],
+      "known_failures": [
+        "声明方言与检测特征冲突时进入边界状态",
+        "方言版本兼容性仍需 runner 证据"
+      ]
+    },
+    {
+      "id": "ir.sql_structure_and_astdiff",
+      "layer": "IR_ASTDIFF",
+      "name": "SQLStructureIR 与 ASTDiff",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "select",
+        "predicate",
+        "join",
+        "aggregate",
+        "window",
+        "cte",
+        "set",
+        "subquery"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_for_structural_analysis",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/ast_schema.py",
+          "line": 460,
+          "symbol": "SQLStructureIR"
+        },
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 8924,
+          "symbol": "extract_ast_diffs"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_advanced_structure_ir.py",
+        "sql-edu-backend/tests/test_phase1_scope_contract.py",
+        "sql-edu-backend/tests/test_phase1_sql_cfg_coverage.py"
+      ],
+      "evidence": [
+        "data_construct_test/outputs/phase1_gold_oracle_audit_summary.json",
+        "docs/35-Phase1-真实代码能力盘点.md#4-ir--astdiff"
+      ],
+      "limits": [
+        "scope metadata 有扫描节点、scope、edge、diff、binding 和路径深度上限",
+        "结构差异不是语义差异证明"
+      ],
+      "known_failures": [
+        "有限 freeze 只验证声明 pair scope；v25 的 determinate label mismatch 为 0，但这不是全 SQL 语义完备性证明",
+        "结构可识别但执行器不可用时不能给语义 verdict"
+      ]
+    },
+    {
+      "id": "feature.core_select_predicate_join",
+      "layer": "FEATURE",
+      "name": "SELECT、投影、谓词和 JOIN 结构",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "projection",
+        "where",
+        "boolean_logic",
+        "null_logic",
+        "inner_join",
+        "outer_join"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed",
+      "runnable_scope": "conditional_on_schema_and_engine",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 8924,
+          "symbol": "extract_ast_diffs"
+        },
+        {
+          "path": "sql-edu-backend/core/witness_generation/obligations.py",
+          "line": 1,
+          "symbol": "compile_obligations"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_witness_generation_foundation.py",
+        "sql-edu-backend/tests/test_witness_validators.py",
+        "sql-edu-backend/tests/test_phase1_mutation_layer.py"
+      ],
+      "evidence": [
+        "docs/34-Phase1-支持契约与验收术语.md#5-sql-结构范围"
+      ],
+      "limits": [
+        "NULL、重复行、空结果和相关作用域需要专门 witness",
+        "结果差异依赖 schema 和执行资源"
+      ],
+      "known_failures": [
+        "无法满足 obligation 时保持 UNDECIDED",
+        "跨方言语义不能由 SQLite 代替"
+      ]
+    },
+    {
+      "id": "feature.aggregate_group_order_limit",
+      "layer": "FEATURE",
+      "name": "聚合、分组、排序和限制",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "group_by",
+        "having",
+        "count",
+        "sum",
+        "avg",
+        "min",
+        "max",
+        "distinct",
+        "order_by",
+        "limit",
+        "offset",
+        "fetch",
+        "top"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_with_bounded_limits",
+      "runnable_scope": "conditional_on_schema_and_engine",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 7346,
+          "symbol": "generate_witness_suite"
+        },
+        {
+          "path": "sql-edu-backend/core/witness_generation/validators.py",
+          "line": 3979,
+          "symbol": "validate_obligation"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_witness_generation_foundation.py",
+        "sql-edu-backend/tests/test_witness_validators.py",
+        "sql-edu-backend/tests/test_phase1_dialect_semantics.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#6-witness"
+      ],
+      "limits": [
+        "LIMIT/OFFSET 所需行数受 32 rows/table 上限约束",
+        "排序 tie、NULLS 和 vendor TOP/FETCH 需显式语义证据"
+      ],
+      "known_failures": [
+        "大 LIMIT、复杂聚合或无法构造边界时为 UNDECIDED"
+      ]
+    },
+    {
+      "id": "feature.set_subquery_cte",
+      "layer": "FEATURE",
+      "name": "集合运算、子查询和 CTE",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "union",
+        "union_all",
+        "intersect",
+        "except",
+        "scalar_subquery",
+        "in",
+        "exists",
+        "correlated_subquery",
+        "cte",
+        "recursive_cte"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_with_feature_boundary",
+      "runnable_scope": "conditional_on_schema_engine_and_obligation",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 8924,
+          "symbol": "extract_ast_diffs"
+        },
+        {
+          "path": "sql-edu-backend/core/witness_generation/validators.py",
+          "line": 3979,
+          "symbol": "validate_obligation"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_advanced_structure_ir.py",
+        "sql-edu-backend/tests/test_witness_generation_foundation.py",
+        "sql-edu-backend/tests/test_witness_validators.py"
+      ],
+      "evidence": [
+        "docs/34-Phase1-支持契约与验收术语.md#5-sql-结构范围"
+      ],
+      "limits": [
+        "INTERSECT ALL/EXCEPT ALL、SEARCH/CYCLE 和复杂递归边界不完整",
+        "相关作用域和 NULL 语义可能缺少可满足 witness"
+      ],
+      "known_failures": [
+        "复杂集合/递归输入可能为 ENGINE_GAP 或 UNDECIDED"
+      ]
+    },
+    {
+      "id": "feature.window_functions",
+      "layer": "FEATURE",
+      "name": "窗口函数、分区、排序和 frame",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "row_number",
+        "rank",
+        "dense_rank",
+        "ntile",
+        "lag",
+        "lead",
+        "first_value",
+        "last_value",
+        "window_aggregate",
+        "partition",
+        "frame",
+        "named_window"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_for_structural_analysis",
+      "runnable_scope": "conditional_on_native_or_compatible_engine",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/ast_schema.py",
+          "line": 460,
+          "symbol": "SQLStructureIR"
+        },
+        {
+          "path": "sql-edu-backend/core/witness_generation/validators.py",
+          "line": 694,
+          "symbol": "window validators"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_advanced_structure_ir.py",
+        "sql-edu-backend/tests/test_witness_generation_foundation.py",
+        "sql-edu-backend/tests/test_witness_validators.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#4-ir--astdiff"
+      ],
+      "limits": [
+        "tie/frame/NULL 排序必须显式约束",
+        "SQLite 转译不能自动等同 vendor 窗口语义"
+      ],
+      "known_failures": [
+        "QUALIFY 及部分方言窗口结构不在完整执行范围"
+      ]
+    },
+    {
+      "id": "schema.compact_and_catalog",
+      "layer": "SCHEMA",
+      "name": "compact schema 与 SchemaCatalog",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "columns",
+        "types",
+        "nullability",
+        "primary_key",
+        "unique",
+        "foreign_key"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "required_for_replay",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/witness_generation/schema_scope.py",
+          "line": 57,
+          "symbol": "SchemaCatalog"
+        },
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 184,
+          "symbol": "parse_schema_text"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_witness_generation_foundation.py",
+        "sql-edu-backend/tests/test_phase1_gold_oracle.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#5-schema"
+      ],
+      "limits": [
+        "compact schema 的类型和约束只有显式声明时可靠",
+        "未知 nullability 按可空保守处理"
+      ],
+      "known_failures": [
+        "schema 不完整或无法 replay 时为 INPUT_GAP",
+        "其他 witness/engine 边界仍需跨层审计"
+      ]
+    },
+    {
+      "id": "schema.qualification",
+      "layer": "SCHEMA",
+      "name": "作用域感知 schema qualification",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "physical_table",
+        "cte",
+        "derived_relation",
+        "lateral_relation",
+        "missing_table",
+        "missing_column",
+        "ambiguous_column"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "required_for_replay",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/witness_generation/schema_scope.py",
+          "line": 461,
+          "symbol": "analyze_schema_qualification"
+        },
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 476,
+          "symbol": "generate_and_compare qualification"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_witness_generation_foundation.py",
+        "sql-edu-backend/tests/test_phase1_scope_contract.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#5-schema"
+      ],
+      "limits": [
+        "vendor 引擎最终名称解析仍可能不同",
+        "结构化 catalog 和 legacy schema 共存"
+      ],
+      "known_failures": [
+        "vendor 原生引擎的最终名称解析仍可能与静态 qualification 不同；标准 schema 无法 replay 时统一为 INPUT_GAP，学生侧缺失物理表仍按 WRONG 处理"
+      ]
+    },
+    {
+      "id": "witness.bounded_planner_and_validator",
+      "layer": "WITNESS",
+      "name": "bounded witness planner 与 validator",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "obligation",
+        "world_split",
+        "constraint_ledger",
+        "witness_validation"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_with_bounds",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 7346,
+          "symbol": "generate_witness_suite"
+        },
+        {
+          "path": "sql-edu-backend/core/witness_generation/planner.py",
+          "line": 765,
+          "symbol": "WitnessPlanner"
+        },
+        {
+          "path": "sql-edu-backend/core/witness_generation/validators.py",
+          "line": 3979,
+          "symbol": "validate_obligation"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_witness_generation_foundation.py",
+        "sql-edu-backend/tests/test_witness_validators.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#6-witness"
+      ],
+      "limits": [
+        "8 worlds、8 attempts、32 rows/table",
+        "有限 witness 不能证明全局等价"
+      ],
+      "known_failures": [
+        "约束冲突、world 上限或无法激活 obligation 时为 UNDECIDED"
+      ]
+    },
+    {
+      "id": "witness.mutation_and_equivalence_control",
+      "layer": "WITNESS",
+      "name": "mutation 与 equivalence control 生成",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "mutation_operator",
+        "repair_evidence",
+        "equivalence_control"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "freeze_input_gate",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 298,
+          "symbol": "generate_and_compare"
+        },
+        {
+          "path": "data_construct_test/scripts/run_phase1_freeze_verification.py",
+          "line": 261,
+          "symbol": "freeze scope selection"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_mutation_layer.py"
+      ],
+      "evidence": [
+        "data_construct_test/outputs/phase1_corpus_universe_dev_v8/final_hidden_freeze_verification_v16.json"
+      ],
+      "limits": [
+        "freeze scope 当前只要求 mutation 和 equivalence control 生成",
+        "没有把 validator/engine/resource 全部纳入同一门禁"
+      ],
+      "known_failures": [
+        "freeze 只将 mutation/control pair generation 作为机械准入；复杂 SQL 仍可能在 Gold/production 层产生 ENGINE_GAP、INPUT_GAP 或 UNDECIDED"
+      ]
+    },
+    {
+      "id": "executor.sqlite_bounded",
+      "layer": "EXECUTOR",
+      "name": "SQLite bounded compatibility runner",
+      "dialects": [
+        "standard",
+        "sqlite"
+      ],
+      "features": [
+        "fixture_replay",
+        "result_compare",
+        "sqlite_translation"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_for_compatible_semantics",
+      "runnable_scope": "conditional_on_sqlite_compatibility",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 21882,
+          "symbol": "_execute_with_backend"
+        },
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 21848,
+          "symbol": "_execute_sqlite"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_dialect_semantics.py",
+        "sql-edu-backend/tests/test_phase1_gold_oracle.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#7-执行器"
+      ],
+      "limits": [
+        "SQLite 兼容不等于 vendor 语义保真",
+        "转译成功不代表原生执行证明"
+      ],
+      "known_failures": [
+        "vendor-only syntax may be ENGINE_GAP or semantic boundary"
+      ]
+    },
+    {
+      "id": "executor.native_vendor_runners",
+      "layer": "EXECUTOR",
+      "name": "MySQL/PostgreSQL/T-SQL/Oracle 原生 runner",
+      "dialects": [
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "native_fixture",
+        "statement_timeout",
+        "native_result_limits"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "allowed_when_runner_declared",
+      "runnable_scope": "requires_driver_url_and_engine",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/native_engine_runner.py",
+          "line": 142,
+          "symbol": "NativeQuerySession"
+        },
+        {
+          "path": "sql-edu-backend/core/native_engine_runner.py",
+          "line": 191,
+          "symbol": "execute_native_query"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_dialect_semantics.py",
+        "sql-edu-backend/tests/test_phase1_gold_oracle.py"
+      ],
+      "evidence": [
+        "docs/34-Phase1-支持契约与验收术语.md#2-先区分两类数据库"
+      ],
+      "limits": [
+        "driver、URL、Docker engine 缺失即 ENGINE_GAP",
+        "MySQL 只接受 8.0.46 且要求 lower_case_table_names=0",
+        "MySQL fixture 表/列保留 source spelling；不改写提交 SQL",
+        "schema/query 的物理表或列名称解析失败属于 INPUT_GAP，不属于 ENGINE_GAP",
+        "版本兼容性依赖运行时配置"
+      ],
+      "known_failures": [
+        "当前环境未证明所有 vendor runner 可达",
+        "不能静默用 SQLite 替代原生语义",
+        "其他 vendor 的完整名称解析 profile 仍需独立版本/配置证据"
+      ]
+    },
+    {
+      "id": "executor.vendor_without_explicit_backend",
+      "layer": "EXECUTOR",
+      "name": "直接调用方言为 vendor 且未指定 backend",
+      "dialects": [
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "execution_backend_none"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "verification_status": "OUT_OF_SCOPE",
+      "policy_scope": "not_safe_as_native_claim",
+      "runnable_scope": "not_guaranteed",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 8121,
+          "symbol": "_select_execution_backend"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_dialect_semantics.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#7-执行器"
+      ],
+      "limits": [
+        "声明 vendor 方言时必须显式选择 auto/native 或明确 sqlite 兼容执行；未选择 backend 不进入 RunnableScope"
+      ],
+      "known_failures": [
+        "缺少显式 backend 时返回 EXECUTION_BACKEND_REQUIRED/ENGINE_GAP；native runner 不可达时仍返回 ENGINE_GAP"
+      ]
+    },
+    {
+      "id": "resources.query_level_limits",
+      "layer": "RESOURCES",
+      "name": "查询级执行、结果和 witness 限制",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "wall_clock",
+        "vm_steps",
+        "result_rows",
+        "result_bytes",
+        "witness_rows",
+        "witness_worlds"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "required",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 114,
+          "symbol": "witness and SQLite limits"
+        },
+        {
+          "path": "sql-edu-backend/core/native_engine_runner.py",
+          "line": 48,
+          "symbol": "native execution limits"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_witness_generation_foundation.py",
+        "sql-edu-backend/tests/test_phase1_acceptance_and_freeze.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#8-资源限制"
+      ],
+      "limits": [
+        "SQLite 1,000,000 VM steps/0.5 秒",
+        "native 3 秒/10,000 rows/8 MiB",
+        "witness 8 worlds/8 attempts/32 rows per table"
+      ],
+      "known_failures": [
+        "不同层限制尚未由同一机器可读 policy 生成"
+      ]
+    },
+    {
+      "id": "resources.task_process_isolation",
+      "layer": "RESOURCES",
+      "name": "任务级硬超时、进程和内存隔离",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "hard_timeout",
+        "worker_kill",
+        "process_group_kill",
+        "memory_limit",
+        "cpu_limit",
+        "queue_limit"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "required_before_student_trial",
+      "runnable_scope": "available_in_api_process_mode; recovery gates pending",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/routers/ai.py",
+          "line": 161,
+          "symbol": "_phase1_process_entry"
+        },
+        {
+          "path": "sql-edu-backend/routers/ai.py",
+          "line": 197,
+          "symbol": "_terminate_phase1_process"
+        },
+        {
+          "path": "sql-edu-backend/routers/ai.py",
+          "line": 235,
+          "symbol": "_run_phase1_process_bounded"
+        },
+        {
+          "path": "sql-edu-backend/routers/ai.py",
+          "line": 220,
+          "symbol": "_run_phase1_bounded"
+        },
+        {
+          "path": "sql-edu-backend/settings/config.py",
+          "line": 44,
+          "symbol": "PARSEVAL_WORKER_*"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_check_sql_flow.py",
+        "sql-edu-backend/tests/test_security_configuration.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#8-资源限制"
+      ],
+      "limits": [
+        "生产 real parser job 默认使用 spawn child、独立 process group、RLIMIT_AS/RLIMIT_CPU 和临时 pickle 结果交付；超时或清理时优先 SIGKILL 整个私有 process group；fork/forkserver 仅可显式配置；测试替身仍可走 thread seam",
+        "默认最多 2 个活动 child，额外最多 8 个请求占用 admission 名额；admission 等待和 work-slot 等待均为 5 秒，单次任务 wall-clock 上限为 45 秒",
+        "当前 worker 是按请求创建的 child；单次 child 崩溃后下一次请求会创建新 child，但尚未实现常驻 worker 池和跨实例队列"
+      ],
+      "known_failures": [
+        "跨实例并发、真实多进程部署级故障恢复尚未完成；真实 OOM 演练尚未完成；CPU/内存/队列限制、硬超时、私有 process group descendant kill 和 child crash/recreate 已有公开回归"
+      ]
+    },
+    {
+      "id": "verdict.gold_oracle",
+      "layer": "VERDICT",
+      "name": "独立 Gold Oracle 五态结果",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "equivalent",
+        "not_equivalent",
+        "undecided",
+        "engine_gap",
+        "input_gap"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "audit_and_freeze_evidence",
+      "runnable_scope": "conditional_on_oracle_engine",
+      "code_entries": [
+        {
+          "path": "data_construct_test/scripts/phase1_gold_oracle.py",
+          "line": 1915,
+          "symbol": "run_gold_oracle"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_gold_oracle.py"
+      ],
+      "evidence": [
+        "data_construct_test/outputs/phase1_gold_oracle_audit_summary.json"
+      ],
+      "limits": [
+        "bounded world 相同不能证明全局 EQUIVALENT",
+        "expected=EQUIVALENT 才能晋升有限等价结果"
+      ],
+      "known_failures": [
+        "不可达 native engine 返回 ENGINE_GAP",
+        "没有反例且无可信等价标签返回 UNDECIDED"
+      ]
+    },
+    {
+      "id": "verdict.production_rich_status",
+      "layer": "VERDICT",
+      "name": "生产 SandboxRun rich status",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "status",
+        "equivalence_conclusion",
+        "boundary_evidence"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "internal_api",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/core/parseval_data_generator.py",
+          "line": 150,
+          "symbol": "SandboxRun"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_dialect_semantics.py",
+        "sql-edu-backend/tests/test_phase1_diff_gate_regressions.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#9-verdict--结果状态"
+      ],
+      "limits": [
+        "与 Gold/API 使用不同枚举",
+        "is_equivalent 兼容字段可能丢失边界原因"
+      ],
+      "known_failures": [
+        "unsupported feature 统一为 KNOWN_GAP；API 现在复用 phase1_verdict 的可教学 WRONG 门禁；Gold/production/API 尚未由同一生成器完整生成"
+      ]
+    },
+    {
+      "id": "verdict.api_authoritative_mapping",
+      "layer": "VERDICT",
+      "name": "API 权威判定映射",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "correct",
+        "wrong",
+        "undecided",
+        "fallback"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "student_api",
+      "runnable_scope": "required",
+      "code_entries": [
+        {
+          "path": "sql-edu-backend/routers/ai.py",
+          "line": 1,
+          "symbol": "_authoritative_phase1_decision"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_check_sql_flow.py",
+        "sql-edu-backend/tests/test_phase1_diff_gate_regressions.py"
+      ],
+      "evidence": [
+        "docs/35-Phase1-真实代码能力盘点.md#9-verdict--结果状态"
+      ],
+      "limits": [
+        "API 的 CORRECT/WRONG/UNDECIDED 是对外简化层，不应覆盖内部 gap 原因"
+      ],
+      "known_failures": [
+        "生产 rich verdict、Gold Oracle 和 API 尚未由同一生成器完整生成；失败状态映射已由 phase1_verdict.py 固化并有回归"
+      ]
+    },
+    {
+      "id": "freeze.pair_generation_scope",
+      "layer": "FREEZE",
+      "name": "mutation/equivalence pair 冻结范围",
+      "dialects": [
+        "standard",
+        "sqlite",
+        "mysql",
+        "postgres",
+        "tsql",
+        "oracle"
+      ],
+      "features": [
+        "family_scope",
+        "repeat_stability",
+        "generation_failure",
+        "label_mismatch"
+      ],
+      "status": "IMPLEMENTED",
+      "verification_status": "VERIFIED",
+      "policy_scope": "hidden_freeze",
+      "runnable_scope": "not_equivalent_to_full_runnable_scope",
+      "code_entries": [
+        {
+          "path": "data_construct_test/scripts/run_phase1_freeze_verification.py",
+          "line": 261,
+          "symbol": "scope selection"
+        }
+      ],
+      "tests": [
+        "sql-edu-backend/tests/test_phase1_acceptance_and_freeze.py"
+      ],
+      "evidence": [
+        "data_construct_test/outputs/phase1_corpus_universe_dev_v8/final_hidden_freeze_verification_v16.json"
+      ],
+      "limits": [
+        "scope 主要表示 mutation/equivalence control 生成成功，不是完整 RunnableScope"
+      ],
+      "known_failures": [
+        "FrozenPairScope 不是完整 RunnableScope；复杂方言、不可达 native runner 和资源/验证边界仍按显式 gap 或 UNDECIDED 处理"
+      ]
+    }
+  ],
+  "freeze_baseline": {
+    "report": "data_construct_test/outputs/final_hidden_freeze_verification_20260826_v6.json",
+    "snapshot_id": "5ec95a5f87fa45206aba4790968675422dcdaa00b75791b48ba678c8ad6f4c48",
+    "hidden_families": 4909,
+    "families_in_declared_supported_scope": 4909,
+    "generated_pair_rows": 9818,
+    "generation_failures": 0,
+    "determinate_label_mismatches": 0,
+    "undecided": 97,
+    "engine_gap": 53,
+    "input_gap": 60,
+    "equivalent": 4852,
+    "not_equivalent": 4756,
+    "scope_coverage_rate": 1.0,
+    "repeat_run_stable": true,
+    "acceptance_pass": true,
+    "hidden_partition_read": true,
+    "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization"
+  },
+  "public_progress_evidence": {
+    "mutation_gap_audit": {
+      "report": "data_construct_test/outputs/phase1_target_mutation_gap_audit.json",
+      "inputs": [
+        "train",
+        "public"
+      ],
+      "hidden_partition_read": false,
+      "parse_failed": 0,
+      "contains_sql": false
+    },
+    "mutation_layer": {
+      "manifest": "data_construct_test/outputs/phase1_target_mutation_layer_manifest.json",
+      "families_read": 9308,
+      "mutation_rows": 9308,
+      "equivalence_rows": 9308,
+      "mutation_coverage_rate": 1.0,
+      "equivalence_coverage_rate": 1.0,
+      "all_fifteen_families_covered": true,
+      "hidden_partition_read": false
+    },
+    "membership_mutation_regression": {
+      "manifest": "data_construct_test/outputs/phase1_target_mutation_layer_v2_manifest.json",
+      "inputs": [
+        "train",
+        "public"
+      ],
+      "hidden_partition_read": false,
+      "families_read": 9308,
+      "mutation_rows": 9308,
+      "equivalence_rows": 9308,
+      "in_subquery_to_exists_rows": 47,
+      "double_parenthesized_exists_rows": 0,
+      "all_fifteen_families_covered": true,
+      "status": "IMPLEMENTED"
+    },
+    "gold_oracle_audit": {
+      "summary": "data_construct_test/outputs/phase1_target_gold_oracle_audit_summary.json",
+      "selected_pairs": 26,
+      "structure_bound_rate": 1.0,
+      "atomic_obligation_coverage_rate": 1.0,
+      "hidden_partition_read": false
+    },
+    "production_chain_audit": {
+      "summary": "data_construct_test/outputs/phase1_target_production_chain_audit_summary.json",
+      "failures": [],
+      "hidden_partition_read": false
+    },
+    "public_holdout": {
+      "mutation_manifest": "data_construct_test/outputs/phase1_target_mutation_layer_20260825_v3_manifest.json",
+      "mutation_input_snapshot": "data_construct_test/outputs/phase1_corpus_universe_target_20260825_v2/manifest.json",
+      "mutation_snapshot_id": "f2cf0157ab58c3980e6890505029151cc6a4b1522f05bffc8df507150334f81d",
+      "mutation_families_read": 9226,
+      "mutation_rows": 9226,
+      "equivalence_rows": 9226,
+      "all_fifteen_families_covered": true,
+      "gold_summary": "data_construct_test/outputs/phase1_target_gold_oracle_audit_public_holdout_20260825_v3_summary.json",
+      "production_summary": "data_construct_test/outputs/phase1_target_production_chain_audit_public_holdout_20260825_v3_summary.json",
+      "selected_gold_pairs": 260,
+      "gold_structure_bound_rate": 1.0,
+      "gold_atomic_obligation_coverage_rate": 1.0,
+      "gold_equivalent_controls": 20,
+      "gold_not_equivalent_witnesses": 203,
+      "gold_engine_gaps": 37,
+      "gold_undecided": 0,
+      "production_pass": 18,
+      "production_excluded": 1,
+      "production_failures": [],
+      "production_exclusion_reasons": {
+        "oracle_engine_gap": 1
+      },
+      "resolved_public_witness_gaps": [
+        {
+          "family_id": "3498bd0f9010f463becfb975fecfa5c9cf94ee51b9251c211dcb85db66bfd2e2",
+          "issue": "COUNT(column) vs COUNT(*) was unreachable when a string WHERE literal matched no generated row",
+          "resolution": "final shared literal predicate path plus nullable COUNT measure",
+          "status": "PASS"
+        },
+        {
+          "family_id": "6b3a2f2334b53a49284952ea2460b9917948c5b1f7e0f499ebaf48d50f80cf60",
+          "issue": "MIN/MAX witness was filtered out by an untyped string predicate",
+          "resolution": "final shared literal predicate path",
+          "status": "PASS"
+        },
+        {
+          "family_id": "d11254b56e34d4f6b1c8644e18ea1077110b47e636190e56b0e19c30fbcb24e0",
+          "issue": "DISTINCT duplicate projection was unreachable after a string filter",
+          "resolution": "final shared literal predicate path and duplicate projected tuple",
+          "status": "PASS"
+        },
+        {
+          "family_id": "f34fef40b2881f252af5e807fb6ffe07e36f2d9f3dc0529eb7a180ce55206eb0",
+          "issue": "generic double-quoted schema column was executed as a string literal",
+          "resolution": "schema-aware quoted identifier dialect resolution",
+          "status": "PASS"
+        },
+        {
+          "family_id": "public-pattern:null-contradiction",
+          "issue": "IS NULL AND NOT IS NULL mutation was an unsatisfiable-to-unsatisfiable rewrite",
+          "resolution": "AST conjunction check rejects null predicate mutations inside a direct contradiction",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "family_id": "public-pattern:recursive-monotone-union",
+          "issue": "UNION ALL to UNION in a strictly monotone bounded recursive sequence had no duplicate path",
+          "resolution": "Conservative recursive uniqueness proof leaves the mutation unavailable for this shape",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "family_id": "public-pattern:subquery-membership",
+          "issue": "Identical generated primary-key ranges hid the difference between IN and uncorrelated EXISTS",
+          "resolution": "Independent Gold Oracle plants a partial-key membership witness for simple subquery shapes",
+          "status": "PASS"
+        },
+        {
+          "family_id": "3a908c0c3ad0f889f4448a9aaf230cc49499c19dca7ba04fdabeebaec152a222",
+          "issue": "COUNT(*) to COUNT(id) was semantically equivalent when id was declared PRIMARY KEY",
+          "resolution": "Mutation context parses inline PRIMARY KEY/NOT NULL declarations and excludes guaranteed non-null columns",
+          "status": "PASS"
+        },
+        {
+          "family_id": "public-pattern:distinct-unique-projection",
+          "issue": "DISTINCT on a single-column PRIMARY KEY/UNIQUE projection cannot change multiplicity",
+          "resolution": "Mutation context parses single-column PRIMARY KEY/UNIQUE constraints and skips DISTINCT add/remove when the direct-table projection is proven unique; joins and composite keys remain fail-closed",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "family_id": "public-pattern:unicode-numeric-identifiers",
+          "issue": "Gold literal seeding did not reach Unicode or numeric-leading schema identifiers",
+          "resolution": "Independent Gold Oracle identifier lexer now accepts Unicode/numeric-leading names; generic/SQLite execution quotes numeric-leading schema headers, and stable evidence IDs canonicalize that representation-only quote so AST/obligation/mutation attribution remains bound",
+          "status": "PASS"
+        },
+        {
+          "family_id": "public-pattern:numeric-identifier-evidence-identity",
+          "issue": "Schema-aware quoting repaired generic numeric-leading identifiers semantically but changed AST diff IDs",
+          "resolution": "Stable diff identity canonicalizes only numeric-leading double-quoted names present in the repaired diff representation; raw SQL semantics and vendor-dialect spelling remain unchanged",
+          "status": "PASS"
+        },
+        {
+          "family_id": "public-pattern:distinct-removed-public-coverage",
+          "issue": "The 2026-08-25 public partition had no non-unique top-level DISTINCT source family, so the required distinct_removed mutation family was not emitted",
+          "resolution": "Added one explicitly marked public hand-authored non-unique projection fixture; the mutation, Gold obligation, validator, and production chain all pass without weakening the single-column uniqueness guard",
+          "status": "PASS"
+        }
+      ],
+      "hidden_partition_read": false,
+      "latest_replay": {
+        "gold_report": "data_construct_test/outputs/phase1_target_gold_oracle_audit_public_holdout_20260825_v3.jsonl",
+        "gold_summary": "data_construct_test/outputs/phase1_target_gold_oracle_audit_public_holdout_20260825_v3_summary.json",
+        "gold_selected_pairs": 260,
+        "gold_not_equivalent_witnesses": 203,
+        "gold_engine_gaps": 37,
+        "gold_undecided": 0,
+        "report": "data_construct_test/outputs/phase1_target_production_chain_audit_public_holdout_20260825_v3.jsonl",
+        "selected_families": 19,
+        "pass": 18,
+        "excluded": 1,
+        "failures": [],
+        "hidden_partition_read": false
+      },
+      "latest_public_expanded_replay": {
+        "mutation_manifest": "data_construct_test/outputs/phase1_target_mutation_layer_20260825_v4_manifest.json",
+        "gold_report": "data_construct_test/outputs/phase1_target_gold_oracle_audit_public_expanded_20260825_v4.jsonl",
+        "gold_summary": "data_construct_test/outputs/phase1_target_gold_oracle_audit_public_expanded_20260825_v4_summary.json",
+        "gold_selected_pairs": 385,
+        "gold_equivalent_controls": 100,
+        "gold_not_equivalent_witnesses": 269,
+        "gold_engine_gaps": 12,
+        "gold_input_gaps": 3,
+        "gold_undecided": 1,
+        "production_report": "data_construct_test/outputs/phase1_target_production_chain_audit_public_expanded_20260825_v4.jsonl",
+        "production_summary": "data_construct_test/outputs/phase1_target_production_chain_audit_public_expanded_20260825_v4_summary.json",
+        "production_selected_families": 246,
+        "production_pass": 229,
+        "production_excluded": 17,
+        "production_failures": [],
+        "distinct_unique_projection_regression": "PASS",
+        "hidden_partition_read": false
+      },
+      "latest_public_full_replay": {
+        "mutation_manifest": "data_construct_test/outputs/phase1_target_mutation_layer_20260826_v1_manifest.json",
+        "mutation_families_read": 1051,
+        "mutation_rows": 1051,
+        "mutation_equivalence_rows": 1051,
+        "mutation_all_fifteen_families_covered": true,
+        "gold_report": "data_construct_test/outputs/phase1_target_gold_oracle_audit_public_full_20260826_v3.jsonl",
+        "gold_summary": "data_construct_test/outputs/phase1_target_gold_oracle_audit_public_full_20260826_v3_summary.json",
+        "gold_selected_pairs": 2102,
+        "gold_equivalent_controls": 1025,
+        "gold_not_equivalent_witnesses": 1018,
+        "gold_engine_gaps": 45,
+        "gold_input_gaps": 14,
+        "gold_undecided": 0,
+        "gold_structure_bound_rate": 1.0,
+        "gold_atomic_obligation_coverage_rate": 1.0,
+        "gold_labelled_pair_count": 2102,
+        "gold_labelled_verdict_match_count": 2043,
+        "production_report": "data_construct_test/outputs/phase1_target_production_chain_audit_public_full_20260826_v3.jsonl",
+        "production_summary": "data_construct_test/outputs/phase1_target_production_chain_audit_public_full_20260826_v3_summary.json",
+        "production_selected_families": 1051,
+        "production_pass": 1025,
+        "production_excluded": 26,
+        "production_failures": [],
+        "unicode_numeric_identifier_regression": "PASS",
+        "stable_diff_identity_regression": "PASS",
+        "distinct_removed_public_coverage": "PASS",
+        "native_mysql_identifier_profile": {
+          "contract_version": "8.0.46",
+          "runtime_probe_version": "8.0.46-0ubuntu0.24.04.3",
+          "lower_case_table_names": 0,
+          "fixture_identifier_policy": "preserve_source_spelling",
+          "hidden_partition_read": false
+        },
+        "resolution": "The public partition now includes an explicit non-unique DISTINCT coverage fixture, restoring all 15 required mutation families while preserving the unique-projection fail-closed guard. The independent Gold Oracle now aligns simple conjunction boundaries and gives changed scalar aggregates a numeric separation witness, removing the four public NOT_EQUIVALENT-to-UNDECIDED cases; full public Gold is 2,102/2,102 classified with structure and atomic obligation coverage 1.0. The full production replay is 1,025 PASS / 26 EXCLUDED / 0 FAIL. MySQL source-spelled fixture names are preserved under lower_case_table_names=0; replayable MySQL mutations remain NOT_EQUIVALENT, while schema/query name mismatches remain INPUT_GAP. Generic numeric-leading identifiers are schema-quoted only for compatibility execution and retain the raw Gold diff identity through representation-only canonicalization. A mismatched MySQL version or identifier mode remains ENGINE_GAP.",
+        "hidden_partition_read": false
+      }
+    },
+    "latest_train_public_freeze_pair_regression": {
+      "mutation_manifest": "data_construct_test/outputs/phase1_target_mutation_layer_train_public_20260826_v6_manifest.json",
+      "families_read": 43837,
+      "mutation_rows": 43837,
+      "equivalence_rows": 43837,
+      "mutation_coverage_rate": 1.0,
+      "equivalence_coverage_rate": 1.0,
+      "all_fifteen_families_covered": true,
+      "public_control_label_mismatches": 0,
+      "public_pair_rows_checked": 9778,
+      "gold_summary": "data_construct_test/outputs/phase1_target_gold_oracle_audit_train_public_stratified_20260826_v5_summary.json",
+      "production_summary": "data_construct_test/outputs/phase1_target_production_chain_audit_train_public_20260826_v12_summary.json",
+      "production_selected_families": 1171,
+      "production_pass": 852,
+      "production_excluded": 319,
+      "production_failures": [],
+      "hidden_partition_read": false,
+      "resolution": "Schema-aware numeric-leading identifier parsing now precedes the raw AST fallback, and freeze pairs use the mutation builder's canonical gold side. The public train/control replay has zero determinate label mismatches; production chain has zero failures."
+    },
+    "public_freeze_pair_regression": {
+      "report": "data_construct_test/outputs/phase1_public_freeze_pair_regression_20260826_v1.json",
+      "input_snapshot_manifest": "data_construct_test/outputs/phase1_corpus_universe_target_20260826_v4/manifest.json",
+      "input_public_snapshot": "data_construct_test/outputs/phase1_corpus_universe_target_20260826_v4/public.jsonl",
+      "mutation_manifest": "data_construct_test/outputs/phase1_target_mutation_layer_train_public_20260826_v6_manifest.json",
+      "source_families": 4889,
+      "generated_pair_rows": 9778,
+      "generation_failures": 0,
+      "determinate_label_mismatches": 0,
+      "repeat_run_stable": true,
+      "acceptance_pass": true,
+      "scope_coverage_rate": 1.0,
+      "hidden_partition_read": false,
+      "configuration": {
+        "oracle_seeds": [0, 1, 2],
+        "row_scales": [4, 8, 16],
+        "max_rows_per_table": 32,
+        "pair_builder_salt": "phase1-hidden-freeze-v1"
+      },
+      "resolution": "The public snapshot and exact public mutation/control replay are now persisted with input hashes, aggregate verdicts, code fingerprint, and deterministic configuration; no hidden partition is read."
+    },
+    "observed_gap_production": {
+      "summary": "data_construct_test/outputs/phase1_observed_gap_production_v2_summary.json",
+      "input": "data_construct_test/outputs/phase1_observed_gap_fixtures_v7.jsonl",
+      "selected_families": 144,
+      "pass": 144,
+      "failures": [],
+      "hidden_partition_read": false
+    },
+    "property_based_synthetic_fuzzer": {
+      "report": "data_construct_test/outputs/e2e_robustness_fuzzer_report.json",
+      "markdown": "data_construct_test/outputs/e2e_robustness_fuzzer_report.md",
+      "seed": 20260825,
+      "cases_per_operator": 20,
+      "positive_equivalence_cases": 50,
+      "total_cases": 430,
+      "pass_cases": 430,
+      "status_counts": {
+        "PASS": 430
+      },
+      "hidden_partition_read": false,
+      "status": "IMPLEMENTED"
+    },
+    "spider_schema_provenance_gate": {
+      "source_manifest": "data_construct_test/sources/web_sql_corpus_manifest.json",
+      "tests": [
+        "sql-edu-backend/tests/test_prepare_phase1_web_gate_corpus.py::test_spider_collector_accepts_authoritative_schema_retained_in_local_snapshot",
+        "sql-edu-backend/tests/test_prepare_phase1_web_gate_corpus.py::test_spider_collector_rejects_query_inferred_schema_without_catalog"
+      ],
+      "accepted_schema_provenance": [
+        "schema_catalog",
+        "authoritative_source_catalog"
+      ],
+      "query_inferred_schema": "REJECTED",
+      "hidden_partition_read": false,
+      "status": "IMPLEMENTED"
+    },
+    "native_mysql8046_matrix": {
+      "report": "data_construct_test/outputs/phase1_teaching_dialect_matrix_native_mysql8046_20260825.json",
+      "markdown": "data_construct_test/outputs/phase1_teaching_dialect_matrix_native_mysql8046_20260825.md",
+      "captured_at": "2026-08-25",
+      "runner_version": "8.0.46",
+      "mysql_full_flow_pass": 3,
+      "hidden_partition_read": false
+    },
+    "external_wikisql_20260825": {
+      "report": "data_construct_test/outputs/web_sql_corpus_phase1_wikisql_20260825_report.json",
+      "manifest": "data_construct_test/outputs/phase1_corpus_universe_wikisql_20260825/manifest.json",
+      "mutation_manifest": "data_construct_test/outputs/phase1_wikisql_20260825_mutation_layer_manifest.json",
+      "source_id": "wikisql_official_archive",
+      "records_after_dedupe": 199,
+      "question_families": 189,
+      "train_records": 145,
+      "public_records": 17,
+      "mutation_families_read": 162,
+      "mutation_rows": 162,
+      "equivalence_rows": 162,
+      "all_fifteen_families_covered": false,
+      "hidden_partition_read": false,
+      "status": "IMPLEMENTED",
+      "scope_note": "追加 source-holdout 证据；特性分布偏窄，不改变 declared support scope。",
+      "gold_summary": "data_construct_test/outputs/phase1_wikisql_20260825_gold_oracle_audit_v4_summary.json",
+      "gold_output": "data_construct_test/outputs/phase1_wikisql_20260825_gold_oracle_audit_v4.jsonl",
+      "gold_selected_pairs": 120,
+      "gold_labelled_verdict_match_count": 119,
+      "gold_labelled_pair_count": 120,
+      "gold_atomic_obligation_coverage_rate": 1.0,
+      "gold_unresolved": {
+        "UNDECIDED": 0,
+        "ENGINE_GAP": 0,
+        "INPUT_GAP": 1
+      },
+      "production_summary": "data_construct_test/outputs/phase1_wikisql_20260825_production_chain_audit_v4_summary.json",
+      "production_output": "data_construct_test/outputs/phase1_wikisql_20260825_production_chain_audit_v4.jsonl",
+      "production_selected_families": 8,
+      "production_pass": 8,
+      "production_failures": [],
+      "latest_replay": {
+        "gold_summary": "data_construct_test/outputs/phase1_wikisql_20260825_gold_oracle_audit_v4_summary.json",
+        "gold_output": "data_construct_test/outputs/phase1_wikisql_20260825_gold_oracle_audit_v4.jsonl",
+        "gold_selected_pairs": 120,
+        "gold_labelled_verdict_match_count": 119,
+        "gold_labelled_pair_count": 120,
+        "gold_atomic_obligation_coverage_rate": 1.0,
+        "gold_unresolved": {
+          "UNDECIDED": 0,
+          "ENGINE_GAP": 0,
+          "INPUT_GAP": 1
+        },
+        "production_summary": "data_construct_test/outputs/phase1_wikisql_20260825_production_chain_audit_v4_summary.json",
+        "production_output": "data_construct_test/outputs/phase1_wikisql_20260825_production_chain_audit_v4.jsonl",
+        "production_selected_families": 8,
+        "production_pass": 8,
+        "production_failures": [],
+        "hidden_partition_read": false,
+        "resolution": "COUNT(column) vs COUNT(*) receives a nullable filtered-row witness when the schema permits it; duplicate source column names are classified as INPUT_GAP because normalization would change SQL name-resolution semantics; the independent Gold Oracle now also plants membership witnesses for simple IN subqueries."
+      },
+      "latest_replay_v5": {
+        "gold_summary": "data_construct_test/outputs/phase1_wikisql_20260825_gold_oracle_audit_v5_summary.json",
+        "gold_output": "data_construct_test/outputs/phase1_wikisql_20260825_gold_oracle_audit_v5.jsonl",
+        "gold_selected_pairs": 154,
+        "gold_labelled_verdict_match_count": 149,
+        "gold_labelled_pair_count": 154,
+        "gold_atomic_obligation_coverage_rate": 1.0,
+        "gold_unresolved": {
+          "UNDECIDED": 0,
+          "ENGINE_GAP": 0,
+          "INPUT_GAP": 5
+        },
+        "production_summary": "data_construct_test/outputs/phase1_wikisql_20260825_production_chain_audit_v5_summary.json",
+        "production_output": "data_construct_test/outputs/phase1_wikisql_20260825_production_chain_audit_v5.jsonl",
+        "production_selected_families": 91,
+        "production_pass": 87,
+        "production_failures": [],
+        "hidden_partition_read": false,
+        "resolution": "Unicode/numeric-leading identifier literal seeding is covered by the independent oracle; duplicate source columns remain explicit INPUT_GAP."
+      },
+      "initial_replay": {
+        "gold_summary": "data_construct_test/outputs/phase1_wikisql_20260825_gold_oracle_audit_summary.json",
+        "gold_output": "data_construct_test/outputs/phase1_wikisql_20260825_gold_oracle_audit.jsonl",
+        "gold_labelled_verdict_match_count": 114,
+        "gold_unresolved": {
+          "UNDECIDED": 5,
+          "ENGINE_GAP": 1
+        },
+        "production_summary": "data_construct_test/outputs/phase1_wikisql_20260825_production_chain_audit_summary.json",
+        "production_selected_families": 31,
+        "production_pass": 31
+      }
+    }
+  },
+  "freeze_evidence": {
+    "post_fix_freeze_v17": {
+      "report": "data_construct_test/outputs/phase1_corpus_universe_dev_v8/final_hidden_freeze_verification_v17.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "selected_family_count": 5846,
+      "generated_pair_rows": 11678,
+      "generation_failures": 7,
+      "generation_failure_reasons": {
+        "parse": 7
+      },
+      "determinate_label_mismatches": 22,
+      "repeat_run_stable": true,
+      "acceptance_pass": false,
+      "verdicts": {
+        "EQUIVALENT": 5605,
+        "NOT_EQUIVALENT": 5001,
+        "UNDECIDED": 655,
+        "ENGINE_GAP": 387,
+        "INPUT_GAP": 30
+      },
+      "scope_coverage_rate": 0.9988026000684228,
+      "generation_failure_digest": "067190cbce04eb51075176a5a6eeb22d86837838856cb6e8c6014a3569ce3b29",
+      "determinate_mismatch_digest": "86c17d51305289dc400d56c95cb52e946f0a3191aadec73a96d1ee5d1ed99719",
+      "interpretation": "No gate improvement over v16; verdict category shift reflects duplicate-schema INPUT_GAP classification only. The v16 baseline remains immutable."
+    },
+    "post_fix_freeze_v19": {
+      "report": "data_construct_test/outputs/phase1_corpus_universe_dev_v8/final_hidden_freeze_verification_v19.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "selected_family_count": 5846,
+      "generated_pair_rows": 11678,
+      "generation_failures": 7,
+      "generation_failure_reasons": {
+        "parse": 7
+      },
+      "determinate_label_mismatches": 22,
+      "repeat_run_stable": true,
+      "acceptance_pass": false,
+      "verdicts": {
+        "EQUIVALENT": 5605,
+        "NOT_EQUIVALENT": 5005,
+        "UNDECIDED": 651,
+        "ENGINE_GAP": 387,
+        "INPUT_GAP": 30
+      },
+      "scope_coverage_rate": 0.9988026000684228,
+      "generation_failure_digest": "067190cbce04eb51075176a5a6eeb22d86837838856cb6e8c6014a3569ce3b29",
+      "determinate_mismatch_digest": "86c17d51305289dc400d56c95cb52e946f0a3191aadec73a96d1ee5d1ed99719",
+      "corpus_snapshot_id": "992244c60df695bb77240e8f4ae9e776dbdf69b4da6219054d136ea62e0e6424",
+      "interpretation": "Post-fix revalidation is repeat-stable but does not improve the hidden acceptance gate; the public simple-membership witness repair remains evidenced only by the non-hidden v7 holdout. The v16 baseline remains immutable."
+    },
+    "post_fix_freeze_v20": {
+      "report": "data_construct_test/outputs/phase1_corpus_universe_target_20260825_v2/final_hidden_freeze_verification_v20.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "corpus_snapshot_id": "f2cf0157ab58c3980e6890505029151cc6a4b1522f05bffc8df507150334f81d",
+      "selected_family_count": 1071,
+      "generated_pair_rows": 2142,
+      "generation_failures": 0,
+      "generation_failure_reasons": {},
+      "determinate_label_mismatches": 5,
+      "repeat_run_stable": true,
+      "acceptance_pass": false,
+      "verdicts": {
+        "EQUIVALENT": 1015,
+        "NOT_EQUIVALENT": 1018,
+        "UNDECIDED": 10,
+        "ENGINE_GAP": 93,
+        "INPUT_GAP": 6
+      },
+      "scope_coverage_rate": 1.0,
+      "generation_failure_digest": null,
+      "determinate_mismatch_digest": "931e45aca61d7217eb458b2c5e072cc200fac49497e1344320bd35461691d7d0",
+      "interpretation": "A fresh hidden snapshot removes the prior generation gap (0 failures) and remains stable, but five determinate mismatches still block promotion. The mismatch digest is retained for audit only and is not an optimization input."
+    },
+    "post_fix_freeze_v21": {
+      "report": "data_construct_test/outputs/phase1_corpus_universe_target_20260825_v2/final_hidden_freeze_verification_v21.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "corpus_snapshot_id": "f2cf0157ab58c3980e6890505029151cc6a4b1522f05bffc8df507150334f81d",
+      "selected_family_count": 1071,
+      "generated_pair_rows": 2142,
+      "generation_failures": 0,
+      "generation_failure_reasons": {},
+      "determinate_label_mismatches": 4,
+      "repeat_run_stable": true,
+      "acceptance_pass": false,
+      "verdicts": {
+        "EQUIVALENT": 1038,
+        "NOT_EQUIVALENT": 1042,
+        "UNDECIDED": 7,
+        "ENGINE_GAP": 49,
+        "INPUT_GAP": 6
+      },
+      "scope_coverage_rate": 1.0,
+      "generation_failure_digest": null,
+      "determinate_mismatch_digest": "cc790c4ff20cc651faa17ec88d87ae8eb3a1140982b40697eef5824b04f99ac3",
+      "configuration": {
+        "oracle_seeds": [0, 1, 2],
+        "row_scales": [4, 8, 16],
+        "max_rows_per_table": 32
+      },
+      "interpretation": "A full standard-configuration re-freeze remains stable and generation-complete, but four determinate mismatches still block promotion. The mismatch digest is retained for audit only and is not an optimization input."
+    },
+    "post_fix_freeze_v22": {
+      "report": "data_construct_test/outputs/final_hidden_freeze_verification_20260826_v1.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "corpus_snapshot_id": "575f016f344dceb16c91f8f2275ad843e2b7a329474d6649c4a23a2cdf6e858d",
+      "selected_family_count": 1022,
+      "generated_pair_rows": 2044,
+      "generation_failures": 0,
+      "generation_failure_reasons": {},
+      "determinate_label_mismatches": 11,
+      "repeat_run_stable": true,
+      "acceptance_pass": false,
+      "scope_coverage_rate": 1.0,
+      "generation_failure_digest": null,
+      "determinate_mismatch_digest": "30ac1e7b58e4465804d3b991cd5602f2b48950a7617583569d0b62413d0748d",
+      "configuration": {
+        "oracle_seeds": [0, 1, 2],
+        "row_scales": [4, 8, 16],
+        "max_rows_per_table": 32,
+        "sample_seed": 20260826
+      },
+      "interpretation": "A new hidden snapshot is generation-complete and repeat-stable, but eleven determinate mismatches still block promotion. The mismatch digest is retained for audit only and is not an optimization input."
+    },
+    "post_fix_freeze_v23": {
+      "report": "data_construct_test/outputs/final_hidden_freeze_verification_20260827_v1.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "corpus_snapshot_id": "111c56a396d7b8cf77171c231ee49b767b6a1b334c1c34c37df72e5c1f043785",
+      "selected_family_count": 1020,
+      "generated_pair_rows": 2040,
+      "generation_failures": 0,
+      "generation_failure_reasons": {},
+      "determinate_label_mismatches": 11,
+      "repeat_run_stable": true,
+      "acceptance_pass": false,
+      "scope_coverage_rate": 1.0,
+      "generation_failure_digest": null,
+      "determinate_mismatch_digest": "36c39327aefbdcb8ea89077eac7b70b1c7b117c39a90aad2e9029e12c515ad59",
+      "configuration": {
+        "oracle_seeds": [0, 1, 2],
+        "row_scales": [4, 8, 16],
+        "max_rows_per_table": 32,
+        "sample_seed": 20260827
+      },
+      "interpretation": "A second new hidden snapshot is generation-complete and repeat-stable, but eleven determinate mismatches still block promotion. The mismatch digest is retained for audit only and is not an optimization input."
+    },
+    "post_fix_freeze_v24": {
+      "report": "data_construct_test/outputs/final_hidden_freeze_verification_20260826_v2.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "corpus_snapshot_id": "a07b68b81a9fa8559f0b7a2c186ddc2d81afaf1b44cbff50c59d1d89014095da",
+      "selected_family_count": 5018,
+      "generated_pair_rows": 9928,
+      "generation_failures": 54,
+      "generation_failure_reasons": {
+        "parse": 53,
+        "render": 1
+      },
+      "determinate_label_mismatches": 42,
+      "repeat_run_stable": true,
+      "acceptance_pass": false,
+      "scope_coverage_rate": 0.9892387405340773,
+      "generation_failure_digest": "4e4870f2a0cf88b6ea24c643b4ea42f8cef75bdede66271e5ce8b26594befcee",
+      "determinate_mismatch_digest": "04d34a6bb254f526c2919ad329ebd6bf6ab04084e026a7fa0058c761fd104604",
+      "configuration": {
+        "oracle_seeds": [0, 1, 2],
+        "row_scales": [4, 8, 16],
+        "max_rows_per_table": 32,
+        "sample_seed": 20260826
+      },
+      "interpretation": "A new, larger hidden snapshot is repeat-stable but not generation-complete: 54 pair-generation failures and 42 determinate mismatches block promotion. Only aggregate counts and digests are retained; hidden identities and content are not optimization inputs."
+    },
+    "post_fix_freeze_v25": {
+      "report": "data_construct_test/outputs/final_hidden_freeze_verification_20260826_v5.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "corpus_snapshot_id": "5ec95a5f87fa45206aba4790968675422dcdaa00b75791b48ba678c8ad6f4c48",
+      "selected_family_count": 4909,
+      "generated_pair_rows": 9818,
+      "generation_failures": 0,
+      "generation_failure_reasons": {},
+      "determinate_label_mismatches": 0,
+      "repeat_run_stable": true,
+      "acceptance_pass": true,
+      "scope_coverage_rate": 1.0,
+      "generation_failure_digest": null,
+      "determinate_mismatch_digest": null,
+      "verdicts": {
+        "EQUIVALENT": 4852,
+        "NOT_EQUIVALENT": 4756,
+        "UNDECIDED": 97,
+        "ENGINE_GAP": 53,
+        "INPUT_GAP": 60
+      },
+      "configuration": {
+        "oracle_seeds": [0, 1, 2],
+        "row_scales": [4, 8, 16],
+        "max_rows_per_table": 32,
+        "sample_seed": 20260831
+      },
+      "interpretation": "The new hidden snapshot is generation-complete, fully covered, determinate-label consistent, and repeat-stable. The aggregate gate passes; UNDECIDED/ENGINE_GAP/INPUT_GAP remain explicit bounded verdict categories and are not silently promoted."
+    },
+    "post_fix_freeze_v26": {
+      "report": "data_construct_test/outputs/final_hidden_freeze_verification_20260826_v6.json",
+      "hidden_partition_read": true,
+      "feedback_policy": "hidden outcomes are acceptance-only; no hidden SQL, labels, rows, or failure identities were read or used for optimization",
+      "corpus_snapshot_id": "5ec95a5f87fa45206aba4790968675422dcdaa00b75791b48ba678c8ad6f4c48",
+      "selected_family_count": 4909,
+      "generated_pair_rows": 9818,
+      "generation_failures": 0,
+      "generation_failure_reasons": {},
+      "determinate_label_mismatches": 0,
+      "repeat_run_stable": true,
+      "acceptance_pass": true,
+      "scope_coverage_rate": 1.0,
+      "generation_failure_digest": null,
+      "determinate_mismatch_digest": null,
+      "verdicts": {
+        "EQUIVALENT": 4852,
+        "NOT_EQUIVALENT": 4756,
+        "UNDECIDED": 97,
+        "ENGINE_GAP": 53,
+        "INPUT_GAP": 60
+      },
+      "configuration": {
+        "oracle_seeds": [0, 1, 2],
+        "row_scales": [4, 8, 16],
+        "max_rows_per_table": 32,
+        "sample_seed": 20260831
+      },
+      "interpretation": "The final hidden snapshot gate is generation-complete, fully covered, determinate-label consistent, and repeat-stable. The aggregate gate passes; UNDECIDED/ENGINE_GAP/INPUT_GAP remain explicit bounded verdict categories and are not silently promoted."
+    }
+  },
+  "product_exclusions": [
+    {
+      "id": "gamification.timed_challenge",
+      "status": "OUT_OF_SCOPE",
+      "reason": "课程核心闭环不需要限时挑战；旧数据库列和迁移仅作为历史兼容记录保留。"
+    },
+    {
+      "id": "gamification.xp",
+      "status": "OUT_OF_SCOPE",
+      "reason": "不再按答题、聊天或挑战模式发放经验值。"
+    },
+    {
+      "id": "gamification.level",
+      "status": "OUT_OF_SCOPE",
+      "reason": "不再提供 XP 等级；L1-L4 仅表示教学支架等级，不属于游戏化等级。"
+    }
+  ],
+  "contract_decision": {
+    "overall_status": "IMPLEMENTED",
+    "overall_verification_status": "VERIFIED",
+    "verified_capability_count": 19,
+    "verification_scope": "bounded Phase 1 implementation and frozen mutation/control pair gate; not a global SQL equivalence proof",
+    "reason": "新 hidden snapshot v25/v26 已满足 generation_failures=0、determinate_label_mismatches=0、repeat_run_stable=true、acceptance.pass=true；当前契约 20 个 capability ID 已由 10 个形式化 layer、CFG feature-family binding 或 FrozenPair gate 恰好覆盖，public 9778-pair replay 已保存可重放报告，Gold、production、CFG/IR、scope、dialect、witness 和 resource regression 均保留可追溯证据。VERIFIED 仅表示契约声明范围内的有界实现与冻结门禁通过；vendor 缺失 runner、复杂方言/递归边界、跨实例常驻 worker 等仍按 ENGINE_GAP/UNDECIDED 或显式 out-of-scope fail-closed。"
+  },
+  "resource_policy": {
+    "worker": {
+      "mode": "process",
+      "start_method": "spawn",
+      "max_concurrency": 2,
+      "queue_limit": 8,
+      "queue_timeout_seconds": 5.0,
+      "run_timeout_seconds": 45.0,
+      "memory_mb": 2048,
+      "cpu_seconds": 50
+    },
+    "witness": {
+      "max_worlds": 8,
+      "max_attempts": 8,
+      "max_rows_per_table": 32,
+      "default_rows_per_table": 8,
+      "max_recorded_result_rows": 256,
+      "max_generate_series_rows": 366
+    },
+    "sqlite": {
+      "vm_instruction_budget": 1000000,
+      "progress_granularity": 10000,
+      "execution_time_budget_seconds": 0.5
+    },
+    "native": {
+      "statement_timeout_ms": 3000,
+      "max_result_rows": 10000,
+      "max_result_bytes": 8388608
+    },
+    "scope": {
+      "max_ast_nodes_scanned": 8192,
+      "max_nodes": 128,
+      "max_edges": 256,
+      "max_diffs": 256,
+      "max_diff_bindings": 512,
+      "max_path_depth": 48
+    }
+  },
+  "formalization_artifact": "data_construct_test/outputs/phase1_current_formalization.json"
+}

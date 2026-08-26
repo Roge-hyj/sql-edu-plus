@@ -283,9 +283,14 @@ def test_oracle_executes_as_read_only_reader_and_drops_both_users(monkeypatch):
         def __init__(self, tag):
             super().__init__(log)
             self.tag = tag
+            self._single_row = None
 
         def execute(self, sql, params=None):
             log.append((self.tag, "execute", sql, params))
+            if sql == "SELECT VERSION(), @@lower_case_table_names":
+                self.description = [("version",), ("lower_case_table_names",)]
+                self._single_row = ("8.0.46", 0)
+                return self
             if sql.startswith("SELECT "):
                 self.description = [("answer",)]
                 self._fetched = False
@@ -457,6 +462,9 @@ def test_fixture_identifiers_are_quoted_and_native_case_folded():
     assert runner._quote_ident("x]; DROP TABLE y;--", "tsql") == "[x]]; DROP TABLE y;--]"
     assert runner._fold_fixture_identifier("Mixed_Name", "postgres") == "mixed_name"
     assert runner._fold_fixture_identifier("Mixed_Name", "oracle") == "MIXED_NAME"
+    assert runner._fold_fixture_identifier("Mixed_Name", "mysql") == "Mixed_Name"
+    assert runner._MYSQL_TARGET_VERSION == "8.0.46"
+    assert runner._MYSQL_REQUIRED_LOWER_CASE_TABLE_NAMES == 0
 
 
 def test_successful_execution_with_failed_cleanup_is_explicit(monkeypatch):
@@ -633,9 +641,14 @@ def test_mysql_loads_with_admin_and_runs_queries_as_temporary_reader(monkeypatch
         def __init__(self, tag):
             super().__init__(log)
             self.tag = tag
+            self._single_row = None
 
         def execute(self, sql, params=None):
             log.append((self.tag, "execute", sql, params))
+            if sql == "SELECT VERSION(), @@lower_case_table_names":
+                self.description = [("version",), ("lower_case_table_names",)]
+                self._single_row = ("8.0.46", 0)
+                return self
             if sql.startswith("SELECT "):
                 self.description = [("answer",)]
                 self._fetched = False
@@ -646,6 +659,10 @@ def test_mysql_loads_with_admin_and_runs_queries_as_temporary_reader(monkeypatch
         def executemany(self, sql, values):
             log.append((self.tag, "executemany", sql, list(values)))
             return self
+
+        def fetchone(self):
+            log.append((self.tag, "fetchone"))
+            return self._single_row
 
     class TaggedConnection(FakeConnection):
         def __init__(self, tag, *, autocommit):
@@ -681,6 +698,7 @@ def test_mysql_loads_with_admin_and_runs_queries_as_temporary_reader(monkeypatch
     admin_statements = [entry[2] for entry in log if entry[:2] == ("admin", "execute")]
     reader_statements = [entry[2] for entry in log if entry[:2] == ("reader", "execute")]
     assert sum(sql.startswith("CREATE DATABASE") for sql in admin_statements) == 1
+    assert "SELECT VERSION(), @@lower_case_table_names" in admin_statements
     assert sum(sql.startswith("CREATE TABLE") for sql in admin_statements) == 1
     assert sum(sql.startswith("DROP DATABASE") for sql in admin_statements) == 1
     assert sum(sql.startswith("DROP USER") for sql in admin_statements) == 1

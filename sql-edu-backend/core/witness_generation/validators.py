@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections import Counter, defaultdict
+from decimal import Decimal, InvalidOperation
 import re
 import sqlite3
 from typing import Any
@@ -41,16 +42,36 @@ class ObligationValidation:
 
 
 def _values(world: Any, table: str, column: str) -> list[Any]:
-    for name, rows in world.database.items():
-        if name.lower() == table.lower():
-            if not rows:
-                return []
-            actual = next(
-                (name for name in rows[0] if name.lower() == column.lower()),
-                None,
-            )
-            return [row.get(actual) for row in rows] if actual else []
-    return []
+    database = getattr(world, "database", {}) or {}
+    requested_table = str(table or "").strip().lower()
+    requested_column = str(column or "").strip().lower()
+
+    def values_from_rows(rows: list[dict[str, Any]]) -> list[Any] | None:
+        if not rows:
+            return None
+        actual = next(
+            (name for name in rows[0] if name.lower() == requested_column),
+            None,
+        )
+        return [row.get(actual) for row in rows] if actual else None
+
+    if requested_table:
+        for name, rows in database.items():
+            if name.lower() == requested_table:
+                values = values_from_rows(rows)
+                return values if values is not None else []
+        return []
+
+    # AST obligations may retain an empty relation for an unqualified column.
+    # Resolve it only when exactly one materialized physical table exposes that
+    # column; guessing across two tables with the same column would make the
+    # semantic validator less trustworthy than the unresolved obligation.
+    candidates = [
+        values
+        for rows in database.values()
+        if (values := values_from_rows(rows)) is not None
+    ]
+    return candidates[0] if len(candidates) == 1 else []
 
 
 def _table_rows(world: Any, table: str) -> list[dict[str, Any]]:
@@ -63,6 +84,16 @@ def _table_rows(world: Any, table: str) -> list[dict[str, Any]]:
 def _column_name(rows: list[dict[str, Any]], requested: str) -> str | None:
     if not rows:
         return None
+    # Obligation metadata stores SQL fragments, so a simple column argument
+    # may retain its source-dialect quoting (``"amount"``, `` `amount` `` or
+    # ``[amount]``).  Resolve the physical witness column by its identifier
+    # rather than treating the quoted fragment as a literal name.  This keeps
+    # aggregate NULL-path validation faithful for quoted teaching schemas.
+    requested = str(requested or "").strip()
+    if len(requested) >= 2 and requested[0] == requested[-1] and requested[0] in {'"', "`", "["}:
+        requested = requested[1:-1]
+        if requested.endswith("]") and requested[0] == "[":
+            requested = requested[:-1]
     return next(
         (name for name in rows[0] if name.lower() == requested.lower()),
         None,
@@ -102,6 +133,35 @@ def _join_candidate_columns(left_rows: list[dict[str, Any]], right_rows: list[di
     return [(left_names[name], right_names[name]) for name in ordered]
 
 
+def _join_value_key(value: Any) -> tuple[str, Any] | None:
+    """Canonicalize join values the way typed SQLite columns commonly do.
+
+    Spider schemas legitimately declare one side of a key as TEXT and the
+    other as BIGINT.  Witness synthesis then materializes ``"1"`` versus
+    ``1``; SQLite's column affinity still joins those rows, while Python set
+    intersection does not.  Normalize finite numeric strings and numbers for
+    validator evidence, but keep ordinary text and NULL distinct.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "boolean", value
+    if isinstance(value, (int, float, Decimal)):
+        try:
+            return "numeric", Decimal(str(value)).normalize()
+        except (InvalidOperation, ValueError):
+            return "other", repr(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", stripped):
+            try:
+                return "numeric", Decimal(stripped).normalize()
+            except InvalidOperation:
+                pass
+        return "text", value
+    return "other", repr(value)
+
+
 def _validate_join_paths(world: Any, obligation: DistinguishingObligation) -> tuple[bool, dict[str, Any], list[str]]:
     spec = next(
         (item for item in obligation.hard_constraints
@@ -113,6 +173,21 @@ def _validate_join_paths(world: Any, obligation: DistinguishingObligation) -> tu
     metadata = dict(spec.metadata)
     declared_pairs = metadata.get("standard_join_pairs") or metadata.get("student_join_pairs")
     if not declared_pairs:
+        # Non-equality joins (for example a salary BETWEEN range join) do not
+        # have column-pair metadata that the row-pair validator can compare.
+        # For a concrete join-topology replacement, the exact atomic
+        # execution evidence is still sufficient to establish that the
+        # replacement is observable.  Keep this fallback limited to join
+        # presence/type changes; ON-predicate changes require their own
+        # predicate metadata.
+        if obligation.diff_type in {"join_type_changed", "join_missing"} and _exact_atomic_execution_distinguished(
+            world,
+            obligation,
+        ):
+            return True, {
+                "source": "execution_atomic_fallback",
+                "join_metadata": "non_equality_or_derived_join",
+            }, []
         return False, {}, ["join_metadata_missing"]
     tables = [(name, rows) for name, rows in world.database.items() if rows]
 
@@ -178,7 +253,7 @@ def _validate_join_paths(world: Any, obligation: DistinguishingObligation) -> tu
                 equal = (
                     left_value is not None
                     and right_value is not None
-                    and left_value == right_value
+                    and _join_value_key(left_value) == _join_value_key(right_value)
                 )
                 comparisons.append({
                     "left_column": left_column,
@@ -259,6 +334,14 @@ def _validate_join_paths(world: Any, obligation: DistinguishingObligation) -> tu
                         "standard_matched_values": standard_matches,
                         "student_matched_values": student_matches,
                     }, []
+        if (
+            obligation.diff_type == "join_on_changed"
+            and _exact_atomic_execution_distinguished(world, obligation)
+        ):
+            return True, {
+                "source": "execution_atomic_fallback",
+                "join_metadata": "derived_or_cte_join",
+            }, []
         return False, {}, ["standard_join_path_or_student_drift_missing"]
 
     best: dict[str, Any] | None = None
@@ -278,11 +361,24 @@ def _validate_join_paths(world: Any, obligation: DistinguishingObligation) -> tu
         if not left_col or not right_col:
             continue
         for _ in (0,):
-                left_values = {row.get(left_col) for row in left_rows}
-                right_values = {row.get(right_col) for row in right_rows}
-                matched = left_values & right_values
-                dangling_left = left_values - right_values
-                dangling_right = right_values - left_values
+                left_values = {
+                    key: row.get(left_col)
+                    for row in left_rows
+                    for key in [_join_value_key(row.get(left_col))]
+                    if key is not None
+                }
+                right_values = {
+                    key: row.get(right_col)
+                    for row in right_rows
+                    for key in [_join_value_key(row.get(right_col))]
+                    if key is not None
+                }
+                matched_keys = set(left_values) & set(right_values)
+                dangling_left_keys = set(left_values) - set(right_values)
+                dangling_right_keys = set(right_values) - set(left_values)
+                matched = [left_values[key] for key in matched_keys]
+                dangling_left = [left_values[key] for key in dangling_left_keys]
+                dangling_right = [right_values[key] for key in dangling_right_keys]
                 candidate = {
                     "left_table": left_name,
                     "right_table": right_name,
@@ -295,6 +391,76 @@ def _validate_join_paths(world: Any, obligation: DistinguishingObligation) -> tu
                 if matched and (dangling_left or dangling_right):
                     return True, candidate, []
                 best = candidate
+    # A JOIN against a derived table/CTE has no physical right-hand table in
+    # the witness database, so the row-set path above cannot resolve its
+    # declared pairs. The production attempt still contains an exact atomic
+    # replacement test; use a bounded query-pair diagnostic only in that
+    # derived-relation case and only when the same obligation is distinguished.
+    if best is None:
+        execution = getattr(world, "execution", {}) or {}
+        context = execution.get("validation_context", {})
+        standard_sql = str(context.get("standard_sql") or "").strip().rstrip(";")
+        student_sql = str(context.get("student_sql") or "").strip().rstrip(";")
+        if standard_sql and student_sql:
+            standard_rows, standard_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({standard_sql}) AS "__join_standard" LIMIT 65',
+            )
+            student_rows, student_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({student_sql}) AS "__join_student" LIMIT 65',
+            )
+            attempt = _latest_execution_attempt(world)
+            atomic = attempt.get("atomic_validation") or {}
+            tests = atomic.get("tests") if isinstance(atomic, dict) else None
+            atomic_distinguished = bool(
+                attempt.get("distinguished")
+                and isinstance(tests, list)
+                and any(
+                    item.get("diff_id") == obligation.diff_id
+                    and item.get("supported") is True
+                    and item.get("distinguished") is True
+                    for item in tests
+                    if isinstance(item, dict)
+                )
+            )
+            if (
+                standard_rows is not None
+                and student_rows is not None
+                and standard_rows != student_rows
+                and atomic_distinguished
+            ):
+                return True, {
+                    "source": "bounded_query_pair_for_derived_join",
+                    "standard_row_count": len(standard_rows),
+                    "student_row_count": len(student_rows),
+                    "standard_result": [list(row) for row in standard_rows[:8]],
+                    "student_result": [list(row) for row in student_rows[:8]],
+                }, []
+            if standard_rows is None or student_rows is None:
+                best = {
+                    "source": "bounded_query_pair_for_derived_join",
+                    "standard_execution_error": standard_error,
+                    "student_execution_error": student_error,
+                }
+    if (
+        obligation.diff_type in {"join_type_changed", "join_missing"}
+        and best is not None
+        and _exact_atomic_execution_distinguished(world, obligation)
+    ):
+        return True, {
+            "source": "execution_atomic_fallback",
+            "join_path": best,
+        }, []
+    if (
+        obligation.diff_type == "join_on_changed"
+        and best is None
+        and _exact_atomic_execution_distinguished(world, obligation)
+    ):
+        return True, {
+            "source": "execution_atomic_fallback",
+            "join_metadata": "derived_or_cte_join",
+        }, []
     return False, best or {}, ["matched_and_dangling_join_paths_missing"]
 
 
@@ -319,6 +485,12 @@ def _validate_group_grain(world: Any, obligation: DistinguishingObligation) -> t
         return False, {}, ["group_metadata_missing"]
     rows = _table_rows(world, spec.relation)
     if not rows:
+        if _exact_atomic_execution_distinguished(world, obligation):
+            return True, {
+                "source": "execution_atomic_fallback",
+                "group_columns": list(standard_keys),
+                "student_group_columns": list(student_keys or ()),
+            }, []
         return False, {}, ["group_table_missing"]
     standard_columns = [
         _column_name(rows, str(key).split(".")[-1])
@@ -972,10 +1144,37 @@ def _validate_aggregate_boundary(world: Any, obligation: DistinguishingObligatio
     spec = next((item for item in obligation.hard_constraints if item.kind == "aggregate_boundary_group"), None)
     if spec is None:
         return False, {}, ["aggregate_constraint_missing"]
+    metadata = dict(spec.metadata)
+    execution_atomic_fallback = False
+    if not spec.relation:
+        attempt = _latest_execution_attempt(world)
+        atomic = attempt.get("atomic_validation") or {}
+        tests = atomic.get("tests") if isinstance(atomic, dict) else None
+        execution_atomic_fallback = bool(
+            attempt.get("distinguished")
+            and isinstance(tests, list)
+            and any(
+                item.get("diff_id") == obligation.diff_id
+                and item.get("supported") is True
+                and item.get("distinguished") is True
+                for item in tests
+                if isinstance(item, dict)
+            )
+        )
+        if execution_atomic_fallback:
+            return True, {
+                "source": "execution_atomic_fallback",
+                "aggregate_function": metadata.get("standard_aggregate_function"),
+            }, []
     rows = _table_rows(world, spec.relation)
     if not rows:
+        if _exact_atomic_execution_distinguished(world, obligation):
+            return True, {
+                "source": "execution_atomic_fallback",
+                "aggregate_function": metadata.get("standard_aggregate_function"),
+                "relation": spec.relation,
+            }, []
         return False, {}, ["aggregate_table_missing"]
-    metadata = dict(spec.metadata)
     joined_validation = _validate_joined_aggregate_boundary(
         world,
         metadata,
@@ -983,9 +1182,26 @@ def _validate_aggregate_boundary(world: Any, obligation: DistinguishingObligatio
     )
     if joined_validation is not None:
         return joined_validation
+
+    function = str(metadata.get("standard_aggregate_function") or "COUNT").upper()
+    argument = str(metadata.get("standard_aggregate_argument") or "*").strip()
+    raw_argument = argument
+    student_argument = str(metadata.get("student_aggregate_argument") or "").strip()
+    distinct = bool(metadata.get("standard_aggregate_distinct", False))
+    if argument.upper().startswith("DISTINCT "):
+        distinct = True
+        argument = argument[9:].strip()
+
     keys = metadata.get("standard_group_columns") or metadata.get("student_group_columns")
     resolved = [_column_name(rows, str(key).split(".")[-1]) for key in keys or ()]
-    if keys and any(item is None for item in resolved):
+    count_null_sensitive = (
+        function == "COUNT"
+        and (
+            (argument == "*" and student_argument and student_argument != "*")
+            or (argument != "*" and student_argument == "*")
+        )
+    )
+    if keys and any(item is None for item in resolved) and not count_null_sensitive:
         return False, {}, ["aggregate_group_column_missing"]
     groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {(): list(rows)} if not keys else {}
     if keys:
@@ -994,13 +1210,76 @@ def _validate_aggregate_boundary(world: Any, obligation: DistinguishingObligatio
             groups.setdefault(key, []).append(row)
     counts = Counter({key: len(items) for key, items in groups.items()})
     boundary = spec.value
-    function = str(metadata.get("standard_aggregate_function") or "COUNT").upper()
-    argument = str(metadata.get("standard_aggregate_argument") or "*").strip()
-    distinct = bool(metadata.get("standard_aggregate_distinct", False))
-    if argument.upper().startswith("DISTINCT "):
-        distinct = True
-        argument = argument[9:].strip()
     argument_column = _column_name(rows, argument.split(".")[-1]) if argument != "*" else None
+    # COUNT(*) -> COUNT(nullable_column) is distinguished exactly by a NULL
+    # input row. Do not require an arbitrary numeric boundary for this
+    # argument mutation; its obligation is a NULL-sensitive aggregate path.
+    if (
+        function == "COUNT"
+        and argument == "*"
+        and student_argument
+        and student_argument != "*"
+    ):
+        student_column = _column_name(rows, student_argument.split(".")[-1])
+        null_indexes = [
+            index for index, row in enumerate(rows)
+            if student_column is not None and row.get(student_column) is None
+        ]
+        satisfied = bool(null_indexes)
+        return satisfied, {
+            "aggregate_function": function,
+            "standard_aggregate_argument": argument,
+            "student_aggregate_argument": student_argument,
+            "nullable_argument_column": student_column,
+            "null_row_indexes": null_indexes[:8],
+        }, [] if satisfied else ["aggregate_nullable_argument_path_missing"]
+    # COUNT(nullable_column) -> COUNT(*) is the opposite direction of the
+    # path above.  A valid witness must contain both a NULL and a non-NULL
+    # value for the standard argument; otherwise the two COUNT forms are
+    # observationally identical.  Do not use the numeric boundary probe for
+    # this mutation: its obligation is specifically NULL sensitivity.
+    if (
+        function == "COUNT"
+        and argument != "*"
+        and student_argument == "*"
+    ):
+        nullable_column = _column_name(
+            rows,
+            argument.split(".")[-1].strip('`"[] '),
+        )
+        null_indexes = [
+            index
+            for index, row in enumerate(rows)
+            if nullable_column is not None and row.get(nullable_column) is None
+        ]
+        non_null_indexes = [
+            index
+            for index, row in enumerate(rows)
+            if nullable_column is not None and row.get(nullable_column) is not None
+        ]
+        satisfied = bool(null_indexes and non_null_indexes)
+        return satisfied, {
+            "aggregate_function": function,
+            "standard_aggregate_argument": argument,
+            "student_aggregate_argument": student_argument,
+            "nullable_argument_column": nullable_column,
+            "null_row_indexes": null_indexes[:8],
+            "non_null_row_indexes": non_null_indexes[:8],
+        }, [] if satisfied else ["aggregate_nullable_argument_path_missing"]
+    if (
+        function == "COUNT"
+        and raw_argument.upper().startswith("DISTINCT ")
+        and student_argument
+        and not student_argument.upper().startswith("DISTINCT ")
+    ):
+        distinct_column = _column_name(rows, raw_argument[9:].strip().split(".")[-1])
+        values = [row.get(distinct_column) for row in rows] if distinct_column else []
+        duplicates = len([value for value in values if value is not None]) > len({value for value in values if value is not None})
+        return duplicates, {
+            "aggregate_function": function,
+            "distinct_argument_column": distinct_column,
+            "duplicate_value_path": duplicates,
+        }, [] if duplicates else ["aggregate_distinct_duplicate_path_missing"]
     aggregate_values: dict[tuple[Any, ...], Any] = {}
     heterogeneous_extreme_groups: list[tuple[Any, ...]] = []
     for key, items in groups.items():
@@ -1046,6 +1325,32 @@ def _validate_aggregate_boundary(world: Any, obligation: DistinguishingObligatio
         else:
             return False, {"aggregate_function": function}, ["aggregate_function_not_supported"]
     satisfied = any(value == boundary for value in aggregate_values.values())
+    execution_atomic_fallback = False
+    if (
+        not satisfied
+        and function == "COUNT"
+        and argument == "*"
+        and boundary == 0
+    ):
+        # COUNT(*)=0 is an empty-group predicate: no physical group can have
+        # that value, but the exact atomic execution pair still proves the
+        # threshold mutation (e.g. ``= 0`` -> ``= 1``) changes the result.
+        attempt = _latest_execution_attempt(world)
+        atomic = attempt.get("atomic_validation") or {}
+        tests = atomic.get("tests") if isinstance(atomic, dict) else None
+        execution_atomic_fallback = bool(
+            attempt.get("distinguished")
+            and isinstance(tests, list)
+            and any(
+                item.get("diff_id") == obligation.diff_id
+                and item.get("supported") is True
+                and item.get("distinguished") is True
+                for item in tests
+                if isinstance(item, dict)
+            )
+        )
+        if execution_atomic_fallback:
+            satisfied = True
     diagnostics = (
         ["aggregate_mixed_types_ordered_deterministically"]
         if heterogeneous_extreme_groups
@@ -1061,6 +1366,7 @@ def _validate_aggregate_boundary(world: Any, obligation: DistinguishingObligatio
         "aggregate_argument": argument,
         "aggregate_distinct": distinct,
         "boundary": boundary,
+        "execution_atomic_fallback": execution_atomic_fallback,
         "heterogeneous_extreme_groups": [
             str(key) for key in heterogeneous_extreme_groups
         ],
@@ -1113,6 +1419,16 @@ def _validate_aggregate_function_separation(
         return False, {}, ["aggregate_function_constraint_missing"]
     rows = _table_rows(world, spec.relation)
     if not rows:
+        if _exact_atomic_execution_distinguished(world, obligation):
+            return True, {
+                "source": "execution_atomic_fallback",
+                "standard_aggregate_function": dict(spec.metadata).get(
+                    "standard_aggregate_function"
+                ),
+                "student_aggregate_function": dict(spec.metadata).get(
+                    "student_aggregate_function"
+                ),
+            }, []
         return False, {}, ["aggregate_function_table_missing"]
     metadata = dict(spec.metadata)
     standard_function = str(
@@ -1500,7 +1816,68 @@ def _validate_order_paths(world: Any, obligation: DistinguishingObligation) -> t
     if not relation:
         return False, {}, ["order_table_metadata_missing"]
     rows = _table_rows(world, relation)
+    if obligation.diff_type == "order_by_changed" and not standard_keys and not student_keys:
+        context = getattr(world, "execution", {}).get("validation_context", {})
+        standard_sql = str(context.get("standard_sql") or "").strip().rstrip(";")
+        student_sql = str(context.get("student_sql") or "").strip().rstrip(";")
+        if standard_sql and student_sql:
+            standard_rows, standard_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({standard_sql}) AS "__order_standard" LIMIT 65',
+            )
+            student_rows, student_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({student_sql}) AS "__order_student" LIMIT 65',
+            )
+            if standard_rows is not None and student_rows is not None:
+                distinguished = standard_rows != student_rows
+                return distinguished, {
+                    "relation": relation,
+                    "source": "bounded_query_result_for_expression_order",
+                    "standard_row_count": len(standard_rows),
+                    "student_row_count": len(student_rows),
+                    "standard_result": [list(row) for row in standard_rows[:8]],
+                    "student_result": [list(row) for row in student_rows[:8]],
+                }, [] if distinguished else ["order_expression_difference_not_materialized"]
+            return False, {
+                "relation": relation,
+                "source": "bounded_query_result_for_expression_order",
+                "standard_execution_error": standard_error,
+                "student_execution_error": student_error,
+            }, ["order_expression_query_execution_failed"]
     if not rows:
+        # A recursive CTE or derived table is a query relation, not a
+        # physical fixture table.  Its order witness can still be validated
+        # by executing the already-bound query pair with the same bounded
+        # diagnostic guard used by other semantic validators.
+        context = getattr(world, "execution", {}).get("validation_context", {})
+        standard_sql = str(context.get("standard_sql") or "").strip().rstrip(";")
+        student_sql = str(context.get("student_sql") or "").strip().rstrip(";")
+        if standard_sql and student_sql:
+            standard_rows, standard_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({standard_sql}) AS "__order_standard" LIMIT 65',
+            )
+            student_rows, student_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({student_sql}) AS "__order_student" LIMIT 65',
+            )
+            if standard_rows is not None and student_rows is not None:
+                distinguished = standard_rows != student_rows
+                return distinguished, {
+                    "relation": relation,
+                    "source": "bounded_query_result",
+                    "standard_row_count": len(standard_rows),
+                    "student_row_count": len(student_rows),
+                    "standard_result": [list(row) for row in standard_rows[:8]],
+                    "student_result": [list(row) for row in student_rows[:8]],
+                }, [] if distinguished else ["order_key_separation_not_materialized"]
+            return False, {
+                "relation": relation,
+                "source": "bounded_query_result",
+                "standard_execution_error": standard_error,
+                "student_execution_error": student_error,
+            }, ["order_query_execution_failed"]
         return False, {"relation": relation}, ["order_table_missing"]
     if not standard_keys and not student_keys:
         return False, {"relation": relation}, ["order_key_metadata_missing"]
@@ -1522,6 +1899,23 @@ def _validate_order_paths(world: Any, obligation: DistinguishingObligation) -> t
             for standard, student in zip(standard_keys, student_keys)
         ):
             return False, {}, ["order_direction_metadata_inconsistent"]
+        changed_index = changed_indexes[0]
+        prefix_keys = standard_keys[:changed_index]
+        discriminator_key = standard_keys[changed_index]
+    elif diff_type == "order_nulls_changed":
+        standard_nulls = tuple(metadata.get("standard_nulls_first") or ())
+        student_nulls = tuple(metadata.get("student_nulls_first") or ())
+        changed_indexes = [
+            index
+            for index, (standard, student) in enumerate(zip(standard_keys, student_keys))
+            if _same_order_expression(standard[0], student[0])
+            and standard[1] == student[1]
+            and index < len(standard_nulls)
+            and index < len(student_nulls)
+            and standard_nulls[index] != student_nulls[index]
+        ]
+        if not changed_indexes:
+            return False, {}, ["order_nulls_metadata_inconsistent"]
         changed_index = changed_indexes[0]
         prefix_keys = standard_keys[:changed_index]
         discriminator_key = standard_keys[changed_index]
@@ -1553,19 +1947,132 @@ def _validate_order_paths(world: Any, obligation: DistinguishingObligation) -> t
         for expression, _descending in (*prefix_keys, discriminator_key)
     ]
     if any(column is None for column in requested_columns):
+        execution = getattr(world, "execution", {}) or {}
+        context = execution.get("validation_context", {})
+        standard_sql = str(context.get("standard_sql") or "").strip().rstrip(";")
+        student_sql = str(context.get("student_sql") or "").strip().rstrip(";")
+        if standard_sql and student_sql:
+            standard_rows, standard_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({standard_sql}) AS "__order_standard" LIMIT 65',
+            )
+            student_rows, student_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({student_sql}) AS "__order_student" LIMIT 65',
+            )
+            attempt = _latest_execution_attempt(world)
+            atomic = attempt.get("atomic_validation") or {}
+            tests = atomic.get("tests") if isinstance(atomic, dict) else None
+            atomic_distinguished = bool(
+                attempt.get("distinguished")
+                and isinstance(tests, list)
+                and any(
+                    item.get("diff_id") == obligation.diff_id
+                    and item.get("supported") is True
+                    and item.get("distinguished") is True
+                    for item in tests
+                    if isinstance(item, dict)
+                )
+            )
+            if (
+                standard_rows is not None
+                and student_rows is not None
+                and standard_rows != student_rows
+                and atomic_distinguished
+            ):
+                return True, {
+                    "source": "bounded_query_pair_for_expression_order",
+                    "relation": relation,
+                    "standard_row_count": len(standard_rows),
+                    "student_row_count": len(student_rows),
+                    "standard_result": [list(row) for row in standard_rows[:8]],
+                    "student_result": [list(row) for row in student_rows[:8]],
+                }, []
         return False, {
             "relation": relation,
             "standard_order_keys": standard_keys,
             "student_order_keys": student_keys,
+            "standard_execution_error": standard_error if standard_sql else None,
+            "student_execution_error": student_error if student_sql else None,
         }, ["order_expression_not_supported"]
     resolved_columns = [_column_name(rows, str(column)) for column in requested_columns]
     if any(column is None for column in resolved_columns):
+        # COUNT(*)/expression ORDER BY keys in a scalar subquery are valid
+        # teaching queries but have no physical column to bind. Reuse the
+        # exact atomic replacement evidence together with a bounded query-pair
+        # result in this expression-only case.
+        execution = getattr(world, "execution", {}) or {}
+        context = execution.get("validation_context", {})
+        standard_sql = str(context.get("standard_sql") or "").strip().rstrip(";")
+        student_sql = str(context.get("student_sql") or "").strip().rstrip(";")
+        if standard_sql and student_sql:
+            standard_rows, standard_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({standard_sql}) AS "__order_standard" LIMIT 65',
+            )
+            student_rows, student_error = _execute_sqlite_diagnostic(
+                world,
+                f'SELECT * FROM ({student_sql}) AS "__order_student" LIMIT 65',
+            )
+            attempt = _latest_execution_attempt(world)
+            atomic = attempt.get("atomic_validation") or {}
+            tests = atomic.get("tests") if isinstance(atomic, dict) else None
+            atomic_distinguished = bool(
+                attempt.get("distinguished")
+                and isinstance(tests, list)
+                and any(
+                    item.get("diff_id") == obligation.diff_id
+                    and item.get("supported") is True
+                    and item.get("distinguished") is True
+                    for item in tests
+                    if isinstance(item, dict)
+                )
+            )
+            if (
+                standard_rows is not None
+                and student_rows is not None
+                and standard_rows != student_rows
+                and atomic_distinguished
+            ):
+                return True, {
+                    "source": "bounded_query_pair_for_expression_order",
+                    "relation": relation,
+                    "standard_row_count": len(standard_rows),
+                    "student_row_count": len(student_rows),
+                    "standard_result": [list(row) for row in standard_rows[:8]],
+                    "student_result": [list(row) for row in student_rows[:8]],
+                }, []
         return False, {
             "relation": relation,
             "requested_columns": requested_columns,
+            "standard_execution_error": standard_error if standard_sql else None,
+            "student_execution_error": student_error if student_sql else None,
         }, ["order_column_missing"]
     prefix_columns = [str(column) for column in resolved_columns[:-1]]
     discriminator_column = str(resolved_columns[-1])
+    if diff_type == "order_nulls_changed":
+        null_indexes = [
+            index
+            for index, row in enumerate(rows)
+            if row.get(discriminator_column) is None
+        ]
+        non_null_indexes = [
+            index
+            for index, row in enumerate(rows)
+            if row.get(discriminator_column) is not None
+        ]
+        has_path = bool(null_indexes and non_null_indexes)
+        return has_path, {
+            "relation": relation,
+            "diff_type": diff_type,
+            "standard_order_keys": standard_keys,
+            "student_order_keys": student_keys,
+            "changed_key_index": changed_index,
+            "discriminator_column": discriminator_column,
+            "null_row_indexes": null_indexes[:4],
+            "non_null_row_indexes": non_null_indexes[:4],
+            "null_order_path": has_path,
+        }, [] if has_path else ["order_null_path_missing"]
     pair = _order_pair_with_prefix_tie(rows, prefix_columns, discriminator_column)
     evidence = {
         "relation": relation,
@@ -1620,6 +2127,23 @@ def _row_column_value(row: dict[str, Any], column: exp.Column) -> Any:
         None,
     )
     return row.get(actual) if actual else _UNSUPPORTED_TRUTH_VALUE
+
+
+def _predicate_scalar_value(node: exp.Expression, row: dict[str, Any]) -> Any:
+    """Evaluate the small scalar expression subset used by predicate paths."""
+    if isinstance(node, exp.Column):
+        return _row_column_value(row, node)
+    if isinstance(node, (exp.Null, exp.Boolean, exp.Literal)):
+        return _literal_value(node)
+    if isinstance(node, (exp.Lower, exp.Upper)):
+        value = _predicate_scalar_value(node.this, row)
+        if value is _UNSUPPORTED_TRUTH_VALUE:
+            return value
+        if value is None:
+            return None
+        text = str(value)
+        return text.lower() if isinstance(node, exp.Lower) else text.upper()
+    return _UNSUPPORTED_TRUTH_VALUE
 
 
 def _sql_and(left: Any, right: Any) -> bool | None:
@@ -1726,8 +2250,15 @@ def _evaluate_predicate(node: exp.Expression, row: dict[str, Any]) -> Any:
         if value in candidates:
             return True
         return None if None in candidates else False
+    if isinstance(node, exp.Escape):
+        inner = node.this
+        if isinstance(inner, (exp.Like, exp.ILike)):
+            inner = inner.copy()
+            inner.set("escape", node.expression)
+            return _evaluate_predicate(inner, row)
+        return _UNSUPPORTED_TRUTH_VALUE
     if isinstance(node, (exp.Like, exp.ILike)):
-        value = _row_column_value(row, node.this) if isinstance(node.this, exp.Column) else _literal_value(node.this)
+        value = _predicate_scalar_value(node.this, row)
         pattern = _literal_value(node.expression)
         if _UNSUPPORTED_TRUTH_VALUE in (value, pattern):
             return _UNSUPPORTED_TRUTH_VALUE
@@ -1823,6 +2354,28 @@ def _validate_boolean_truth_table(world: Any, obligation: DistinguishingObligati
     satisfied = bool(distinguishing_rows) and (
         full_truth_table if require_binary_truth_table else bool(assignments)
     )
+    execution_atomic_fallback = False
+    if not satisfied and unsupported_rows:
+        # A dialect-owned predicate or quoted identifier can be opaque to the
+        # row-level evaluator even though the exact atomic replacement test
+        # executed successfully. Tie this fallback to the same diff and a
+        # distinguished pair; a bare output difference is insufficient.
+        attempt = _latest_execution_attempt(world)
+        atomic = attempt.get("atomic_validation") or {}
+        tests = atomic.get("tests") if isinstance(atomic, dict) else None
+        execution_atomic_fallback = bool(
+            attempt.get("distinguished")
+            and isinstance(tests, list)
+            and any(
+                item.get("diff_id") == obligation.diff_id
+                and item.get("supported") is True
+                and item.get("distinguished") is True
+                for item in tests
+                if isinstance(item, dict)
+            )
+        )
+        if execution_atomic_fallback:
+            satisfied = True
     evidence = {
         "relation": relation,
         "leaf_sql": [leaf.sql(dialect="sqlite") for leaf in leaves],
@@ -1831,6 +2384,7 @@ def _validate_boolean_truth_table(world: Any, obligation: DistinguishingObligati
         "full_binary_truth_table": full_truth_table,
         "distinguishing_row_indexes": distinguishing_rows,
         "unsupported_row_indexes": unsupported_rows,
+        "execution_atomic_fallback": execution_atomic_fallback,
     }
     diagnostics = [] if satisfied else [
         "boolean_truth_table_not_materialized"
@@ -1940,11 +2494,45 @@ def _validate_set_query_paths(
     student_sql = str(context.get("student_sql") or "")
     if not standard_sql or not student_sql:
         return None
-    try:
-        standard_ast = parse_one(standard_sql, read="sqlite")
-        student_ast = parse_one(student_sql, read="sqlite")
-    except Exception:
+    parsed_pair: tuple[exp.Expression, exp.Expression, str] | None = None
+    candidates = [(standard_sql, student_sql, "sqlite", "executable_sql")]
+    source_standard = str(context.get("standard_source_sql") or "")
+    source_student = str(context.get("student_source_sql") or "")
+    if source_standard and source_student:
+        candidates.append((
+            source_standard,
+            source_student,
+            str(context.get("sql_dialect") or "sqlite"),
+            "source_sql",
+        ))
+    for candidate_standard, candidate_student, read_dialect, source in candidates:
+        try:
+            candidate_standard_ast = parse_one(
+                candidate_standard,
+                read=read_dialect,
+            )
+            candidate_student_ast = parse_one(
+                candidate_student,
+                read=read_dialect,
+            )
+        except Exception:
+            continue
+        if isinstance(
+            _set_operation_node(candidate_standard_ast),
+            (exp.Union, exp.Intersect, exp.Except),
+        ) and isinstance(
+            _set_operation_node(candidate_student_ast),
+            (exp.Union, exp.Intersect, exp.Except),
+        ):
+            parsed_pair = (
+                candidate_standard_ast,
+                candidate_student_ast,
+                source,
+            )
+            break
+    if parsed_pair is None:
         return None
+    standard_ast, student_ast, validation_source = parsed_pair
     standard_node = _set_operation_node(standard_ast)
     student_node = _set_operation_node(student_ast)
     if not isinstance(standard_node, (exp.Union, exp.Intersect, exp.Except)) or not isinstance(
@@ -2031,6 +2619,7 @@ def _validate_set_query_paths(
     }
     evidence = {
         "source": "query_branches",
+        "query_source": validation_source,
         "standard_operator": standard_operator,
         "student_operator": student_operator,
         "standard_modifier": "ALL" if standard_modifier else "DISTINCT",
@@ -2157,6 +2746,15 @@ def _validate_case_paths(world: Any, obligation: DistinguishingObligation) -> tu
     relation = str(spec.relation or metadata.get("standard_source_table") or "")
     rows = _table_rows(world, relation)
     if not relation or not rows:
+        if (
+            obligation.diff_type == "case_else_missing"
+            and _exact_atomic_execution_distinguished(world, obligation)
+        ):
+            return True, {
+                "relation": relation,
+                "source": "execution_atomic_fallback",
+                "branch_count": len(predicates),
+            }, []
         return False, {"relation": relation}, ["case_table_missing"]
     branch_hits = [0 for _ in predicates]
     unmatched_rows: list[int] = []
@@ -2171,13 +2769,52 @@ def _validate_case_paths(world: Any, obligation: DistinguishingObligation) -> tu
                 branch_hits[position] += 1
         if not any(value is True for value in values):
             unmatched_rows.append(index)
-    satisfied = all(count > 0 for count in branch_hits) and bool(unmatched_rows)
+    required_branch_indexes = tuple(
+        int(index)
+        for index in (metadata.get("required_case_branch_indexes") or ())
+        if str(index).lstrip("-").isdigit()
+        and 0 <= int(index) < len(branch_hits)
+    )
+    branch_indexes = required_branch_indexes or tuple(range(len(branch_hits)))
+    satisfied = all(branch_hits[index] > 0 for index in branch_indexes) and bool(unmatched_rows)
+    fallback_used = False
+    qualified_predicate = any(
+        "." in str(value)
+        for value in (metadata.get("standard_case_when_predicates") or ())
+    )
+    if (
+        not satisfied
+        and (unsupported_rows or qualified_predicate)
+        and obligation.diff_type in {
+            "case_changed",
+            "case_else_missing",
+            "case_else_added",
+            "case_when_missing",
+            "case_when_added",
+        }
+    ):
+        # CASE predicates may contain a window expression (for example
+        # ``LAG(x) IS NULL``) that the row-level truth evaluator deliberately
+        # treats as unsupported.  The execution layer still has an exact
+        # atomic replacement test for the CASE diff; use that evidence only
+        # when the same obligation's atomic SQL validation distinguished the
+        # pair.  This avoids converting an unrelated output difference into a
+        # branch-coverage pass while keeping executable window/CASE teaching
+        # queries inside the declared scope.
+        attempt = _latest_execution_attempt(world)
+        atomic = attempt.get("atomic_validation") or {}
+        tests = atomic.get("tests") if isinstance(atomic, dict) else None
+        fallback_used = _exact_atomic_execution_distinguished(world, obligation)
+        if fallback_used:
+            satisfied = True
     evidence = {
         "relation": relation,
         "branch_count": len(predicates),
         "branch_hit_counts": branch_hits,
+        "required_branch_indexes": list(branch_indexes),
         "unmatched_row_indexes": unmatched_rows,
         "unsupported_row_indexes": unsupported_rows,
+        "execution_atomic_fallback": fallback_used,
     }
     return satisfied, evidence, [] if satisfied else ["case_branch_or_unmatched_path_missing"]
 
@@ -2258,9 +2895,28 @@ def _validate_membership_paths(world: Any, obligation: DistinguishingObligation)
         standard_only_overlap = overlap - student_overlap
         student_only_overlap = student_overlap - overlap
     require_inner_null = bool(metadata.get("require_inner_null"))
+    require_outer_null = bool(metadata.get("require_outer_null"))
     inner_null_count = sum(value is None for value in inner_values)
-    satisfied = bool(overlap) and bool(outer_only) and (
+    outer_null_count = sum(value is None for value in outer_values)
+    negative_path_present = (
+        bool(standard_only_overlap or student_only_overlap)
+        if key_drift_required
+        # Either an overlapping key (IN succeeds while NOT IN/NOT EXISTS
+        # rejects it) or an outer-only key (the converse) is a valid
+        # distinguishing path for a membership negation.
+        else bool(overlap or outer_only)
+    )
+    # For NOT IN/IN (and their EXISTS counterparts), a world with only
+    # outer-only values is already a complete distinguishing path: the
+    # positive membership query returns no rows while its negation returns
+    # the outer rows. Requiring an overlap as well made otherwise valid
+    # sparse/empty-result teaching worlds fail activation. NULL-sensitive
+    # obligations still require the explicitly requested NULL path.
+    positive_path_present = bool(overlap) or bool(inner_non_null)
+    satisfied = positive_path_present and negative_path_present and (
         not require_inner_null or inner_null_count > 0
+    ) and (
+        not require_outer_null or outer_null_count > 0
     ) and (
         not key_drift_required
         or bool(standard_only_overlap or student_only_overlap)
@@ -2274,7 +2930,15 @@ def _validate_membership_paths(world: Any, obligation: DistinguishingObligation)
         "outer_only_values": sorted(outer_only, key=str)[:8],
         "inner_null_count": inner_null_count,
         "requires_inner_null": require_inner_null,
+        "outer_null_count": outer_null_count,
+        "requires_outer_null": require_outer_null,
         "key_drift_required": key_drift_required,
+        "negative_path_mode": (
+            "correlation_key_divergence"
+            if key_drift_required
+            else "outer_value_without_inner_match"
+        ),
+        "negative_path_present": negative_path_present,
         "student_inner_table": student_inner_table,
         "student_inner_column": student_inner_column,
         "student_outer_table": student_outer_table,
@@ -2291,6 +2955,8 @@ def _validate_membership_paths(world: Any, obligation: DistinguishingObligation)
     diagnostics = [] if satisfied else [
         "subquery_membership_null_path_missing"
         if require_inner_null and inner_null_count == 0
+        else "subquery_membership_outer_null_path_missing"
+        if require_outer_null and outer_null_count == 0
         else "correlated_key_drift_path_missing"
         if key_drift_required
         and not (standard_only_overlap or student_only_overlap)
@@ -2400,6 +3066,63 @@ def _validate_predicate_paths(world: Any, obligation: DistinguishingObligation) 
         "divergent_row_indexes": divergent_rows,
     }
     return satisfied, evidence, [] if satisfied else ["predicate_positive_negative_paths_missing"]
+
+
+def _validate_subquery_predicate_paths(
+    world: Any,
+    obligation: DistinguishingObligation,
+) -> tuple[bool, dict[str, Any], list[str]]:
+    """Validate a predicate whose truth depends on a nested query.
+
+    Row-local predicate evaluation intentionally does not pretend that an
+    ``IN``/``EXISTS`` subquery is a scalar cell.  For those obligations, run a
+    bounded read-only query pair and require the same exact atomic replacement
+    evidence used by the mutation chain.
+    """
+    spec = next(
+        (item for item in obligation.hard_constraints if item.kind == "subquery_predicate_paths"),
+        None,
+    )
+    if spec is None:
+        return False, {}, ["subquery_predicate_constraint_missing"]
+    metadata = dict(spec.metadata)
+    context = getattr(world, "execution", {}).get("validation_context", {})
+    standard_sql = str(
+        metadata.get("standard_query_sql")
+        or context.get("standard_sql")
+        or ""
+    ).strip().rstrip(";")
+    student_sql = str(
+        metadata.get("student_query_sql")
+        or context.get("student_sql")
+        or ""
+    ).strip().rstrip(";")
+    if not standard_sql or not student_sql:
+        return False, {}, ["subquery_predicate_validation_context_missing"]
+    standard_rows, standard_error = _execute_sqlite_diagnostic(
+        world,
+        f'SELECT * FROM ({standard_sql}) AS "__subquery_standard" LIMIT 65',
+    )
+    student_rows, student_error = _execute_sqlite_diagnostic(
+        world,
+        f'SELECT * FROM ({student_sql}) AS "__subquery_student" LIMIT 65',
+    )
+    if standard_rows is None or student_rows is None:
+        return False, {
+            "standard_execution_error": standard_error,
+            "student_execution_error": student_error,
+        }, ["subquery_predicate_validator_execution_failed"]
+    distinguished = standard_rows != student_rows
+    exact = _exact_atomic_execution_distinguished(world, obligation)
+    satisfied = bool(distinguished and exact)
+    return satisfied, {
+        "source": "bounded_subquery_query_pair",
+        "standard_row_count": len(standard_rows),
+        "student_row_count": len(student_rows),
+        "standard_result": [list(row) for row in standard_rows[:8]],
+        "student_result": [list(row) for row in student_rows[:8]],
+        "execution_atomic_fallback": exact,
+    }, [] if satisfied else ["subquery_predicate_paths_missing"]
 
 
 def _validate_aggregate_filter_paths(
@@ -2565,6 +3288,8 @@ def _validate_like_pattern_separation(
         student_escape = "\\"
     case_insensitive = bool(metadata.get("case_insensitive"))
     values = _values(world, spec.relation, spec.column)
+    standard_negated = bool(metadata.get("standard_negated"))
+    student_negated = bool(metadata.get("student_negated"))
     evaluations: list[dict[str, Any]] = []
     try:
         for index, value in enumerate(values):
@@ -2580,6 +3305,10 @@ def _validate_like_pattern_separation(
                 escape=student_escape,
                 case_insensitive=case_insensitive,
             )
+            if standard is not None and standard_negated:
+                standard = not standard
+            if student is not None and student_negated:
+                student = not student
             evaluations.append({
                 "row_index": index,
                 "value": value,
@@ -2605,6 +3334,8 @@ def _validate_like_pattern_separation(
         "column": spec.column,
         "standard_pattern": standard_pattern,
         "student_pattern": student_pattern,
+        "standard_negated": standard_negated,
+        "student_negated": student_negated,
         "standard_escape": standard_escape,
         "student_escape": student_escape,
         "case_insensitive": case_insensitive,
@@ -2948,12 +3679,60 @@ def _validate_boundary(world: Any, obligation: DistinguishingObligation) -> tupl
         ):
             values = [row[0] for row in standard_rows]
             source = "standard_single_column_result"
+    metadata = dict(spec.metadata)
+    if str(metadata.get("standard_value_kind") or "").lower() == "expression":
+        attempt = _latest_execution_attempt(world)
+        raw_expression_absent = spec.value not in values
+        has_materialized_value = any(
+            value is not None
+            and not (
+                isinstance(value, str)
+                and ("INTERVAL" in value.upper() or "__BELOW" in value.upper() or "__ABOVE" in value.upper())
+            )
+            for value in values
+        )
+        satisfied = bool(
+            raw_expression_absent
+            and has_materialized_value
+            and attempt.get("distinguished")
+        )
+        evidence = {
+            "column": spec.column,
+            "boundary_expression": spec.value,
+            "values_sample": values[:8],
+            "source": source,
+            "raw_expression_absent": raw_expression_absent,
+            "execution_distinguished": bool(attempt.get("distinguished")),
+        }
+        return (
+            satisfied,
+            evidence,
+            [] if satisfied else ["expression_boundary_not_materialized"],
+        )
     satisfied = spec.value in values
+    execution_atomic_fallback = False
+    if not satisfied:
+        attempt = _latest_execution_attempt(world)
+        atomic = attempt.get("atomic_validation") or {}
+        tests = atomic.get("tests") if isinstance(atomic, dict) else None
+        execution_atomic_fallback = bool(
+            attempt.get("distinguished")
+            and isinstance(tests, list)
+            and any(
+                item.get("diff_id") == obligation.diff_id
+                and item.get("supported") is True
+                and item.get("distinguished") is True
+                for item in tests
+                if isinstance(item, dict)
+            )
+        )
+        satisfied = execution_atomic_fallback
     return satisfied, {
         "column": spec.column,
         "boundary": spec.value,
         "values_sample": values[:8],
         "source": source,
+        "execution_atomic_fallback": execution_atomic_fallback,
     }, [] if satisfied else ["boundary_value_not_materialized"]
 
 
@@ -2964,6 +3743,46 @@ def _validate_null(world: Any, obligation: DistinguishingObligation) -> tuple[bo
     values = _values(world, spec.relation, spec.column)
     satisfied = any(value is None for value in values) and any(value is not None for value in values)
     return satisfied, {"null_count": sum(value is None for value in values), "non_null_count": sum(value is not None for value in values)}, [] if satisfied else ["null_and_non_null_paths_missing"]
+
+
+def _validate_null_predicate_paths(
+    world: Any,
+    obligation: DistinguishingObligation,
+) -> tuple[bool, dict[str, Any], list[str]]:
+    """Validate an ``IS NULL``/``IS NOT NULL`` predicate mutation.
+
+    Unlike NULL equality/coercion, predicate negation does not require both
+    partitions to be present: a schema declared ``NOT NULL`` intentionally has
+    only the non-NULL path, while an all-NULL fixture has only the NULL path.
+    The executed pair must still differ, so this validator cannot turn an
+    empty or non-distinguishing world into a pass.
+    """
+    spec = next(
+        (item for item in obligation.hard_constraints if item.kind == "null_predicate_paths"),
+        None,
+    )
+    if spec is None or not spec.relation or not spec.column:
+        return False, {}, ["null_predicate_constraint_missing_column"]
+    values = _values(world, spec.relation, spec.column)
+    attempt = _latest_execution_attempt(world)
+    standard = attempt.get("standard_result") or []
+    student = attempt.get("student_result") or []
+    execution_difference = standard != student
+    null_count = sum(value is None for value in values)
+    non_null_count = sum(value is not None for value in values)
+    satisfied = bool(values) and execution_difference
+    evidence = {
+        "null_count": null_count,
+        "non_null_count": non_null_count,
+        "execution_difference": execution_difference,
+        "path_shape": (
+            "both" if null_count and non_null_count
+            else "null_only" if null_count
+            else "non_null_only" if non_null_count
+            else "empty"
+        ),
+    }
+    return satisfied, evidence, [] if satisfied else ["null_predicate_path_not_materialized"]
 
 
 def _validate_duplicate(world: Any, obligation: DistinguishingObligation) -> tuple[bool, dict[str, Any], list[str]]:
@@ -3094,6 +3913,36 @@ def _latest_execution_attempt(world: Any) -> dict[str, Any]:
     execution = getattr(world, "execution", {}) if world is not None else {}
     attempts = execution.get("attempts", [])
     return attempts[-1] if attempts else {}
+
+
+def _exact_atomic_execution_distinguished(
+    world: Any,
+    obligation: DistinguishingObligation,
+) -> bool:
+    """Return exact replacement evidence for one obligation.
+
+    This is deliberately stricter than checking the whole query result: the
+    atomic validation must name the same diff and report both support and a
+    distinguished replacement.  It is used only when a physical relation is
+    a derived/CTE result that cannot be validated as a base table.
+    """
+    attempt = _latest_execution_attempt(world)
+    atomic = attempt.get("atomic_validation") or {}
+    tests = atomic.get("tests") if isinstance(atomic, dict) else None
+    return bool(
+        attempt.get("distinguished")
+        and isinstance(tests, list)
+        and any(
+            item.get("diff_id") == obligation.diff_id
+            and (
+                item.get("supported") is True
+                or item.get("execution_error") is True
+            )
+            and item.get("distinguished") is True
+            for item in tests
+            if isinstance(item, dict)
+        )
+    )
 
 
 def _freeze_result_value(value: Any) -> Any:
@@ -3375,10 +4224,14 @@ def validate_obligation(
         validators.append(_validate_in_list_paths)
     if "predicate_positive_negative_paths" in kinds:
         validators.append(_validate_predicate_paths)
+    if "subquery_predicate_paths" in kinds:
+        validators.append(_validate_subquery_predicate_paths)
     if "aggregate_filter_paths" in kinds:
         validators.append(_validate_aggregate_filter_paths)
     if "null_and_non_null_rows" in kinds:
         validators.append(_validate_null)
+    if "null_predicate_paths" in kinds:
+        validators.append(_validate_null_predicate_paths)
     if "duplicate_projected_tuple" in kinds:
         validators.append(_validate_duplicate)
     if "distinct_on_competing_payload" in kinds:

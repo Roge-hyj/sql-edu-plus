@@ -8,11 +8,12 @@ import core.parseval_data_generator as parseval
 from core.ast_schema import SQLStructureIR
 from core.parseval_data_generator import (
     _apply_not_in_null_probe,
+    _execute_sqlite,
     _execute_mutation_case,
     _prepare_executable_sql_pair,
     _is_likely_backend_capability_error,
     extract_ast_diffs,
-    generate_and_compare,
+    generate_and_compare as _generate_and_compare,
     parse_schema_text,
     parse_schema_column_types,
     transpile_to_sqlite,
@@ -22,6 +23,19 @@ from core.native_engine_runner import (
     NativeQueryExecutionError,
     NativeResultLimitError,
 )
+from core.witness_generation import SchemaCatalog
+from core.witness_generation.obligations import stable_diff_id
+
+
+def generate_and_compare(*args, **kwargs):
+    """Make SQLite compatibility explicit for legacy unit fixtures.
+
+    Production callers must choose a backend for declared vendor dialects;
+    these fixtures exercise the bounded SQLite compatibility path unless a
+    test explicitly supplies another backend.
+    """
+    kwargs.setdefault("execution_backend", "sqlite")
+    return _generate_and_compare(*args, **kwargs)
 
 
 def _patch_native_session(monkeypatch, execute):
@@ -48,6 +62,347 @@ def test_native_runtime_errors_do_not_use_sqlite_capability_heuristics():
     assert _is_likely_backend_capability_error(
         "sqlite", 'near "LATERAL": syntax error', sql
     ) is True
+
+
+def test_single_row_correlated_lateral_projection_is_lowered_for_sqlite():
+    standard = (
+        "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL "
+        "(SELECT s.id + 1 AS value) x"
+    )
+    student = "SELECT name, id + 1 AS value FROM student"
+
+    sqlite_sql = transpile_to_sqlite(standard, source_dialect="mysql")
+    run = generate_and_compare(
+        "student(id, name);",
+        standard,
+        student,
+        sql_dialect="mysql",
+    )
+
+    assert sqlite_sql is not None
+    assert "LATERAL" not in sqlite_sql.upper()
+    assert extract_ast_diffs(standard, student, dialect="mysql") == []
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.is_equivalent is True
+
+
+def test_multirow_lateral_source_remains_an_explicit_engine_boundary():
+    sql = (
+        "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL "
+        "(SELECT t.course_id AS value FROM takes t WHERE t.id = s.id) x"
+    )
+
+    run = generate_and_compare(
+        "student(id, name); takes(id, course_id);",
+        sql,
+        sql,
+        sql_dialect="mysql",
+    )
+
+    assert run.executed is False
+    assert run.status == "KNOWN_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert "LATERAL" in run.data_evidence["unsupported_features"]
+
+
+@pytest.mark.parametrize(
+    ("standard", "student"),
+    [
+        (
+            "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL "
+            "(SELECT s.id + 1 AS value) x",
+            "SELECT name, id + 2 AS value FROM student",
+        ),
+        (
+            "SELECT s.name, x.value FROM student s CROSS JOIN LATERAL "
+            "(SELECT s.id + 1 AS value) x WHERE s.id > 1",
+            "SELECT name, id + 1 AS value FROM student",
+        ),
+    ],
+)
+def test_lateral_inline_rule_does_not_hide_unrelated_changes(standard, student):
+    diffs = extract_ast_diffs(standard, student, dialect="mysql")
+    run = generate_and_compare(
+        "student(id, name);",
+        standard,
+        student,
+        sql_dialect="mysql",
+        max_rows_per_table=4,
+    )
+
+    assert diffs
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.is_equivalent is False
+
+
+@pytest.mark.parametrize("operator", ["INTERSECT", "EXCEPT"])
+def test_two_branch_set_all_is_lowered_with_duplicate_safe_row_numbers(operator):
+    standard = (
+        "SELECT title FROM course "
+        f"{operator} ALL "
+        "SELECT title FROM course WHERE credits = 3"
+    )
+
+    sqlite_sql = transpile_to_sqlite(standard, source_dialect="mysql")
+    run = generate_and_compare(
+        "course(id INT PRIMARY KEY, title TEXT, credits INT);",
+        standard,
+        standard,
+        sql_dialect="mysql",
+        max_rows_per_table=4,
+    )
+
+    assert sqlite_sql is not None
+    assert "INTERSECT ALL" not in sqlite_sql.upper()
+    assert "EXCEPT ALL" not in sqlite_sql.upper()
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+
+
+def test_set_all_lowering_preserves_multicolumn_null_multiplicity():
+    rows = {
+        "items": [
+            {"side": "L", "a": 1, "b": None},
+            {"side": "L", "a": 1, "b": None},
+            {"side": "L", "a": 1, "b": None},
+            {"side": "L", "a": 2, "b": "x"},
+            {"side": "R", "a": 1, "b": None},
+            {"side": "R", "a": 1, "b": None},
+            {"side": "R", "a": 2, "b": "x"},
+            {"side": "R", "a": 2, "b": "x"},
+            {"side": "R", "a": 3, "b": "y"},
+        ]
+    }
+    base = "SELECT a, b FROM items WHERE side = '{}'"
+    intersect_sql = transpile_to_sqlite(
+        base.format("L") + " INTERSECT ALL " + base.format("R"),
+        source_dialect="mysql",
+    )
+    except_sql = transpile_to_sqlite(
+        base.format("L") + " EXCEPT ALL " + base.format("R"),
+        source_dialect="mysql",
+    )
+
+    assert intersect_sql is not None
+    assert except_sql is not None
+    _, intersect_rows = _execute_sqlite(
+        {"items": ["side", "a", "b"]},
+        rows,
+        intersect_sql,
+        schema_types={
+            "items": {"side": "TEXT", "a": "INT", "b": "TEXT"}
+        },
+    )
+    _, except_rows = _execute_sqlite(
+        {"items": ["side", "a", "b"]},
+        rows,
+        except_sql,
+        schema_types={
+            "items": {"side": "TEXT", "a": "INT", "b": "TEXT"}
+        },
+    )
+
+    assert Counter(intersect_rows) == Counter({(1, None): 2, (2, "x"): 1})
+    assert Counter(except_rows) == Counter({(1, None): 1})
+
+
+@pytest.mark.parametrize(
+    ("standard", "student", "row_count"),
+    [
+        (
+            "SELECT title FROM course INTERSECT ALL SELECT title FROM course",
+            "SELECT title FROM course INTERSECT SELECT title FROM course",
+            4,
+        ),
+        (
+            "SELECT title FROM course INTERSECT ALL SELECT title FROM course",
+            "SELECT title FROM course INTERSECT SELECT title FROM course",
+            10,
+        ),
+        (
+            "SELECT title FROM course INTERSECT ALL "
+            "SELECT title FROM course WHERE credits >= 3",
+            "SELECT title FROM course INTERSECT "
+            "SELECT title FROM course WHERE credits >= 3",
+            4,
+        ),
+        (
+            "SELECT title FROM course EXCEPT ALL "
+            "SELECT title FROM course WHERE credits = 3",
+            "SELECT title FROM course EXCEPT "
+            "SELECT title FROM course WHERE credits = 3",
+            4,
+        ),
+        (
+            "SELECT title FROM course EXCEPT ALL "
+            "SELECT title FROM course WHERE credits = 3",
+            "SELECT title FROM course EXCEPT "
+            "SELECT title FROM course WHERE credits = 3",
+            10,
+        ),
+    ],
+)
+def test_set_all_modifier_difference_has_full_counterexample_evidence(
+    standard,
+    student,
+    row_count,
+):
+    run = generate_and_compare(
+        "course(id INT PRIMARY KEY, title TEXT, credits INT);",
+        standard,
+        student,
+        sql_dialect="mysql",
+        max_rows_per_table=row_count,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.is_equivalent is False
+    assert run.mutation_evidence["summary"]["fixed_by_replacement"] >= 1
+    effectiveness = next(
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "set_overlap"
+    )
+    assert effectiveness["constraints_satisfied"] is True
+    assert effectiveness["semantic_validation"]["evidence"]["query_source"] == "source_sql"
+
+
+@pytest.mark.parametrize(
+    "branch",
+    [
+        "SELECT title FROM course",
+        "SELECT title FROM course WHERE credits >= 3",
+    ],
+)
+def test_identical_deterministic_except_branches_ignore_all_modifier(branch):
+    standard = f"{branch} EXCEPT ALL {branch}"
+    student = f"{branch} EXCEPT {branch}"
+
+    run = generate_and_compare(
+        "course(id INT PRIMARY KEY, title TEXT, credits INT);",
+        standard,
+        student,
+        sql_dialect="mysql",
+        max_rows_per_table=4,
+    )
+
+    assert extract_ast_diffs(standard, student, dialect="mysql") == []
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.is_equivalent is True
+
+
+def test_identical_except_branch_modifier_rule_rejects_unstable_expressions():
+    standard = "SELECT RAND() FROM course EXCEPT ALL SELECT RAND() FROM course"
+    student = "SELECT RAND() FROM course EXCEPT SELECT RAND() FROM course"
+
+    diffs = extract_ast_diffs(standard, student, dialect="mysql")
+
+    assert any(diff.diff_type == "set_modifier_changed" for diff in diffs)
+
+
+def test_identical_except_branch_modifier_rule_does_not_cover_intersect():
+    standard = "SELECT title FROM course INTERSECT ALL SELECT title FROM course"
+    student = "SELECT title FROM course INTERSECT SELECT title FROM course"
+
+    diffs = extract_ast_diffs(standard, student, dialect="mysql")
+
+    assert any(diff.diff_type == "set_modifier_changed" for diff in diffs)
+
+
+@pytest.mark.parametrize(
+    ("operator", "schema", "left", "right"),
+    [
+        (
+            "INTERSECT",
+            "course(id INT PRIMARY KEY, credits INT);",
+            "SELECT credits + 1 FROM course",
+            "SELECT credits + 1 FROM course",
+        ),
+        (
+            "EXCEPT",
+            "left_rows(id INT PRIMARY KEY, value INT); "
+            "right_rows(id INT PRIMARY KEY, value INT);",
+            "SELECT value * 2 FROM left_rows",
+            "SELECT value * 2 FROM right_rows",
+        ),
+    ],
+)
+def test_set_all_materializer_supports_one_column_arithmetic_projection(
+    operator,
+    schema,
+    left,
+    right,
+):
+    standard = f"{left} {operator} ALL {right}"
+    student = f"{left} {operator} {right}"
+
+    run = generate_and_compare(
+        schema,
+        standard,
+        student,
+        sql_dialect="mysql",
+        max_rows_per_table=8,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.is_equivalent is False
+    effectiveness = next(
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "set_overlap"
+    )
+    assert effectiveness["constraints_satisfied"] is True
+    assert effectiveness["distinguished"] is True
+
+
+@pytest.mark.parametrize("projection", ["a + b", "ABS(a)"])
+def test_set_all_materializer_stays_conservative_for_unsupported_projection(
+    projection,
+):
+    standard = (
+        f"SELECT {projection} FROM t INTERSECT ALL "
+        f"SELECT {projection} FROM t"
+    )
+    student = standard.replace(" INTERSECT ALL ", " INTERSECT ")
+
+    run = generate_and_compare(
+        "t(id INT PRIMARY KEY, a INT, b INT);",
+        standard,
+        student,
+        sql_dialect="mysql",
+        max_rows_per_table=8,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "KNOWN_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert run.is_equivalent is True
+
+
+def test_set_all_with_outer_order_remains_an_engine_boundary():
+    sql = "SELECT title FROM course INTERSECT ALL SELECT title FROM course ORDER BY title"
+
+    run = generate_and_compare(
+        "course(id INT PRIMARY KEY, title TEXT, credits INT);",
+        sql,
+        sql,
+        sql_dialect="mysql",
+    )
+
+    assert run.executed is False
+    assert run.status == "KNOWN_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
 
 
 @pytest.mark.parametrize(
@@ -619,6 +974,126 @@ def test_top_level_distinct_witness_exposes_bounded_difference():
     assert tests[0]["fixed_by_replacement"] is True
 
 
+def test_constant_true_filter_is_a_supported_equivalent_rewrite():
+    standard = "SELECT MIN(value) FROM t"
+    student = "SELECT MIN(value) FROM t WHERE 1 = 1"
+
+    assert extract_ast_diffs(standard, student) == []
+    run = generate_and_compare("t(id, value);", standard, student)
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+
+
+def test_filtered_aggregate_presence_materializes_a_different_minimum():
+    run = generate_and_compare(
+        "episodes(episode, no_in_season, viewers);",
+        "SELECT MIN(no_in_season) FROM episodes WHERE viewers = '3.00'",
+        "SELECT MIN(no_in_season) FROM episodes",
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+    effectiveness = next(
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "predicate_positive_negative"
+    )
+    assert effectiveness["constraints_satisfied"] is True
+
+
+def test_distinct_filter_witness_duplicates_two_qualifying_rows():
+    run = generate_and_compare(
+        "episodes(episode, first_air_date, other);",
+        "SELECT first_air_date FROM episodes WHERE episode = 9",
+        "SELECT DISTINCT first_air_date FROM episodes WHERE episode = 9",
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+    effectiveness = next(
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "duplicate_projection"
+    )
+    assert effectiveness["constraints_satisfied"] is True
+
+
+def test_numeric_leading_schema_identifiers_share_parser_and_sqlite_semantics():
+    standard = (
+        "SELECT tournament FROM matches "
+        "WHERE 2007 = '1r' AND 2009 = '1r'"
+    )
+    student = standard.replace("AND", "OR")
+    run = generate_and_compare(
+        "matches(tournament, 2007, 2009);",
+        standard,
+        student,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+    effectiveness = next(
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "logical_truth_table"
+    )
+    assert effectiveness["constraints_satisfied"] is True
+
+
+def test_numeric_identifier_quote_repair_preserves_diff_identity():
+    schema = "matches(tournament, 2007, 2009);"
+    standard = "SELECT tournament FROM matches WHERE 2007 = '1r' AND 2009 = '1r'"
+    student = "SELECT tournament FROM matches WHERE 2007 = '1r' OR 2009 = '1r'"
+
+    raw_ids = [stable_diff_id(diff) for diff in extract_ast_diffs(standard, student)]
+    run = generate_and_compare(schema, standard, student)
+    repaired_ids = [stable_diff_id(diff) for diff in run.ast_diffs]
+
+    assert repaired_ids == raw_ids
+
+
+def test_string_filter_reaches_count_column_vs_count_star_witness():
+    run = generate_and_compare(
+        "scores(country, press_index);",
+        "SELECT COUNT(press_index) FROM scores WHERE country = 'Austria'",
+        "SELECT COUNT(*) FROM scores WHERE country = 'Austria'",
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+
+
+def test_string_filter_reaches_min_max_witness():
+    run = generate_and_compare(
+        "senators(residence, term_limited);",
+        "SELECT MIN(term_limited) FROM senators WHERE residence = 'Coshocton'",
+        "SELECT MAX(term_limited) FROM senators WHERE residence = 'Coshocton'",
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+
+
+def test_string_filter_reaches_distinct_projection_witness():
+    run = generate_and_compare(
+        "tax(year, reserve_tax, revenue_ratio);",
+        "SELECT reserve_tax FROM tax WHERE revenue_ratio = '0.79'",
+        "SELECT DISTINCT reserve_tax FROM tax WHERE revenue_ratio = '0.79'",
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+
+
 def test_self_join_distinct_witness_materializes_duplicate_result_paths():
     standard = (
         "SELECT DISTINCT l1.num AS ConsecutiveNums FROM logs l1 "
@@ -742,7 +1217,7 @@ def test_tsql_variable_assignment_is_engine_gap_not_sqlite_equality():
     )
 
     assert run.executed is False
-    assert run.status == "ENGINE_GAP"
+    assert run.status == "KNOWN_GAP"
     assert run.equivalence_conclusion == "UNDECIDED"
     assert run.data_evidence["sql_dialect"] == "tsql"
     assert run.data_evidence["unsupported_features"] == [
@@ -1053,6 +1528,681 @@ def test_sql_server_recursive_cte_transpiles_with_recursive_and_without_option()
     assert "OPTION" not in sqlite_sql.upper()
 
 
+def test_postgres_date_trunc_and_month_length_transpile_for_sqlite():
+    sqlite_sql = transpile_to_sqlite(
+        "SELECT DATE_TRUNC('MONTH', started_at), "
+        "CAST((month_start + INTERVAL '1' MONTH) AS DATE) "
+        "- CAST(month_start AS DATE) FROM bookings",
+        source_dialect="postgres",
+    )
+
+    assert sqlite_sql is not None
+    assert "TIMESTAMP_TRUNC" not in sqlite_sql.upper()
+    assert " INTERVAL " not in sqlite_sql.upper()
+    assert "JULIANDAY" in sqlite_sql.upper()
+    assert "start of month" in sqlite_sql
+
+
+def test_postgres_dynamic_interval_arithmetic_uses_bounded_sqlite_udf():
+    sql = (
+        "SELECT starttime, starttime + slots * (INTERVAL '30 minutes') "
+        "AS endtime FROM cd.bookings"
+    )
+
+    sqlite_sql = transpile_to_sqlite(sql, source_dialect="postgres")
+    run = generate_and_compare(
+        "bookings(starttime TIMESTAMP, slots INTEGER);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+    )
+
+    assert sqlite_sql is not None
+    assert "PG_INTERVAL_ADD" in sqlite_sql
+    assert "INTERVAL '" not in sqlite_sql.upper()
+    assert run.executed is True
+    assert run.is_equivalent is True
+    assert run.standard_rows[0][1] == "2024-01-01 00:30:00"
+
+
+def test_postgres_interval_month_subtraction_uses_elapsed_days():
+    sql = (
+        "SELECT (date_trunc('month', testts) + interval '1 month') "
+        "- date_trunc('day', testts) FROM bookings"
+    )
+    run = generate_and_compare(
+        "bookings(testts TIMESTAMP);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is True
+    assert run.standard_rows[:3] == [(31,), (30,), (29,)]
+    assert parseval._sql_date_add("month", 1, "2024-01-31") == "2024-02-29"
+
+
+def test_sqlite_fixture_unqualifies_catalog_tables_and_orders_by_output_ordinal():
+    catalog = SchemaCatalog.from_dict({
+        "source": "fixture",
+        "db_id": "club",
+        "tables": [{
+            "name": "members",
+            "columns": [
+                {"name": "memid", "data_type": "INT", "nullable": False},
+                {"name": "name", "data_type": "TEXT", "nullable": False},
+            ],
+            "primary_key": ["memid"],
+            "foreign_keys": [],
+            "unique_constraints": [["memid"]],
+        }],
+    })
+    sql = (
+        "SELECT left_member.memid, right_member.name "
+        "FROM cd.members left_member JOIN cd.members right_member "
+        "ON left_member.memid = right_member.memid ORDER BY memid"
+    )
+    ast = parse_one(sql, read="postgres")
+
+    standard, student = _prepare_executable_sql_pair(
+        "sqlite",
+        sql,
+        sql,
+        standard_ast=ast,
+        student_ast=ast.copy(),
+        source_dialect="postgres",
+        schema_catalog=catalog,
+    )
+
+    assert standard == student
+    assert standard is not None
+    assert '"cd"' not in standard
+    assert "ORDER BY 1" in standard
+
+
+def test_mutation_replay_uses_the_same_catalog_table_mapping_as_execution():
+    catalog = SchemaCatalog.from_dict({
+        "source": "fixture",
+        "db_id": "club",
+        "tables": [{
+            "name": "facilities",
+            "columns": [
+                {"name": "facid", "data_type": "INT", "nullable": False},
+                {"name": "guestcost", "data_type": "NUMERIC", "nullable": False},
+            ],
+            "primary_key": ["facid"],
+            "foreign_keys": [],
+            "unique_constraints": [["facid"]],
+        }],
+    })
+    run = generate_and_compare(
+        "facilities(facid INT PRIMARY KEY, guestcost NUMERIC);",
+        "SELECT COUNT(*) FROM cd.facilities WHERE guestcost >= 10",
+        "SELECT COUNT(*) FROM cd.facilities WHERE guestcost > 10",
+        sql_dialect="postgres",
+        schema_catalog=catalog,
+    )
+
+    where_test = next(
+        item for item in run.mutation_evidence["tests"]
+        if item["clause"] == "WHERE"
+    )
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert '"cd"' not in where_test["replacement_sql"]
+    assert where_test["replacement_exec_ok"] is True
+    assert where_test["fixed_by_replacement"] is True
+
+
+def test_temporal_comparison_boundary_materializes_valid_date():
+    run = generate_and_compare(
+        "events(id INT, event_date DATE, kind TEXT);",
+        "SELECT id FROM events WHERE event_date >= '2020-01-01'",
+        "SELECT id FROM events WHERE event_date > '2020-01-01'",
+        max_rows_per_table=4,
+        sql_dialect="sqlite",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert run.status == "SUPPORTED"
+    assert any(row[0] == 1 for row in run.standard_rows)
+    assert all(row[0] != 1 for row in run.student_rows)
+    assert run.test_database["events"][0]["event_date"] == "2020-01-01"
+
+
+def test_year_comparison_boundary_materializes_a_parseable_date():
+    run = generate_and_compare(
+        "Dim_Simulados(id_simulado INT, nome TEXT, data_aplicacao TEXT);",
+        "SELECT nome, CASE WHEN YEAR(data_aplicacao) < 2025 THEN 'Antigo' ELSE 'Recente' END AS status FROM Dim_Simulados",
+        "SELECT nome, CASE WHEN YEAR(data_aplicacao) <= 2025 THEN 'Antigo' ELSE 'Recente' END AS status FROM Dim_Simulados",
+        max_rows_per_table=4,
+        sql_dialect="tsql",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert run.test_database["Dim_Simulados"][0]["data_aplicacao"] == "2025-01-01"
+    assert run.standard_rows[0][1] == "Recente"
+    assert run.student_rows[0][1] == "Antigo"
+
+
+def test_temporal_boundary_keeps_compound_join_filter_reachable():
+    run = generate_and_compare(
+        "facilities(facid INT, name TEXT); bookings(bookid INT, facid INT, starttime DATE);",
+        "SELECT b.starttime, f.name FROM facilities f JOIN bookings b ON f.facid=b.facid WHERE f.name IN ('Tennis Court 2','Tennis Court 1') AND b.starttime >= '2012-09-21' AND b.starttime < '2012-09-22'",
+        "SELECT b.starttime, f.name FROM facilities f JOIN bookings b ON f.facid=b.facid WHERE f.name IN ('Tennis Court 2','Tennis Court 1') AND b.starttime > '2012-09-21' AND b.starttime < '2012-09-22'",
+        max_rows_per_table=4,
+        sql_dialect="postgres",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert run.standard_rows
+    assert run.student_rows == []
+    assert run.test_database["bookings"][0]["starttime"] == "2012-09-21"
+
+
+def test_cte_aggregate_alias_boundary_is_pushed_to_base_rows():
+    standard_sql = (
+        "WITH averages AS ("
+        "SELECT t.name AS group_name, AVG(a.age) AS average_age "
+        "FROM people a JOIN teams t ON a.team_id = t.team_id "
+        "GROUP BY t.name) "
+        "SELECT group_name, average_age FROM averages WHERE average_age > 22"
+    )
+    student_sql = standard_sql.replace("average_age > 22", "average_age >= 22")
+    run = generate_and_compare(
+        "people(id INT, age INT, team_id INT); teams(team_id INT, name TEXT);",
+        standard_sql,
+        student_sql,
+        max_rows_per_table=8,
+        sql_dialect="sqlite",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert run.standard_rows == []
+    assert len(run.student_rows) == 1
+    assert run.student_rows[0][1] == 22
+    assert [row["age"] for row in run.test_database["people"][:2]] == [21, 23]
+
+
+def test_join_having_count_boundary_is_post_join_exact():
+    run = generate_and_compare(
+        "questions(question_id INT, quiz_id INT); quizzes(quiz_id INT, name TEXT);",
+        "SELECT qz.name, COUNT(q.question_id) AS total FROM questions q JOIN quizzes qz ON q.quiz_id = qz.quiz_id GROUP BY qz.name HAVING COUNT(q.question_id) > 15",
+        "SELECT qz.name, COUNT(q.question_id) AS total FROM questions q JOIN quizzes qz ON q.quiz_id = qz.quiz_id GROUP BY qz.name HAVING COUNT(q.question_id) >= 15",
+        max_rows_per_table=16,
+        sql_dialect="sqlite",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert run.standard_rows == []
+    assert len(run.student_rows) == 1
+    assert run.student_rows[0][1] == 15
+
+
+def test_having_percentage_boundary_materializes_joined_error_ratio():
+    standard_sql = (
+        "SELECT t.name AS topic, d.name AS discipline, COUNT(r.response_id) AS total, "
+        "SUM(CASE WHEN r.correct = 0 THEN 1 ELSE 0 END) AS errors, "
+        "100.0 * SUM(CASE WHEN r.correct = 0 THEN 1 ELSE 0 END) / "
+        "NULLIF(COUNT(r.response_id), 0) AS error_pct "
+        "FROM responses r JOIN questions q ON r.question_id = q.question_id "
+        "JOIN topics t ON q.topic_id = t.topic_id "
+        "JOIN disciplines d ON t.discipline_id = d.discipline_id "
+        "GROUP BY t.name, d.name HAVING 100.0 * "
+        "SUM(CASE WHEN r.correct = 0 THEN 1 ELSE 0 END) / "
+        "NULLIF(COUNT(r.response_id), 0) > 40"
+    )
+    student_sql = standard_sql.replace("> 40", ">= 40")
+    run = generate_and_compare(
+        "responses(response_id INT, question_id INT, correct INT); "
+        "questions(question_id INT, topic_id INT); "
+        "topics(topic_id INT, discipline_id INT, name TEXT); "
+        "disciplines(discipline_id INT, name TEXT);",
+        standard_sql,
+        student_sql,
+        max_rows_per_table=16,
+        sql_dialect="sqlite",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert run.standard_rows == []
+    assert len(run.student_rows) == 1
+    assert run.student_rows[0][2:] == (5, 2, 40)
+
+
+def test_window_alias_boundary_materializes_required_partition_rows():
+    standard_sql = (
+        "WITH ranked AS (SELECT p.id, p.name, t.name AS team, p.age, "
+        "ROW_NUMBER() OVER (PARTITION BY t.name ORDER BY p.age DESC) AS rn "
+        "FROM people p LEFT JOIN teams t ON p.team_id = t.team_id) "
+        "SELECT id, name, team, age FROM ranked WHERE rn <= 3 ORDER BY team, rn"
+    )
+    student_sql = standard_sql.replace("rn <= 3", "rn < 3")
+    run = generate_and_compare(
+        "people(id INT, name TEXT, age INT, team_id INT); teams(team_id INT, name TEXT);",
+        standard_sql,
+        student_sql,
+        max_rows_per_table=8,
+        sql_dialect="sqlite",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert len(run.standard_rows) > len(run.student_rows)
+    assert len(run.standard_rows) - len(run.student_rows) == 1
+
+
+def test_null_order_case_does_not_mask_direction_with_limit():
+    run = generate_and_compare(
+        "Products(Code INT, Name TEXT, Price INT, Manufacturer INT);",
+        "SELECT name, price FROM Products ORDER BY price ASC LIMIT 1",
+        "SELECT name, price FROM Products ORDER BY CASE WHEN price IS NULL THEN 1 ELSE 0 END DESC, price DESC LIMIT 1",
+        max_rows_per_table=12,
+        sql_dialect="sqlite",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert run.standard_rows[0][1] != run.student_rows[0][1]
+    assert all(row["Price"] is not None for row in run.test_database["Products"])
+
+
+def test_derived_sum_alias_boundary_materializes_exact_revenue():
+    standard_sql = (
+        "SELECT name, revenue FROM (SELECT f.name, "
+        "SUM(CASE WHEN b.memid = 0 THEN b.slots * f.guestcost "
+        "ELSE b.slots * f.membercost END) AS revenue "
+        "FROM bookings b JOIN facilities f ON b.facid = f.facid "
+        "GROUP BY f.name) AS totals WHERE revenue < 1000 ORDER BY revenue"
+    )
+    student_sql = standard_sql.replace("revenue < 1000", "revenue <= 1000")
+    run = generate_and_compare(
+        "bookings(bookid INT, facid INT, memid INT, slots INT); "
+        "facilities(facid INT, name TEXT, membercost INT, guestcost INT);",
+        standard_sql,
+        student_sql,
+        max_rows_per_table=8,
+        sql_dialect="postgres",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert run.student_rows[-1][1] == 1000
+    assert all(row[1] != 1000 for row in run.standard_rows)
+
+
+def test_recursive_identity_world_is_acyclic_without_ast_differences():
+    sql = """
+        WITH RECURSIVE recommendeds(memid) AS (
+          SELECT memid FROM members WHERE recommendedby = 1
+          UNION ALL
+          SELECT mems.memid FROM recommendeds recs
+          JOIN members mems ON mems.recommendedby = recs.memid
+        )
+        SELECT recs.memid, mems.name
+        FROM recommendeds recs JOIN members mems ON recs.memid = mems.memid
+        ORDER BY memid
+    """
+
+    run = generate_and_compare(
+        "members(memid INT PRIMARY KEY, name TEXT, recommendedby INT);",
+        sql,
+        sql,
+        max_rows_per_table=8,
+        sql_dialect="postgres",
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is True
+
+
+def test_nested_exists_boundary_survives_outer_join_count_and_not_in_filters():
+    standard = """
+        SELECT Pt.NAME, PhPCP.NAME
+        FROM Patient Pt, Physician PhPCP
+        WHERE Pt.PCP = PhPCP.EmployeeID
+          AND EXISTS (
+              SELECT * FROM Prescribes Pr
+              WHERE Pr.Patient = Pt.SSN AND Pr.Physician = Pt.PCP
+          )
+          AND EXISTS (
+              SELECT * FROM Undergoes U, Procedures Pr
+              WHERE U.Procedures = Pr.CODE
+                AND U.Patient = Pt.SSN
+                AND Pr.Cost > 5000
+          )
+          AND 2 <= (
+              SELECT COUNT(A.AppointmentID)
+              FROM Appointment A, Nurse N
+              WHERE A.PrepNurse = N.EmployeeID AND N.Registered = 1
+          )
+          AND NOT Pt.PCP IN (SELECT Head FROM Department)
+    """
+    student = standard.replace("Pr.Cost > 5000", "Pr.Cost >= 5000")
+    schema = (
+        "Physician(EmployeeID INT PRIMARY KEY, Name TEXT); "
+        "Department(DepartmentID INT PRIMARY KEY, Head INT); "
+        "Procedures(Code INT PRIMARY KEY, Cost INT); "
+        "Patient(SSN INT PRIMARY KEY, Name TEXT, PCP INT); "
+        "Nurse(EmployeeID INT PRIMARY KEY, Registered INT); "
+        "Appointment(AppointmentID INT PRIMARY KEY, PrepNurse INT); "
+        "Prescribes(Physician INT, Patient INT); "
+        "Undergoes(Patient INT, Procedures INT);"
+    )
+
+    run = generate_and_compare(
+        schema,
+        standard,
+        student,
+        max_rows_per_table=4,
+        sql_dialect="sqlite",
+    )
+
+    assert run.executed is True
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is False
+    assert run.standard_rows == []
+    assert run.student_rows
+    boundary = next(
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "comparison_boundary_tristate"
+    )
+    assert boundary["constraints_satisfied"] is True
+    assert boundary["causal_attribution_verified"] is True
+
+
+def test_recursive_cte_output_alias_maps_to_anchor_relationship_column():
+    sql = """
+        WITH RECURSIVE recommenders(recommender, member) AS (
+          SELECT recommendedby, memid FROM cd.members
+          UNION ALL
+          SELECT mems.recommendedby, recs.member
+          FROM recommenders recs
+          INNER JOIN cd.members mems ON mems.memid = recs.recommender
+        )
+        SELECT recs.member, mems.firstname, mems.surname, recs.recommender
+        FROM recommenders recs
+        INNER JOIN cd.members mems ON recs.recommender = mems.memid
+        ORDER BY recs.member, recs.recommender
+    """
+
+    run = generate_and_compare(
+        "members(memid INTEGER PRIMARY KEY, recommendedby INTEGER, "
+        "firstname TEXT, surname TEXT);",
+        sql,
+        sql,
+        max_rows_per_table=8,
+        sql_dialect="postgres",
+    )
+
+    members = run.test_database["members"]
+    assert run.executed is True
+    assert run.is_equivalent is True
+    assert members[0]["recommendedby"] is None
+    assert all(
+        member["recommendedby"] == members[index - 1]["memid"]
+        for index, member in enumerate(members[1:], start=1)
+    )
+
+
+def test_postgres_lpad_and_translate_have_exact_sqlite_compatibility():
+    sql = (
+        "SELECT LPAD(CAST(zipcode AS CHAR(5)), 5, '0'), "
+        "TRANSLATE(telephone, '-() ', '') FROM members ORDER BY memid"
+    )
+
+    run = generate_and_compare(
+        "members(memid INT PRIMARY KEY, zipcode INT, telephone TEXT);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+    )
+
+    assert parseval._sql_lpad("42", 5, "0") == "00042"
+    assert parseval._sql_lpad("abcdef", 4, "0") == "abcd"
+    assert parseval._sql_translate("(555) 12-34", "-() ", "") == "5551234"
+    assert run.executed is True
+    assert run.is_equivalent is True
+
+
+def test_postgres_bounded_literal_generate_series_executes_in_sqlite():
+    sql = (
+        "SELECT generate_series(timestamp '2012-10-01', "
+        "timestamp '2012-10-31', interval '1 day') AS ts"
+    )
+
+    run = generate_and_compare("", sql, sql, sql_dialect="postgres")
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+    assert len(run.standard_rows) == 31
+    assert run.standard_rows[0] == ("2012-10-01 00:00:00",)
+    assert run.standard_rows[-1] == ("2012-10-31 00:00:00",)
+
+
+def test_postgres_bounded_generate_series_preserves_derived_filter_mutation():
+    standard = (
+        "SELECT d.date FROM (SELECT CAST(generate_series("
+        "timestamp '2012-08-01', timestamp '2012-08-05', "
+        "interval '1 day') AS date) AS date) d "
+        "WHERE d.date < '2012-08-03'"
+    )
+    student = standard.replace(" < '2012-08-03'", " <= '2012-08-03'")
+
+    run = generate_and_compare(
+        "",
+        standard,
+        student,
+        sql_dialect="postgres",
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is False
+    assert run.standard_rows == [("2012-08-01",), ("2012-08-02",)]
+    assert run.student_rows == [
+        ("2012-08-01",),
+        ("2012-08-02",),
+        ("2012-08-03",),
+    ]
+
+
+def test_postgres_series_derived_column_is_visible_to_correlated_date_filter():
+    sql = (
+        "SELECT dategen.date, (SELECT SUM(b.slots) FROM bookings b "
+        "WHERE b.starttime > dategen.date - INTERVAL '14 days' "
+        "AND b.starttime < dategen.date + INTERVAL '1 day') AS total "
+        "FROM (SELECT CAST(generate_series(timestamp '2012-08-01', "
+        "'2012-08-31', '1 day') AS date) AS date) AS dategen "
+        "ORDER BY dategen.date"
+    )
+
+    run = generate_and_compare(
+        "bookings(id INT PRIMARY KEY, starttime TIMESTAMP, slots INT);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+    assert len(run.standard_rows) == 31
+    assert run.standard_rows[0][0] == "2012-08-01"
+    assert run.standard_rows[-1][0] == "2012-08-31"
+
+
+def test_postgres_correlated_series_expression_boundary_is_materialized():
+    standard = (
+        "SELECT d.date, (SELECT SUM(b.slots * f.membercost) "
+        "FROM bookings b JOIN facilities f ON b.facid = f.facid "
+        "WHERE b.starttime > d.date - INTERVAL '14 days' "
+        "AND b.starttime < d.date + INTERVAL '1 day') AS revenue "
+        "FROM (SELECT CAST(generate_series(timestamp '2012-08-01', "
+        "'2012-08-05', '1 day') AS date) AS date) d ORDER BY d.date"
+    )
+    student = standard.replace(
+        " < d.date + INTERVAL '1 day'",
+        " <= d.date + INTERVAL '1 day'",
+    )
+
+    run = generate_and_compare(
+        "bookings(bookid INT PRIMARY KEY, facid INT, starttime TIMESTAMP, "
+        "slots INT); facilities(facid INT PRIMARY KEY, membercost DECIMAL);",
+        standard,
+        student,
+        sql_dialect="postgres",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is False
+    assert run.test_database["bookings"][0]["starttime"] == "2012-08-02"
+    assert run.standard_rows[0] == ("2012-08-01", None)
+    assert run.student_rows[0] == ("2012-08-01", 1)
+    boundary = next(
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "comparison_boundary_tristate"
+    )
+    assert boundary["constraints_satisfied"] is True
+    assert boundary["distinguished"] is True
+    assert boundary["semantic_validation"]["evidence"][
+        "raw_expression_absent"
+    ] is True
+
+
+def test_nested_correlated_atomic_comparison_has_one_precise_diff():
+    standard = (
+        "SELECT d.date, (SELECT SUM(b.slots * f.membercost) "
+        "FROM bookings b JOIN facilities f ON b.facid = f.facid "
+        "WHERE b.starttime > d.date - INTERVAL '14 days' "
+        "AND b.starttime < d.date + INTERVAL '1 day') AS revenue "
+        "FROM (SELECT CAST(generate_series(timestamp '2012-08-01', "
+        "'2012-08-05', '1 day') AS date) AS date) d ORDER BY d.date"
+    )
+    student = standard.replace(
+        " < d.date + INTERVAL '1 day'",
+        " <= d.date + INTERVAL '1 day'",
+    )
+
+    diffs = extract_ast_diffs(standard, student, dialect="postgres")
+
+    assert [diff.diff_type for diff in diffs] == [
+        "comparison_operator_changed"
+    ]
+    assert diffs[0].extra["subquery_depth"] == 1
+
+
+def test_nested_comparison_is_not_atomic_when_outer_projection_also_changes():
+    standard = (
+        "SELECT d.date, (SELECT SUM(b.slots) FROM bookings b "
+        "WHERE b.starttime < d.date + INTERVAL '1 day') AS total "
+        "FROM (SELECT CAST(generate_series(timestamp '2012-08-01', "
+        "'2012-08-05', '1 day') AS date) AS date) d"
+    )
+    student = standard.replace("SELECT d.date,", "SELECT d.date AS day,").replace(
+        " < d.date + INTERVAL '1 day'",
+        " <= d.date + INTERVAL '1 day'",
+    )
+
+    diffs = extract_ast_diffs(standard, student, dialect="postgres")
+    diff_types = {diff.diff_type for diff in diffs}
+
+    assert "comparison_operator_changed" in diff_types
+    assert "alias_changed" in diff_types
+    assert len(diffs) > 1
+
+
+def test_nested_having_comparison_keeps_aggregate_context_for_witness():
+    standard = (
+        "SELECT Name FROM Departments WHERE Code IN ("
+        "SELECT Department FROM Employees GROUP BY Department "
+        "HAVING COUNT(*) > 2)"
+    )
+    student = standard.replace("COUNT(*) > 2", "COUNT(*) >= 2")
+
+    diffs = extract_ast_diffs(standard, student, dialect="mysql")
+    diff_types = {diff.diff_type for diff in diffs}
+
+    assert "comparison_operator_changed" in diff_types
+    assert "having_changed" in diff_types
+
+    run = generate_and_compare(
+        "Departments(Code INT PRIMARY KEY, Name VARCHAR(255), "
+        "Budget DECIMAL); Employees(SSN INT PRIMARY KEY, Name VARCHAR(255), "
+        "LastName VARCHAR(255), Department INT);",
+        standard,
+        student,
+        sql_dialect="mysql",
+        max_rows_per_table=8,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.is_equivalent is False
+
+
+def test_postgres_large_generate_series_is_an_explicit_engine_boundary():
+    sql = (
+        "SELECT generate_series(timestamp '2000-01-01', "
+        "timestamp '2020-01-01', interval '1 day') AS ts"
+    )
+
+    run = generate_and_compare("", sql, sql, sql_dialect="postgres")
+
+    assert run.executed is False
+    assert run.status == "KNOWN_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert run.data_evidence["unsupported_features"] == [
+        "POSTGRES_GENERATE_SERIES_UNBOUNDED"
+    ]
+
+
+def test_postgres_static_epoch_difference_executes_as_exact_seconds():
+    sql = (
+        "SELECT EXTRACT(EPOCH FROM (timestamp '2012-09-02 00:00:00' "
+        "- '2012-08-31 01:00:00'))"
+    )
+
+    run = generate_and_compare("", sql, sql, sql_dialect="postgres")
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+    assert run.standard_rows == [(169200,)]
+
+
+def test_postgres_dynamic_epoch_extract_is_an_explicit_engine_boundary():
+    sql = "SELECT EXTRACT(EPOCH FROM starttime) FROM bookings"
+
+    run = generate_and_compare(
+        "bookings(starttime TIMESTAMP);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+    )
+
+    assert run.executed is False
+    assert run.status == "KNOWN_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert run.data_evidence["unsupported_features"] == [
+        "POSTGRES_EXTRACT_EPOCH_DYNAMIC"
+    ]
+
+
 def test_sql_server_recursive_union_modifier_gets_duplicate_state_probe():
     standard = """
         WITH descendants AS (
@@ -1115,10 +2265,146 @@ def test_sqlite_unsupported_dialect_feature_is_not_judged_as_wrong():
     assert run.executed is False
     assert run.is_equivalent is None
     assert run.judge_status == "UNSUPPORTED"
-    assert run.status == "ENGINE_GAP"
+    assert run.status == "KNOWN_GAP"
     assert run.equivalence_conclusion == "UNDECIDED"
-    assert run.data_evidence["status"] == "ENGINE_GAP"
+    assert run.data_evidence["status"] == "KNOWN_GAP"
     assert "ROLLUP" in run.data_evidence["unsupported_features"]
+
+
+def test_postgres_simple_rollup_executes_through_union_all_lowering():
+    sql = (
+        "SELECT facid, EXTRACT(MONTH FROM starttime) AS month, "
+        "SUM(slots) AS slots FROM bookings "
+        "GROUP BY ROLLUP(facid, month) ORDER BY facid, month"
+    )
+
+    run = generate_and_compare(
+        "bookings(id INT PRIMARY KEY, facid INT, starttime TIMESTAMP, slots INT);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+    assert (None, None, 10) in run.standard_rows
+
+
+def test_postgres_simple_cube_executes_through_bounded_union_all_lowering():
+    sql = (
+        "SELECT region, product, SUM(amount) AS total FROM sales "
+        "GROUP BY CUBE(region, product) ORDER BY region, product"
+    )
+
+    run = generate_and_compare(
+        "sales(id INT PRIMARY KEY, region TEXT, product TEXT, amount INT);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+    assert len(run.standard_rows) >= 4
+    assert any(row[0] is None and row[1] is None for row in run.standard_rows)
+
+
+def test_cube_with_four_keys_remains_an_explicit_engine_boundary():
+    sql = (
+        "SELECT a, b, c, d, COUNT(*) FROM t "
+        "GROUP BY CUBE(a, b, c, d)"
+    )
+    run = generate_and_compare(
+        "t(id INT PRIMARY KEY, a TEXT, b TEXT, c TEXT, d TEXT);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is False
+    assert run.status == "KNOWN_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert "CUBE" in run.data_evidence["unsupported_features"]
+
+
+def test_postgres_rollup_preserves_filter_boundary_mutation():
+    standard = (
+        "SELECT facid, EXTRACT(MONTH FROM starttime) AS month, "
+        "SUM(slots) AS slots FROM bookings "
+        "WHERE starttime >= '2012-01-01' AND starttime < '2013-01-01' "
+        "GROUP BY ROLLUP(facid, month) ORDER BY facid, month"
+    )
+    student = standard.replace(
+        "starttime >= '2012-01-01'",
+        "starttime > '2012-01-01'",
+    )
+
+    run = generate_and_compare(
+        "bookings(id INT PRIMARY KEY, facid INT, starttime TIMESTAMP, slots INT);",
+        standard,
+        student,
+        sql_dialect="postgres",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+
+
+@pytest.mark.parametrize("include_grand_total", [False, True])
+def test_postgres_simple_grouping_sets_execute_through_union_all_lowering(
+    include_grand_total,
+):
+    sets = (
+        "(), (city_name), (city_name, post_code)"
+        if include_grand_total
+        else "(city_name), (city_name, post_code)"
+    )
+    sql = (
+        "SELECT city_name, post_code, COUNT(*) AS corp_count "
+        "FROM corporations GROUP BY GROUPING SETS ("
+        f"{sets}) ORDER BY city_name, corp_count DESC"
+    )
+
+    run = generate_and_compare(
+        "corporations(id INT PRIMARY KEY, city_name TEXT, post_code TEXT);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+    assert any(row[1] is None for row in run.standard_rows)
+    assert ((None, None, 4) in run.standard_rows) is include_grand_total
+
+
+def test_postgres_grouping_function_keeps_grouping_extension_at_engine_boundary():
+    sql = (
+        "SELECT region, GROUPING(region), SUM(amount) FROM sales "
+        "GROUP BY ROLLUP(region)"
+    )
+
+    run = generate_and_compare(
+        "sales(region TEXT, amount DECIMAL);",
+        sql,
+        sql,
+        sql_dialect="postgres",
+    )
+
+    assert run.executed is False
+    assert run.status == "KNOWN_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert "GROUPING" in run.data_evidence["unsupported_features"]
 
 
 def test_malformed_standard_query_is_an_input_gap_not_an_engine_gap():
@@ -1138,6 +2424,21 @@ def test_malformed_standard_query_is_an_input_gap_not_an_engine_gap():
         "sql_role": "standard",
         "error_code": "STANDARD_SQL_PARSE_ERROR",
     }
+
+
+def test_missing_schema_for_referenced_table_is_an_input_gap_not_engine_gap():
+    run = generate_and_compare(
+        "",
+        "SELECT id FROM missing_table",
+        "SELECT id FROM missing_table",
+    )
+
+    assert run.executed is False
+    assert run.judge_status == "INPUT_ERROR"
+    assert run.status == "INPUT_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert run.error_code == "SCHEMA_PARSE_FAILED"
+    assert run.boundary_evidence["reason"] == "schema_unreplayable"
 
 
 def test_cte_window_neighbor_context_makes_direct_alias_comparison_observable():
@@ -1298,12 +2599,34 @@ def test_generate_and_compare_marks_execution_backend_in_evidence():
         "SELECT title FROM course",
         "SELECT title FROM course",
         sql_dialect="mysql",
+        execution_backend="sqlite",
     )
 
     assert run.executed is True
     assert run.judge_status == "CORRECT"
     assert run.data_evidence["execution_backend"] == "sqlite"
     assert run.data_evidence["sql_dialect"] == "mysql"
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgres", "tsql", "oracle"])
+def test_declared_vendor_without_execution_backend_is_explicit_engine_gap(dialect):
+    run = _generate_and_compare(
+        "course(course_id BIGINT, title VARCHAR(255));",
+        "SELECT title FROM course",
+        "SELECT title FROM course",
+        sql_dialect=dialect,
+    )
+
+    assert run.executed is False
+    assert run.judge_status == "ENGINE_GAP"
+    assert run.status == "ENGINE_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert run.error_code == "EXECUTION_BACKEND_REQUIRED"
+    assert run.data_evidence["execution_backend"] is None
+    assert run.data_evidence["boundary_evidence"]["reason"] == (
+        "declared_vendor_dialect_without_execution_backend"
+    )
+    assert run.data_evidence["boundary_evidence"]["declared_dialect"] == dialect
 
 
 def test_forced_mysql_backend_requires_native_executor_url():
@@ -1464,6 +2787,35 @@ def test_student_side_native_connection_failure_is_platform_error(monkeypatch):
     assert run.executed is False
     assert run.judge_status == "ENGINE_ERROR"
     assert "student_sql_platform_failed" in (run.error or "")
+
+
+def test_standard_native_schema_resolution_is_input_gap_not_engine_error(monkeypatch):
+    def missing_table(_sql):
+        raise NativeQueryExecutionError(
+            "NATIVE_QUERY_FAILED", "mysql", "(1146, Table 'products' doesn't exist)"
+        )
+
+    _patch_native_session(monkeypatch, missing_table)
+
+    run = _generate_and_compare(
+        "Products(id BIGINT);",
+        "SELECT id FROM products",
+        "SELECT DISTINCT id FROM products",
+        sql_dialect="mysql",
+        execution_backend="auto",
+        native_executor_url="mysql://judge:pw@db/parseval",
+    )
+
+    assert run.executed is False
+    assert run.judge_status == "INPUT_ERROR"
+    assert run.status == "INPUT_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert run.error_code == "NATIVE_SCHEMA_REPLAY_GAP"
+    assert run.boundary_evidence == {
+        "reason": "native_schema_resolution_failed",
+        "sql_role": "standard",
+        "schema_error": "mysql.table_not_found",
+    }
 
 
 def test_student_native_query_rejection_remains_student_error(monkeypatch):
@@ -2017,6 +3369,569 @@ def test_cte_column_list_alias_is_mapped_for_simple_inline_equivalence():
     assert run.ast_diffs == []
 
 
+def test_passthrough_cte_dependency_chain_is_safely_inlined():
+    run = generate_and_compare(
+        "employee(id INTEGER, name TEXT, salary INTEGER);",
+        "WITH a AS (SELECT * FROM employee), "
+        "b AS (SELECT name FROM a WHERE salary > 3) SELECT name FROM b",
+        "SELECT name FROM employee WHERE salary > 3",
+        max_rows_per_table=6,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+@pytest.mark.parametrize(
+    ("standard", "student"),
+    [
+        (
+            "WITH avg_sal AS (SELECT AVG(salary) AS v FROM instructor) "
+            "SELECT name FROM instructor, avg_sal WHERE salary > avg_sal.v",
+            "SELECT name FROM instructor WHERE salary > "
+            "(SELECT AVG(salary) FROM instructor)",
+        ),
+        (
+            "WITH avg_sal AS (SELECT AVG(salary) AS v FROM instructor) "
+            "SELECT i.name FROM instructor i CROSS JOIN avg_sal a "
+            "WHERE i.salary > a.v",
+            "SELECT i.name FROM instructor i WHERE i.salary > "
+            "(SELECT AVG(salary) FROM instructor)",
+        ),
+    ],
+)
+def test_single_row_aggregate_cte_is_equivalent_to_scalar_subquery(
+    standard,
+    student,
+):
+    run = generate_and_compare(
+        "instructor(ID INTEGER, name TEXT, dept_name TEXT, salary INTEGER);",
+        standard,
+        student,
+        max_rows_per_table=6,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+@pytest.mark.parametrize(
+    ("standard", "student"),
+    [
+        (
+            "WITH avg_sal AS (SELECT AVG(salary) AS v FROM instructor "
+            "WHERE dept_name = 'CS') "
+            "SELECT name FROM instructor, avg_sal WHERE salary > avg_sal.v",
+            "SELECT name FROM instructor WHERE salary > "
+            "(SELECT AVG(salary) FROM instructor WHERE dept_name = 'Math')",
+        ),
+        (
+            "WITH avg_sal AS (SELECT dept_name, AVG(salary) AS v "
+            "FROM instructor GROUP BY dept_name) "
+            "SELECT name FROM instructor, avg_sal WHERE salary > avg_sal.v",
+            "SELECT name FROM instructor WHERE salary > "
+            "(SELECT AVG(salary) FROM instructor)",
+        ),
+        (
+            "WITH avg_sal AS (SELECT AVG(salary) AS v FROM instructor) "
+            "SELECT name FROM instructor, avg_sal "
+            "WHERE salary > avg_sal.v OR ID > avg_sal.v",
+            "SELECT name FROM instructor WHERE salary > "
+            "(SELECT AVG(salary) FROM instructor) OR ID > "
+            "(SELECT AVG(salary) FROM instructor)",
+        ),
+    ],
+)
+def test_scalar_aggregate_cte_rewrite_does_not_hide_unproven_shapes(
+    standard,
+    student,
+):
+    assert extract_ast_diffs(standard, student)
+
+
+def test_star_matches_complete_schema_ordered_projection():
+    run = generate_and_compare(
+        "course(id INTEGER, title TEXT, credits INTEGER);",
+        "SELECT * FROM course",
+        "SELECT id, title, credits FROM course",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+@pytest.mark.parametrize(
+    "projection",
+    ["id, title", "title, id, credits", "id, title, title"],
+)
+def test_star_equivalence_requires_complete_schema_order(projection):
+    catalog = SchemaCatalog.from_legacy(
+        {"course": ["id", "title", "credits"]}
+    )
+
+    diffs = extract_ast_diffs(
+        "SELECT * FROM course",
+        f"SELECT {projection} FROM course",
+        schema_catalog=catalog,
+    )
+
+    assert diffs
+
+
+def test_simple_derived_table_projection_is_safely_inlined():
+    run = generate_and_compare(
+        "student(id INTEGER, name TEXT, credits INTEGER);",
+        "SELECT x.name FROM ("
+        "SELECT name FROM student WHERE credits > 3"
+        ") x",
+        "SELECT name FROM student WHERE credits > 3",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+def test_named_window_is_equivalent_to_exact_inline_definition():
+    run = generate_and_compare(
+        "instructor(id INTEGER, name TEXT, dept TEXT, salary INTEGER);",
+        "SELECT name, SUM(salary) OVER w FROM instructor "
+        "WINDOW w AS (PARTITION BY dept)",
+        "SELECT name, SUM(salary) OVER (PARTITION BY dept) FROM instructor",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+def test_named_window_reference_override_is_not_treated_as_exact_inline():
+    diffs = extract_ast_diffs(
+        "SELECT name, SUM(salary) OVER (w ORDER BY salary) FROM instructor "
+        "WINDOW w AS (PARTITION BY dept)",
+        "SELECT name, SUM(salary) OVER (PARTITION BY dept) FROM instructor",
+    )
+
+    assert diffs
+
+
+def test_in_filter_is_equivalent_to_exact_correlated_exists():
+    run = generate_and_compare(
+        "student(id INTEGER, name TEXT); takes(id INTEGER, course_id INTEGER);",
+        "SELECT name FROM student s WHERE id IN (SELECT id FROM takes)",
+        "SELECT name FROM student s WHERE EXISTS ("
+        "SELECT 1 FROM takes t WHERE t.id = s.id)",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+def test_simple_uncorrelated_in_exists_probe_keeps_match_and_nonmatch_outer_keys():
+    run = generate_and_compare(
+        "gap_subqueries_correlation_0242(id INT PRIMARY KEY, value TEXT); "
+        "gap_subqueries_correlation_0242_lookup(id INT PRIMARY KEY, value TEXT);",
+        "SELECT id FROM gap_subqueries_correlation_0242 WHERE id IN "
+        "(SELECT id FROM gap_subqueries_correlation_0242_lookup)",
+        "SELECT id FROM gap_subqueries_correlation_0242 WHERE EXISTS "
+        "(SELECT id FROM gap_subqueries_correlation_0242_lookup)",
+        sql_dialect="sqlite",
+        max_rows_per_table=8,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    outer_rows = run.test_database["gap_subqueries_correlation_0242"]
+    inner_rows = run.test_database["gap_subqueries_correlation_0242_lookup"]
+    outer_ids = [row["id"] for row in outer_rows]
+    inner_ids = [row["id"] for row in inner_rows]
+    assert set(outer_ids) & set(inner_ids)
+    assert any(value not in set(inner_ids) for value in outer_ids)
+    assert run.standard_rows != run.student_rows
+    obligation = run.data_evidence["obligation_effectiveness"][0]
+    assert obligation["probe"] == "subquery_membership_paths"
+    assert obligation["constraints_satisfied"] is True
+    assert obligation["causal_attribution_verified"] is True
+
+
+def test_in_exists_equivalence_requires_identical_inner_filters():
+    diffs = extract_ast_diffs(
+        "SELECT name FROM student s WHERE id IN ("
+        "SELECT id FROM takes WHERE course_id = 1)",
+        "SELECT name FROM student s WHERE EXISTS ("
+        "SELECT 1 FROM takes t WHERE t.id = s.id AND t.course_id = 2)",
+    )
+
+    assert diffs
+
+
+def test_equal_any_subquery_is_equivalent_to_in_subquery():
+    run = generate_and_compare(
+        "student(id INTEGER, name TEXT); takes(id INTEGER, course_id INTEGER);",
+        "SELECT name FROM student WHERE id = ANY (SELECT id FROM takes)",
+        "SELECT name FROM student WHERE id IN (SELECT id FROM takes)",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+def test_non_equality_any_is_not_normalized_to_in():
+    diffs = extract_ast_diffs(
+        "SELECT name FROM student WHERE id <> ANY (SELECT id FROM takes)",
+        "SELECT name FROM student WHERE id IN (SELECT id FROM takes)",
+    )
+
+    assert diffs
+
+
+def test_nullable_all_max_rewrite_is_executable_but_not_claimed_equivalent():
+    standard = (
+        "SELECT name FROM student WHERE credits >= ("
+        "SELECT MAX(credits) FROM student)"
+    )
+    student = (
+        "SELECT name FROM student WHERE credits >= ALL ("
+        "SELECT credits FROM student)"
+    )
+
+    run = generate_and_compare(
+        "student(id INTEGER, name TEXT, credits INTEGER);",
+        standard,
+        student,
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "KNOWN_GAP"
+    assert run.equivalence_conclusion == "UNDECIDED"
+    assert run.ast_diffs
+
+
+@pytest.mark.parametrize(
+    ("operator", "aggregate"),
+    [(">", "MAX"), (">=", "MAX"), ("<", "MIN"), ("<=", "MIN")],
+)
+def test_root_where_all_extreme_filter_is_schema_proven(operator, aggregate):
+    standard = (
+        f"SELECT name FROM student WHERE credits {operator} ("
+        f"SELECT {aggregate}(credits) FROM student)"
+    )
+    student = (
+        f"SELECT name FROM student WHERE credits {operator} ALL ("
+        "SELECT credits FROM student)"
+    )
+
+    run = generate_and_compare(
+        "student(id INTEGER, name TEXT, credits INTEGER NOT NULL);",
+        standard,
+        student,
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+@pytest.mark.parametrize(
+    ("operator", "aggregate"),
+    [(">", "MIN"), (">=", "MIN"), ("<", "MAX"), ("<=", "MAX")],
+)
+def test_root_where_any_extreme_filter_is_supported(operator, aggregate):
+    standard = (
+        f"SELECT name FROM student WHERE credits {operator} ("
+        f"SELECT {aggregate}(credits) FROM student WHERE id > 0)"
+    )
+    student = (
+        f"SELECT name FROM student WHERE credits {operator} ANY ("
+        "SELECT credits FROM student WHERE id > 0)"
+    )
+
+    run = generate_and_compare(
+        "student(id INTEGER, name TEXT, credits INTEGER);",
+        standard,
+        student,
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+@pytest.mark.parametrize(
+    "inner_filter",
+    ["1 = 0", "credits IS NULL"],
+)
+def test_root_where_any_extreme_filter_handles_empty_and_null_inputs(inner_filter):
+    standard = (
+        "SELECT name FROM student WHERE credits > ("
+        f"SELECT MIN(credits) FROM student WHERE {inner_filter})"
+    )
+    student = (
+        "SELECT name FROM student WHERE credits > ANY ("
+        f"SELECT credits FROM student WHERE {inner_filter})"
+    )
+
+    run = generate_and_compare(
+        "student(id INTEGER, name TEXT, credits INTEGER);",
+        standard,
+        student,
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+def test_sqlite_quantified_rewrite_has_guarded_root_any_support():
+    assert " IN " in parseval._rewrite_quantified_subqueries(
+        "SELECT id FROM student WHERE id = ANY (SELECT id FROM takes)"
+    )
+    rewritten = parseval._rewrite_quantified_subqueries(
+        "SELECT name FROM student WHERE credits > ANY ("
+        "SELECT credits FROM student)"
+    )
+    assert "SELECT MIN(credits)" in rewritten
+
+    for sql in (
+        "SELECT name FROM student WHERE NOT (credits > ANY ("
+        "SELECT credits FROM student))",
+        "SELECT name FROM student WHERE (credits > ANY ("
+        "SELECT credits FROM student)) IS FALSE",
+        "SELECT credits > ANY (SELECT credits FROM student) FROM student",
+    ):
+        assert parseval._rewrite_quantified_subqueries(sql) == sql
+        assert "QUANTIFIED_SUBQUERY_COMPARISON" in (
+            parseval._detect_sqlite_unsupported_features(
+                sql,
+                target_dialect="mysql",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("inner_filter", "expected_names"),
+    [
+        ("1 = 0", {"low", "high", "null"}),
+        ("id < 3", {"high"}),
+        ("id = 3", set()),
+    ],
+)
+def test_root_where_all_not_exists_lowering_preserves_empty_null_and_values(
+    inner_filter,
+    expected_names,
+):
+    sql = (
+        "SELECT name FROM student WHERE credits >= ALL ("
+        f"SELECT credits FROM student WHERE {inner_filter})"
+    )
+    rewritten = parseval._rewrite_quantified_subqueries(sql)
+
+    assert " ALL " not in rewritten.upper()
+    assert "NOT EXISTS" in rewritten.upper()
+    assert "QUANTIFIED_SUBQUERY_COMPARISON" not in (
+        parseval._detect_sqlite_unsupported_features(
+            sql,
+            target_dialect="mysql",
+        )
+    )
+    _, result_rows = parseval._execute_sqlite(
+        {"student": ["id", "name", "credits"]},
+        {
+            "student": [
+                {"id": 1, "name": "low", "credits": 1},
+                {"id": 2, "name": "high", "credits": 3},
+                {"id": 3, "name": "null", "credits": None},
+            ]
+        },
+        rewritten,
+        schema_types={
+            "student": {
+                "id": "INTEGER",
+                "name": "TEXT",
+                "credits": "INTEGER",
+            }
+        },
+    )
+
+    assert {row[0] for row in result_rows} == expected_names
+
+
+def test_all_lowering_keeps_observable_three_valued_contexts_as_engine_gaps():
+    for sql in (
+        "SELECT credits >= ALL (SELECT credits FROM student) FROM student",
+        "SELECT name FROM student WHERE NOT (credits >= ALL ("
+        "SELECT credits FROM student))",
+        "SELECT name FROM student WHERE (credits >= ALL ("
+        "SELECT credits FROM student)) IS FALSE",
+        "SELECT name FROM student WHERE credits >= ALL ("
+        "SELECT credits FROM student) OR id = 1",
+    ):
+        assert parseval._rewrite_quantified_subqueries(sql) == sql
+        assert "QUANTIFIED_SUBQUERY_COMPARISON" in (
+            parseval._detect_sqlite_unsupported_features(
+                sql,
+                target_dialect="mysql",
+            )
+        )
+
+
+def test_all_extreme_equivalence_requires_same_unfiltered_not_null_column():
+    standard = (
+        "SELECT s.name FROM student s WHERE s.credits >= ("
+        "SELECT MAX(x.credits) FROM student x)"
+    )
+    student = (
+        "SELECT s.name FROM student s WHERE s.credits >= ALL ("
+        "SELECT x.credits FROM student x)"
+    )
+    not_null_catalog = SchemaCatalog.from_legacy(
+        {"student": ["id", "name", "credits"]},
+        {
+            "student": {
+                "id": "INTEGER PRIMARY KEY",
+                "name": "TEXT",
+                "credits": "INTEGER NOT NULL",
+            }
+        },
+    )
+    nullable_catalog = SchemaCatalog.from_legacy(
+        {"student": ["id", "name", "credits"]},
+        {"student": {"id": "INTEGER", "name": "TEXT", "credits": "INTEGER"}},
+    )
+
+    assert extract_ast_diffs(
+        standard,
+        student,
+        dialect="mysql",
+        schema_catalog=not_null_catalog,
+    ) == []
+    assert extract_ast_diffs(
+        standard,
+        student,
+        dialect="mysql",
+        schema_catalog=nullable_catalog,
+    )
+    assert extract_ast_diffs(
+        standard,
+        student.replace(
+            "SELECT x.credits FROM student x",
+            "SELECT x.credits FROM student x WHERE x.id > 0",
+        ),
+        dialect="mysql",
+        schema_catalog=not_null_catalog,
+    )
+
+
+def test_statically_empty_scalar_subquery_is_null():
+    run = generate_and_compare(
+        "student(id INTEGER, name TEXT);",
+        "SELECT (SELECT id FROM student WHERE 1 = 0)",
+        "SELECT NULL",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+@pytest.mark.parametrize(
+    ("standard", "student"),
+    [("SELECT 100.0", "SELECT 1e2"), ("SELECT TRUE", "SELECT 1")],
+)
+def test_standalone_equivalent_literals_follow_value_judge_contract(
+    standard,
+    student,
+):
+    run = generate_and_compare("", standard, student, max_rows_per_table=4)
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+def test_boolean_numeric_literal_equivalence_is_dialect_scoped():
+    assert extract_ast_diffs(
+        "SELECT TRUE",
+        "SELECT 1",
+        dialect="postgres",
+    )
+
+
+def test_numeric_literal_canonicalization_does_not_change_arithmetic_types():
+    assert extract_ast_diffs("SELECT 1 / 2", "SELECT 1.0 / 2")
+
+
+def test_nonempty_scalar_subquery_is_not_normalized_to_null():
+    diffs = extract_ast_diffs(
+        "SELECT (SELECT id FROM student WHERE 1 = 1)",
+        "SELECT NULL",
+    )
+
+    assert diffs
+
+
+def test_derived_table_outer_filter_is_not_collapsed_into_inner_filter():
+    diffs = extract_ast_diffs(
+        "SELECT x.name FROM ("
+        "SELECT name, credits FROM student WHERE credits > 3"
+        ") x WHERE x.credits < 8",
+        "SELECT name FROM student WHERE credits > 3",
+    )
+
+    assert diffs
+
+
+def test_filtered_cte_dependency_is_not_collapsed_as_passthrough():
+    diffs = extract_ast_diffs(
+        "WITH a AS (SELECT * FROM employee WHERE salary > 10), "
+        "b AS (SELECT name FROM a WHERE salary > 3) SELECT name FROM b",
+        "SELECT name FROM employee WHERE salary > 3",
+    )
+
+    assert diffs
+
+
 def test_cte_column_list_alias_mapping_does_not_hide_wrong_output_column():
     diffs = extract_ast_diffs(
         "WITH e(x, y) AS (SELECT id, name FROM employee) SELECT x FROM e",
@@ -2447,6 +4362,28 @@ def test_order_direction_probe_is_not_masked_by_repeating_projection_values():
     assert len({row["title"] for row in run.test_database["course"]}) == 10
 
 
+def test_order_direction_join_resolves_the_changed_key_table_not_first_from_source():
+    run = generate_and_compare(
+        "people(People_ID INTEGER PRIMARY KEY, Birth_Date TEXT); "
+        "poker_player(Poker_Player_ID INTEGER PRIMARY KEY, People_ID INTEGER, Earnings INTEGER);",
+        "SELECT p.Birth_Date FROM people p JOIN poker_player pp "
+        "ON p.People_ID = pp.People_ID ORDER BY pp.Earnings ASC LIMIT 1",
+        "SELECT p.Birth_Date FROM people p JOIN poker_player pp "
+        "ON p.People_ID = pp.People_ID ORDER BY pp.Earnings DESC LIMIT 1",
+        max_rows_per_table=8,
+    )
+
+    assert run.executed is True
+    assert run.is_equivalent is False
+    effectiveness = [
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "order_key_separation"
+    ]
+    assert effectiveness
+    assert effectiveness[0]["constraints_satisfied"] is True
+
+
 @pytest.mark.parametrize("row_scale", [8, 16, 32])
 def test_grouped_aggregate_function_witness_is_stable_across_row_scales(row_scale):
     standard = (
@@ -2542,6 +4479,25 @@ def test_adversarial_data_probes_expose_counterexamples(schema, standard, studen
 
     assert run.executed is True, run.error
     assert run.is_equivalent is False
+
+
+def test_top_level_nulls_placement_has_complete_witness_chain():
+    run = generate_and_compare(
+        "instructor(id, name, salary);",
+        "SELECT name, salary FROM instructor ORDER BY salary ASC NULLS LAST",
+        "SELECT name, salary FROM instructor ORDER BY salary ASC",
+        max_rows_per_table=10,
+    )
+
+    assert run.executed is True
+    assert run.status == "SUPPORTED"
+    assert any(diff.diff_type == "order_nulls_changed" for diff in run.ast_diffs)
+    effectiveness = run.data_evidence["obligation_effectiveness"]
+    assert len(effectiveness) == 1
+    assert effectiveness[0]["constraints_satisfied"] is True
+    assert effectiveness[0]["causal_attribution_verified"] is True
+    assert effectiveness[0]["semantic_validation"]["evidence"]["null_order_path"] is True
+    assert effectiveness[0]["mutation_validation"]["relevant_fixed_by_replacement"] is True
 
 
 def test_schema_free_recursive_cte_executes_and_exposes_boundary():
@@ -2641,6 +4597,70 @@ def test_correlated_exists_wrong_inner_key_gets_standard_only_path(row_scale):
     assert run.is_equivalent is False
     assert run.standard_rows != run.student_rows
     assert run.mutation_evidence["summary"]["fixed_by_replacement"] >= 1
+
+
+@pytest.mark.parametrize("row_scale", [4, 8])
+def test_correlated_scalar_aggregate_wrong_outer_key_has_complete_evidence(
+    row_scale,
+):
+    standard = (
+        "SELECT e.id FROM employee e WHERE e.salary > ("
+        "SELECT AVG(x.salary) FROM employee x WHERE x.dept = e.dept)"
+    )
+    student = standard.replace("x.dept = e.dept", "x.dept = e.id")
+
+    run = generate_and_compare(
+        "employee(id INTEGER PRIMARY KEY, dept INTEGER, salary INTEGER);",
+        standard,
+        student,
+        max_rows_per_table=row_scale,
+        sql_dialect="mysql",
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.is_equivalent is False
+    focused = [
+        item
+        for item in run.ast_diffs
+        if item.diff_type == "correlated_predicate_changed"
+        and item.extra.get("query_scope") == "nested_correlation"
+    ]
+    assert len(focused) == 1
+    assert focused[0].extra["standard_outer_column"] == "dept"
+    assert focused[0].extra["student_outer_column"] == "id"
+    rows = run.test_database["employee"]
+    assert len({row["id"] for row in rows}) == len(rows)
+    assert max(Counter(row["dept"] for row in rows).values()) >= 2
+    effectiveness = run.data_evidence["obligation_effectiveness"]
+    assert len(effectiveness) == 1
+    assert effectiveness[0]["constraints_satisfied"] is True
+    assert effectiveness[0]["causal_attribution_verified"] is True
+    mutations = [
+        item
+        for item in run.mutation_evidence["tests"]
+        if item.get("clause") == "CORRELATED SUBQUERY"
+    ]
+    assert len(mutations) == 1
+    assert mutations[0]["binding_quality"] == "exact"
+    assert mutations[0]["fixed_by_replacement"] is True
+
+
+def test_inner_table_alias_scope_detects_self_correlation_without_shadowing():
+    correlated = parse_one(
+        "SELECT e.id FROM employee e WHERE EXISTS ("
+        "SELECT 1 FROM employee x WHERE x.dept = e.dept)",
+        read="mysql",
+    ).find(parseval.exp.Exists).this
+    shadowed = parse_one(
+        "SELECT e.id FROM employee e WHERE EXISTS ("
+        "SELECT 1 FROM employee WHERE employee.dept = employee.dept)",
+        read="mysql",
+    ).find(parseval.exp.Exists).this
+
+    assert parseval._subquery_is_correlated(correlated) is True
+    assert parseval._subquery_is_correlated(shadowed) is False
 
 
 @pytest.mark.parametrize("row_scale", [4, 8, 16])
@@ -2780,6 +4800,98 @@ def test_correlated_in_subquery_probe():
     assert len(overlap) >= 1, "Should have overlapping ID values for correlated IN subquery"
 
 
+def test_not_in_negation_witness_keeps_complex_outer_path_reachable():
+    """A NOT IN/IN mutation must survive all neighboring outer predicates."""
+    schema = (
+        "Physician(EmployeeID INT PRIMARY KEY, Name VARCHAR(30), "
+        "Position VARCHAR(30), SSN INT); "
+        "Department(DepartmentID INT PRIMARY KEY, Name VARCHAR(30), Head INT); "
+        "Procedures(Code INT PRIMARY KEY, Name VARCHAR(30), Cost FLOAT); "
+        "Patient(SSN INT PRIMARY KEY, Name VARCHAR(30), Address VARCHAR(30), "
+        "Phone VARCHAR(30), InsuranceID INT, PCP INT); "
+        "Nurse(EmployeeID INT PRIMARY KEY, Name VARCHAR(30), "
+        "Position VARCHAR(30), Registered BOOLEAN, SSN INT); "
+        "Appointment(AppointmentID INT PRIMARY KEY, Patient INT, "
+        "PrepNurse INT, Physician INT, Start DATETIME, End DATETIME, "
+        "ExaminationRoom TEXT); "
+        "Prescribes(Physician INT, Patient INT, Medication INT, Date DATETIME, "
+        "Appointment INT, Dose VARCHAR(30)); "
+        "Undergoes(Patient INT, Procedures INT, Stay INT, "
+        "DateUndergoes DATETIME, Physician INT, AssistingNurse INT);"
+    )
+    standard = (
+        "SELECT Pt.NAME, PhPCP.NAME FROM Patient Pt, Physician PhPCP "
+        "WHERE Pt.PCP = PhPCP.EmployeeID "
+        "AND EXISTS (SELECT * FROM Prescribes Pr "
+        "WHERE Pr.Patient = Pt.SSN AND Pr.Physician = Pt.PCP) "
+        "AND EXISTS (SELECT * FROM Undergoes U, Procedures Pr "
+        "WHERE U.Procedures = Pr.CODE AND U.Patient = Pt.SSN "
+        "AND Pr.Cost > 5000) "
+        "AND 2 <= (SELECT COUNT(A.AppointmentID) "
+        "FROM Appointment A, Nurse N "
+        "WHERE A.PrepNurse = N.EmployeeID AND N.Registered = 1) "
+        "AND NOT Pt.PCP IN (SELECT Head FROM Department)"
+    )
+    student = standard.replace("AND NOT Pt.PCP IN", "AND Pt.PCP IN")
+
+    run = generate_and_compare(
+        schema,
+        standard,
+        student,
+        max_rows_per_table=4,
+        sql_dialect="mysql",
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+    membership = [
+        item
+        for item in run.data_evidence["obligation_effectiveness"]
+        if item["probe"] == "subquery_membership_paths"
+        and item.get("semantic_validation", {})
+        .get("evidence", {})
+        .get("inner_table", "")
+        .lower() == "department"
+    ]
+    assert membership
+    assert membership[0]["constraints_satisfied"] is True
+
+
+@pytest.mark.parametrize(
+    "join_predicate",
+    ["u.manager_id = m.id", "m.id = u.manager_id"],
+)
+def test_not_in_negation_targets_changed_predicate_among_multiple_not_in(
+    join_predicate,
+):
+    standard = (
+        "SELECT u.id FROM users u, managers m "
+        f"WHERE {join_predicate} "
+        "AND u.id NOT IN (SELECT id FROM banned) "
+        "AND u.manager_id NOT IN (SELECT head FROM departments)"
+    )
+    student = standard.replace(
+        "AND u.manager_id NOT IN",
+        "AND u.manager_id IN",
+    )
+
+    run = generate_and_compare(
+        "users(id INT PRIMARY KEY, manager_id INT); "
+        "managers(id INT PRIMARY KEY); banned(id INT); departments(head INT);",
+        standard,
+        student,
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.standard_rows != run.student_rows
+
+
 @pytest.mark.parametrize("row_scale", [8, 16, 32])
 def test_in_subquery_comparison_boundary_is_stable_across_row_scales(row_scale):
     standard = (
@@ -2841,6 +4953,79 @@ def test_recursive_cte_probe_generates_hierarchy():
     null_managers = sum(1 for r in rows if r["manager_id"] is None)
     assert null_managers >= 1, "Recursive CTE should have root node(s) with NULL manager_id"
     assert run.is_equivalent is False
+
+
+def test_recursive_literal_anchor_and_outer_cte_filter_survive_order_probe():
+    standard = (
+        "WITH RECURSIVE hierarchy(emp_id, manager_id) AS ("
+        "SELECT emp_id, manager_id FROM employee WHERE emp_id = 27 "
+        "UNION ALL "
+        "SELECT e.emp_id, e.manager_id FROM employee e "
+        "JOIN hierarchy h ON e.manager_id = h.emp_id) "
+        "SELECT h.emp_id FROM hierarchy h "
+        "WHERE h.emp_id = 22 OR h.emp_id = 12 ORDER BY h.emp_id DESC"
+    )
+    student = standard.replace("ORDER BY h.emp_id DESC", "ORDER BY h.emp_id ASC")
+
+    run = generate_and_compare(
+        "employee(emp_id, name, manager_id);",
+        standard,
+        student,
+        max_rows_per_table=8,
+    )
+
+    rows = run.test_database["employee"]
+    assert run.executed is True
+    assert run.is_equivalent is False
+    assert rows[0]["emp_id"] == 27
+    assert [row["emp_id"] for row in rows[:3]] == [27, 22, 12]
+    assert rows[0]["manager_id"] is None
+    assert rows[1]["manager_id"] == 27
+    assert rows[2]["manager_id"] == 22
+    effectiveness = run.data_evidence["obligation_effectiveness"]
+    order_effectiveness = next(
+        item for item in effectiveness if item["probe"] == "order_key_separation"
+    )
+    assert order_effectiveness["constraints_satisfied"] is True
+    assert order_effectiveness["causal_attribution_verified"] is True
+    assert order_effectiveness["semantic_validation"]["evidence"]["source"] == (
+        "bounded_query_result"
+    )
+
+
+def test_recursive_parent_projection_literal_anchor_walks_toward_ancestors():
+    standard = (
+        "WITH RECURSIVE recommenders(recommender) AS ("
+        "SELECT recommendedby FROM members WHERE memid = 27 "
+        "UNION ALL "
+        "SELECT mems.recommendedby FROM recommenders recs "
+        "JOIN members mems ON mems.memid = recs.recommender) "
+        "SELECT recs.recommender, mems.firstname, mems.surname "
+        "FROM recommenders recs "
+        "JOIN members mems ON recs.recommender = mems.memid "
+        "ORDER BY memid DESC"
+    )
+    student = standard.replace("ORDER BY memid DESC", "ORDER BY memid ASC")
+
+    run = generate_and_compare(
+        "members(memid INTEGER PRIMARY KEY, recommendedby INTEGER, "
+        "firstname TEXT, surname TEXT);",
+        standard,
+        student,
+        max_rows_per_table=8,
+        sql_dialect="postgres",
+    )
+
+    rows = run.test_database["members"]
+    assert run.executed is True
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is False
+    assert rows[0]["memid"] == 27
+    assert rows[0]["recommendedby"] == rows[1]["memid"]
+    assert rows[1]["recommendedby"] == rows[2]["memid"]
+    assert rows[-1]["recommendedby"] is None
+    assert len(run.standard_rows) >= 2
+    assert run.standard_rows == list(reversed(run.student_rows))
 
 
 def test_cte_mutation_detects_changed_cte():
@@ -3215,6 +5400,45 @@ def test_recursive_union_modifier_uses_unique_graph_diamond_paths():
     )
     assert set_effectiveness["constraints_satisfied"] is True
     assert set_effectiveness["causal_attribution_verified"] is True
+
+
+@pytest.mark.parametrize(
+    ("anchor", "step", "predicate"),
+    [
+        ("1", "x + 1", "x < 4"),
+        ("4", "x - 1", "x > 1"),
+    ],
+)
+def test_bounded_monotonic_recursive_union_modifier_is_equivalent(
+    anchor,
+    step,
+    predicate,
+):
+    standard = (
+        "WITH RECURSIVE n(x) AS ("
+        f"SELECT {anchor} UNION SELECT {step} FROM n WHERE {predicate}"
+        ") SELECT x FROM n"
+    )
+    student = standard.replace(" UNION SELECT", " UNION ALL SELECT")
+
+    run = generate_and_compare("", standard, student, max_rows_per_table=4)
+
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert run.ast_diffs == []
+
+
+def test_unbounded_monotonic_recursive_union_modifier_is_not_proven_equivalent():
+    standard = (
+        "WITH RECURSIVE n(x) AS ("
+        "SELECT 1 UNION SELECT x + 1 FROM n"
+        ") SELECT x FROM n"
+    )
+    student = standard.replace(" UNION SELECT", " UNION ALL SELECT")
+
+    assert extract_ast_diffs(standard, student)
 
 
 def test_full_pipeline_null_handling():
@@ -3895,6 +6119,36 @@ def test_not_in_null_probe_satisfies_subquery_filter_and_changes_antijoin_result
     assert where_tests[0]["dependent_changes"] == ["FROM ALIAS", "SELECT"]
 
 
+def test_not_in_not_exists_null_witness_keeps_single_focused_obligation():
+    run = generate_and_compare(
+        "outer_t(id INT PRIMARY KEY, v INT); "
+        "inner_t(id INT PRIMARY KEY, v INT);",
+        "SELECT v FROM outer_t WHERE v NOT IN (SELECT v FROM inner_t)",
+        "SELECT v FROM outer_t WHERE NOT EXISTS ("
+        "SELECT 1 FROM inner_t WHERE inner_t.v = outer_t.v)",
+        sql_dialect="sqlite",
+    )
+
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert len(run.ast_diffs) == 1
+    diff = run.ast_diffs[0]
+    assert diff.diff_type == "null_sensitive_antijoin_equivalence"
+    assert diff.extra["standard_source_table"] == "outer_t"
+    assert diff.extra["standard_membership_table"] == "inner_t"
+    assert diff.extra["require_inner_null"] is True
+    item = run.data_evidence["obligation_effectiveness"][0]
+    assert item["constraints_satisfied"] is True
+    assert item["distinguished"] is True
+    assert item["causal_attribution_verified"] is True
+    assert item["mutation_validation"]["relevant_test_count"] == 1
+    assert item["mutation_validation"]["relevant_fixed_by_replacement"] is True
+    mutation = item["mutation_validation"]["tests"][0]
+    assert mutation["diff_ids"] == [item["diff_id"]]
+    assert any(row["v"] is None for row in run.test_database["inner_t"])
+    assert run.standard_rows != run.student_rows
+
+
 def test_not_in_null_probe_does_not_violate_is_not_null_filter():
     data = {
         "majors": [
@@ -3912,6 +6166,171 @@ def test_not_in_null_probe_does_not_violate_is_not_null_filter():
 
     assert data["majors"][0]["id"] is None
     assert data["majors"][0]["inactive_at"] is not None
+
+
+def test_not_in_is_not_null_uses_outer_null_path_for_antijoin_witness():
+    run = generate_and_compare(
+        "outer_t(id INT PRIMARY KEY, v INT); "
+        "inner_t(id INT PRIMARY KEY, v INT);",
+        "SELECT v FROM outer_t WHERE v NOT IN "
+        "(SELECT v FROM inner_t WHERE v IS NOT NULL)",
+        "SELECT v FROM outer_t WHERE NOT EXISTS ("
+        "SELECT 1 FROM inner_t WHERE inner_t.v IS NOT NULL "
+        "AND inner_t.v = outer_t.v)",
+        sql_dialect="sqlite",
+    )
+
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    diff = run.ast_diffs[0]
+    assert diff.diff_type == "null_sensitive_antijoin_equivalence"
+    assert diff.extra["require_inner_null"] is False
+    assert diff.extra["require_outer_null"] is True
+    item = run.data_evidence["obligation_effectiveness"][0]
+    evidence = item["semantic_validation"]["evidence"]
+    assert item["constraints_satisfied"] is True
+    assert item["distinguished"] is True
+    assert evidence["inner_null_count"] == 0
+    assert evidence["outer_null_count"] >= 1
+    assert run.standard_rows != run.student_rows
+
+
+def test_not_in_null_probe_keeps_root_literal_predicate_reachable():
+    run = generate_and_compare(
+        "outer_t(id INT PRIMARY KEY, v INT, active INT); "
+        "inner_t(id INT PRIMARY KEY, v INT);",
+        "SELECT v FROM outer_t WHERE active = 1 AND v NOT IN "
+        "(SELECT v FROM inner_t)",
+        "SELECT v FROM outer_t WHERE active = 1 AND NOT EXISTS ("
+        "SELECT 1 FROM inner_t WHERE inner_t.v = outer_t.v)",
+        sql_dialect="sqlite",
+    )
+
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    item = run.data_evidence["obligation_effectiveness"][0]
+    assert item["constraints_satisfied"] is True
+    assert item["distinguished"] is True
+    assert run.standard_rows != run.student_rows
+    assert any(
+        row["active"] == 1 and row["v"] is not None
+        for row in run.test_database["outer_t"]
+    )
+
+
+def test_not_in_null_probe_preserves_explicit_numeric_membership_types():
+    run = generate_and_compare(
+        "outer_t(id INT PRIMARY KEY, v INT); "
+        "inner_t(id INT PRIMARY KEY, v INT);",
+        "SELECT v FROM outer_t WHERE v NOT IN "
+        "(SELECT v FROM inner_t WHERE v IS NULL)",
+        "SELECT v FROM outer_t WHERE NOT EXISTS ("
+        "SELECT 1 FROM inner_t WHERE inner_t.v IS NULL "
+        "AND inner_t.v = outer_t.v)",
+        sql_dialect="sqlite",
+    )
+
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.data_evidence["obligation_effectiveness"][0]["distinguished"] is True
+    for table in ("outer_t", "inner_t"):
+        assert all(
+            row["v"] is None or isinstance(row["v"], int)
+            for row in run.test_database[table]
+        )
+
+
+def test_not_in_null_probe_keeps_explicit_outer_null_predicate_reachable():
+    run = generate_and_compare(
+        "outer_t(id INT PRIMARY KEY, v INT); "
+        "inner_t(id INT PRIMARY KEY, v INT);",
+        "SELECT v FROM outer_t WHERE v IS NULL AND v NOT IN "
+        "(SELECT v FROM inner_t)",
+        "SELECT v FROM outer_t WHERE v IS NULL AND NOT EXISTS ("
+        "SELECT 1 FROM inner_t WHERE inner_t.v = outer_t.v)",
+        sql_dialect="sqlite",
+    )
+
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    item = run.data_evidence["obligation_effectiveness"][0]
+    assert item["constraints_satisfied"] is True
+    assert item["distinguished"] is True
+    assert item["semantic_validation"]["evidence"]["outer_null_count"] >= 1
+    assert run.standard_rows != run.student_rows
+
+
+def test_not_in_not_exists_is_equivalent_when_both_membership_keys_are_nonnull():
+    run = generate_and_compare(
+        "outer_t(id INT PRIMARY KEY, v INT NOT NULL); "
+        "inner_t(id INT PRIMARY KEY, v INT NOT NULL);",
+        "SELECT v FROM outer_t WHERE v NOT IN (SELECT v FROM inner_t)",
+        "SELECT v FROM outer_t WHERE NOT EXISTS ("
+        "SELECT 1 FROM inner_t WHERE inner_t.v = outer_t.v)",
+        sql_dialect="sqlite",
+    )
+
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert not run.ast_diffs
+    assert all(
+        row["v"] is not None
+        for table in ("outer_t", "inner_t")
+        for row in run.test_database[table]
+    )
+
+
+@pytest.mark.parametrize(
+    ("schema", "standard_sql", "student_sql"),
+    [
+        (
+            "outer_t(id INT PRIMARY KEY, v INT NOT NULL); "
+            "inner_t(id INT PRIMARY KEY, v INT);",
+            "SELECT v FROM outer_t WHERE v NOT IN "
+            "(SELECT v FROM inner_t WHERE v IS NOT NULL)",
+            "SELECT v FROM outer_t WHERE NOT EXISTS ("
+            "SELECT 1 FROM inner_t WHERE inner_t.v IS NOT NULL "
+            "AND inner_t.v = outer_t.v)",
+        ),
+        (
+            "outer_t(id INT PRIMARY KEY, v INT); "
+            "inner_t(id INT PRIMARY KEY, v INT);",
+            "SELECT v FROM outer_t WHERE v IS NOT NULL AND v NOT IN "
+            "(SELECT v FROM inner_t WHERE v IS NOT NULL)",
+            "SELECT v FROM outer_t WHERE v IS NOT NULL AND NOT EXISTS ("
+            "SELECT 1 FROM inner_t WHERE inner_t.v IS NOT NULL "
+            "AND inner_t.v = outer_t.v)",
+        ),
+        (
+            "outer_t(id INT PRIMARY KEY, v INT); "
+            "inner_t(id INT PRIMARY KEY, v INT NOT NULL);",
+            "SELECT v FROM outer_t WHERE v NOT IN "
+            "(SELECT v FROM inner_t WHERE v IS NULL)",
+            "SELECT v FROM outer_t WHERE NOT EXISTS ("
+            "SELECT 1 FROM inner_t WHERE inner_t.v IS NULL "
+            "AND inner_t.v = outer_t.v)",
+        ),
+    ],
+)
+def test_not_in_null_equivalence_uses_query_null_filters_and_hard_schema(
+    schema, standard_sql, student_sql
+):
+    run = generate_and_compare(
+        schema,
+        standard_sql,
+        student_sql,
+        sql_dialect="sqlite",
+    )
+
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NO_COUNTEREXAMPLE_FOUND"
+    assert not run.ast_diffs
+    assert all(
+        row["v"] is not None
+        for table, rows in run.test_database.items()
+        if "NOT NULL" in schema.split(table, 1)[1].split(";", 1)[0].upper()
+        for row in rows
+    )
 
 
 @pytest.mark.parametrize("row_scale", [4, 8, 12, 16])

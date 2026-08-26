@@ -267,7 +267,8 @@ def build_cases() -> list[dict[str, Any]]:
     ))
     add(fragment_case(
         "subquery_all_max_equivalent", "SubQuery", "ALL", "equivalent",
-        "student(id, name, credits);", "SELECT name FROM student WHERE credits >= (SELECT MAX(credits) FROM student)",
+        "student(id INTEGER PRIMARY KEY, name TEXT, credits INTEGER NOT NULL);",
+        "SELECT name FROM student WHERE credits >= (SELECT MAX(credits) FROM student)",
         "SELECT name FROM student WHERE credits >= ALL (SELECT credits FROM student)",
         cfg_labels=["subquery-scalar"], attack_kind="equivalent_rewrite",
     ))

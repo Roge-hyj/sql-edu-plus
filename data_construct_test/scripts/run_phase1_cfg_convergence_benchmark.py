@@ -42,6 +42,21 @@ KNOWN_BOUNDARY_IDS = {
     "set_intersect_all",
     "set_except_all",
 }
+
+
+def _web_engine_boundary(sql: str) -> str | None:
+    upper = str(sql or "").upper()
+    if re.search(r"\bGROUP\s+BY\s+(?:GROUPING\s+SETS|ROLLUP|CUBE)\b", upper):
+        return "sqlite_grouping_sets_or_rollup"
+    if re.search(r"\bGENERATE_SERIES\s*\(", upper):
+        return "postgres_generate_series"
+    if re.search(r"\b(?:INTERSECT|EXCEPT)\s+ALL\b", upper):
+        return "sqlite_set_all_modifier"
+    if re.search(r"\bLATERAL\b", upper):
+        return "sqlite_lateral"
+    if re.search(r"EXTRACT\s*\(\s*EPOCH\s+FROM", upper):
+        return "sqlite_epoch_interval"
+    return None
 FULL_EVIDENCE_FIELDS = {
     "standard_ir",
     "student_ir",
@@ -54,6 +69,13 @@ FULL_EVIDENCE_FIELDS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    parser.add_argument(
+        "--artifact-policy",
+        choices=("full", "failures_only"),
+        default="full",
+        help="failures_only omits per-case success artifacts for bounded long runs",
+    )
     parser.add_argument("--generated-cases", type=int, default=100_000)
     parser.add_argument("--web-corpus", type=Path, default=DEFAULT_WEB_CORPUS)
     parser.add_argument("--web-cases", type=int, default=50_000)
@@ -234,10 +256,13 @@ def _stratified_web_order(
     }
 
 
-def _parsed_web_query(sql: str) -> tuple[exp.Query, str | None] | None:
+def _parsed_web_query(
+    sql: str,
+    declared_dialect: str | None = None,
+) -> tuple[exp.Query, str | None] | None:
     try:
         resolution = resolve_sql_dialect_or_raise(
-            declared_dialect=None,
+            declared_dialect=declared_dialect,
             standard_sql=sql,
             student_sql=sql,
             default_dialect="mysql",
@@ -338,6 +363,358 @@ def _literal_set_values(node: exp.Expression) -> set[str] | None:
     return None
 
 
+def _normalized_identifier(value: Any) -> str:
+    """Normalize one already-parsed schema/AST identifier for local matching."""
+
+    return str(value or "").strip().strip('"`[]').lower()
+
+
+def _split_top_level_schema_items(text: str) -> list[str]:
+    """Split compact column declarations without splitting DECIMAL(p, s)."""
+
+    items: list[str] = []
+    start = 0
+    depth = 0
+    quote: str | None = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if char == quote:
+                if index + 1 < len(text) and text[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            elif quote == "]" and char == "]":
+                quote = None
+            index += 1
+            continue
+        if char in {'"', "'", "`"}:
+            quote = char
+        elif char == "[":
+            quote = "]"
+        elif char == "(":
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+        elif char == "," and depth == 0:
+            items.append(text[start:index].strip())
+            start = index + 1
+        index += 1
+    tail = text[start:].strip()
+    if tail:
+        items.append(tail)
+    return items
+
+
+def _schema_unary_primary_keys(
+    schema_text: str,
+    schema_catalog: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Return only primary keys that are provably unary.
+
+    Authoritative catalog metadata wins.  The compact-schema fallback accepts
+    only explicit ``PRIMARY KEY`` declarations; column-name heuristics are not
+    evidence of uniqueness and therefore must not suppress an attack.
+    """
+
+    keys: dict[str, str] = {}
+    if isinstance(schema_catalog, dict):
+        for table in schema_catalog.get("tables") or ():
+            if not isinstance(table, dict):
+                continue
+            table_name = _normalized_identifier(table.get("name"))
+            primary = [
+                _normalized_identifier(column)
+                for column in table.get("primary_key") or ()
+                if _normalized_identifier(column)
+            ]
+            if not primary:
+                primary = [
+                    _normalized_identifier(column.get("name"))
+                    for column in table.get("columns") or ()
+                    if isinstance(column, dict)
+                    and column.get("is_primary_key")
+                    and _normalized_identifier(column.get("name"))
+                ]
+            if table_name and len(primary) == 1:
+                keys[table_name] = primary[0]
+
+    for raw_table in str(schema_text or "").split(";"):
+        definition = raw_table.strip()
+        if not definition or "(" not in definition or ")" not in definition:
+            continue
+        table_name = _normalized_identifier(definition[: definition.find("(")])
+        if not table_name or table_name in keys:
+            continue
+        body = definition[definition.find("(") + 1 : definition.rfind(")")]
+        primary: list[str] = []
+        for item in _split_top_level_schema_items(body):
+            table_constraint = re.match(
+                r"(?is)^(?:constraint\s+\S+\s+)?primary\s+key\s*\((.+)\)\s*$",
+                item,
+            )
+            if table_constraint:
+                columns = _split_top_level_schema_items(table_constraint.group(1))
+                if len(columns) == 1:
+                    primary.append(_normalized_identifier(columns[0]))
+                else:
+                    primary.extend("" for _ in columns)
+                continue
+            if not re.search(r"(?is)\bprimary\s+key\b", item):
+                continue
+            identifier = re.match(r'\s*(\[[^\]]+\]|`[^`]+`|"[^"]+"|[A-Za-z_]\w*)', item)
+            if identifier:
+                primary.append(_normalized_identifier(identifier.group(1)))
+        primary = [column for column in primary if column]
+        if len(primary) == 1:
+            keys[table_name] = primary[0]
+    return keys
+
+
+def _direct_select_tables(select: exp.Select) -> list[exp.Table]:
+    return [
+        table
+        for table in select.find_all(exp.Table)
+        if table.find_ancestor(exp.Select) is select
+    ]
+
+
+def _simple_set_branch(node: exp.Expression) -> exp.Select | None:
+    current = node
+    while isinstance(current, (exp.Subquery, exp.Paren)):
+        current = current.this
+    if not isinstance(current, exp.Select):
+        return None
+    if any(
+        nested is not current
+        for nested in current.find_all(exp.Select)
+    ):
+        return None
+    return current
+
+
+def _projection_column(expression: exp.Expression) -> exp.Column | None:
+    current = expression.this if isinstance(expression, exp.Alias) else expression
+    while isinstance(current, exp.Paren):
+        current = current.this
+    return current if isinstance(current, exp.Column) else None
+
+
+def _recursive_union_modifier_is_redundant(
+    union: exp.Union,
+    schema_text: str,
+    schema_catalog: dict[str, Any] | None = None,
+) -> bool:
+    """Prove that a recursive UNION modifier has no finite witness.
+
+    This deliberately recognizes only unary-primary-key hierarchy walks.  It
+    covers downward traversal where each child row stores one parent, and
+    upward traversal where a primary-key lookup has at most one successor.
+    Cycles can make ``UNION ALL`` non-terminating, but they are not finite
+    counterexample databases and must not be fabricated by duplicating a
+    physical primary key.  General edge tables and diamond paths remain
+    mutation candidates.
+    """
+
+    cte = union.find_ancestor(exp.CTE)
+    if not isinstance(cte, exp.CTE) or not cte.alias_or_name:
+        return False
+    cte_name = _normalized_identifier(cte.alias_or_name)
+    branches = (_simple_set_branch(union.this), _simple_set_branch(union.expression))
+    if any(branch is None for branch in branches):
+        return False
+    left, right = branches
+    assert isinstance(left, exp.Select) and isinstance(right, exp.Select)
+
+    def references_cte(select: exp.Select) -> bool:
+        return any(
+            _normalized_identifier(table.name) == cte_name
+            for table in _direct_select_tables(select)
+        )
+
+    recursive_flags = (references_cte(left), references_cte(right))
+    if recursive_flags.count(True) != 1:
+        return False
+    recursive = left if recursive_flags[0] else right
+    anchor = right if recursive_flags[0] else left
+    if any(
+        select.args.get(key)
+        for select in (anchor, recursive)
+        for key in ("group", "having", "qualify", "limit", "offset")
+    ):
+        return False
+    if any(select.args.get("distinct") for select in (anchor, recursive)):
+        return False
+
+    recursive_tables = _direct_select_tables(recursive)
+    anchor_tables = _direct_select_tables(anchor)
+    if len(recursive_tables) != 2 or len(anchor_tables) != 1:
+        return False
+    recursive_aliases = {
+        _normalized_identifier(table.alias_or_name): _normalized_identifier(table.name)
+        for table in recursive_tables
+    }
+    anchor_aliases = {
+        _normalized_identifier(table.alias_or_name): _normalized_identifier(table.name)
+        for table in anchor_tables
+    }
+    physical_tables = {
+        table for table in recursive_aliases.values() if table != cte_name
+    }
+    if len(physical_tables) != 1:
+        return False
+    physical_table = next(iter(physical_tables))
+    if set(anchor_aliases.values()) != {physical_table}:
+        return False
+    primary_key = _schema_unary_primary_keys(schema_text, schema_catalog).get(physical_table)
+    if not primary_key:
+        return False
+
+    anchor_projection = [_projection_column(item) for item in anchor.expressions]
+    recursive_projection = [_projection_column(item) for item in recursive.expressions]
+    if (
+        not anchor_projection
+        or len(anchor_projection) != len(recursive_projection)
+        or any(column is None for column in (*anchor_projection, *recursive_projection))
+    ):
+        return False
+
+    alias = cte.args.get("alias")
+    output_names = [
+        _normalized_identifier(column.name)
+        for column in (alias.args.get("columns") or ())
+        if isinstance(alias, exp.TableAlias) and isinstance(column, exp.Identifier)
+    ] if isinstance(alias, exp.TableAlias) else []
+    if len(output_names) != len(anchor_projection):
+        output_names = [
+            _normalized_identifier(item.alias_or_name)
+            for item in anchor.expressions
+        ]
+    if len(output_names) != len(anchor_projection) or any(not name for name in output_names):
+        return False
+    output_positions = {name: index for index, name in enumerate(output_names)}
+    if len(output_positions) != len(output_names):
+        return False
+
+    def owner(
+        column: exp.Column,
+        aliases: dict[str, str],
+    ) -> str | None:
+        qualifier = _normalized_identifier(column.table)
+        if qualifier:
+            return aliases.get(qualifier)
+        only = set(aliases.values())
+        return next(iter(only)) if len(only) == 1 else None
+
+    join_pairs: list[tuple[exp.Column, exp.Column]] = []
+    for equality in recursive.find_all(exp.EQ):
+        if equality.find_ancestor(exp.Select) is not recursive:
+            continue
+        if not isinstance(equality.left, exp.Column) or not isinstance(equality.right, exp.Column):
+            continue
+        columns = (equality.left, equality.right)
+        physical = next(
+            (column for column in columns if owner(column, recursive_aliases) == physical_table),
+            None,
+        )
+        recursive_column = next(
+            (column for column in columns if owner(column, recursive_aliases) == cte_name),
+            None,
+        )
+        if isinstance(physical, exp.Column) and isinstance(recursive_column, exp.Column):
+            join_pairs.append((physical, recursive_column))
+    if len(join_pairs) != 1:
+        return False
+    physical_join, recursive_join = join_pairs[0]
+    state_position = output_positions.get(_normalized_identifier(recursive_join.name))
+    if state_position is None:
+        return False
+
+    anchor_columns = [column for column in anchor_projection if isinstance(column, exp.Column)]
+    recursive_columns = [column for column in recursive_projection if isinstance(column, exp.Column)]
+
+    # Downward tree traversal: state is the entity primary key, each emitted
+    # physical row has exactly one scalar parent value, and anchors are the
+    # children of one fixed root (or NULL roots).  A general edge projection
+    # does not satisfy these conditions and remains attackable.
+    if (
+        _normalized_identifier(recursive_columns[state_position].name) == primary_key
+        and owner(recursive_columns[state_position], recursive_aliases) == physical_table
+        and _normalized_identifier(anchor_columns[state_position].name) == primary_key
+        and owner(anchor_columns[state_position], anchor_aliases) == physical_table
+        and _normalized_identifier(physical_join.name) != primary_key
+    ):
+        anchor_where = anchor.args.get("where")
+        if isinstance(anchor_where, exp.Where):
+            for predicate in anchor_where.find_all(exp.EQ, exp.Is):
+                if predicate.find_ancestor(exp.Select) is not anchor:
+                    continue
+                sides = (predicate.left, predicate.right)
+                hierarchy_column = next(
+                    (
+                        side for side in sides
+                        if isinstance(side, exp.Column)
+                        and owner(side, anchor_aliases) == physical_table
+                        and _normalized_identifier(side.name)
+                        == _normalized_identifier(physical_join.name)
+                    ),
+                    None,
+                )
+                constant = next(
+                    (side for side in sides if isinstance(side, (exp.Literal, exp.Null))),
+                    None,
+                )
+                if hierarchy_column is not None and constant is not None:
+                    return True
+
+    # Upward walk: the recursive branch looks up the current state through a
+    # unary PK and emits its parent value.  It is duplicate-free for finite
+    # execution when either there is one anchor row or every chain carries an
+    # unchanged, unique anchor key.
+    if _normalized_identifier(physical_join.name) != primary_key:
+        return False
+    recursive_state = recursive_columns[state_position]
+    if (
+        owner(recursive_state, recursive_aliases) != physical_table
+        or _normalized_identifier(recursive_state.name) == primary_key
+    ):
+        return False
+
+    anchor_where = anchor.args.get("where")
+    if isinstance(anchor_where, exp.Where):
+        for equality in anchor_where.find_all(exp.EQ):
+            if equality.find_ancestor(exp.Select) is not anchor:
+                continue
+            sides = (equality.left, equality.right)
+            key_column = next(
+                (
+                    side for side in sides
+                    if isinstance(side, exp.Column)
+                    and owner(side, anchor_aliases) == physical_table
+                    and _normalized_identifier(side.name) == primary_key
+                ),
+                None,
+            )
+            constant = next((side for side in sides if isinstance(side, exp.Literal)), None)
+            if key_column is not None and constant is not None:
+                return True
+
+    for index, (anchor_column, recursive_column) in enumerate(
+        zip(anchor_columns, recursive_columns)
+    ):
+        if index == state_position:
+            continue
+        if (
+            owner(anchor_column, anchor_aliases) == physical_table
+            and _normalized_identifier(anchor_column.name) == primary_key
+            and owner(recursive_column, recursive_aliases) == cte_name
+            and output_positions.get(_normalized_identifier(recursive_column.name)) == index
+        ):
+            return True
+    return False
+
+
 def _projection_changes_source_shape(
     select: exp.Select,
     schema_text: str,
@@ -411,10 +788,12 @@ def _quote_unsafe_schema_identifiers(sql: str, schema_text: str) -> str:
 def _web_mutations(
     sql: str,
     schema_text: str = "",
+    declared_dialect: str | None = None,
+    schema_catalog: dict[str, Any] | None = None,
 ) -> list[tuple[str, str, list[str]]]:
     candidates: list[tuple[str, str, list[str]]] = []
     sql = _quote_unsafe_schema_identifiers(sql, schema_text)
-    parsed = _parsed_web_query(sql)
+    parsed = _parsed_web_query(sql, declared_dialect)
     if parsed is None:
         return candidates
     original, dialect = parsed
@@ -540,6 +919,11 @@ def _web_mutations(
         union is not None
         and (
             _has_ancestor(union, exp.In)
+            or _recursive_union_modifier_is_redundant(
+                union,
+                schema_text,
+                schema_catalog,
+            )
             or (
                 (left_values := _literal_set_values(union.this)) is not None
                 and (right_values := _literal_set_values(union.expression)) is not None
@@ -672,13 +1056,19 @@ def _web_corpus_variants(
     emitted_sources: set[str] = set()
     variants: list[dict[str, Any]] = []
     for index, record in enumerate(ordered):
-        sql = str(record["sql"]).strip().rstrip(";")
+        source_sql = str(record["sql"]).strip().rstrip(";")
+        sql = source_sql
         if not re.match(r"(?is)^\s*(select|with)\b", sql):
             continue
         schema = str(record.get("schema") or "")
         sql = _quote_unsafe_schema_identifiers(sql, schema)
-        parsed = _parsed_web_query(sql)
-        if parsed is not None:
+        source_dialect = _web_sql_dialect(record)
+        parsed = _parsed_web_query(sql, source_dialect)
+        # Preserve authoritative source text whenever quoting did not change
+        # it.  Re-rendering an otherwise valid PostgreSQL query through the
+        # generic AST can canonicalize DATE_TRUNC, string concatenation or
+        # interval syntax into a different dialect before execution.
+        if parsed is not None and sql != source_sql:
             try:
                 sql = _render_mutation(*parsed)
             except Exception:
@@ -687,7 +1077,6 @@ def _web_corpus_variants(
                 pass
         labels = list(record.get("cfg_labels") or ["select-basic"])
         source_id = str(record.get("source_id") or "unknown")
-        source_dialect = _web_sql_dialect(record)
         scale = _web_row_scale(sql, ROW_SCALES[index % len(ROW_SCALES)])
         identity = _case(
             _web_case_id(source_id, index, "identity", scale, sql),
@@ -715,13 +1104,21 @@ def _web_corpus_variants(
             "source_kind": record.get("source_kind"),
             "source_sql_dialect": source_dialect,
         })
+        boundary = _web_engine_boundary(sql)
+        if boundary:
+            identity["known_boundary"] = boundary
         variants.append(identity)
         emitted_sources.add(source_id)
         if len(variants) >= target_cases:
             if required_sources.issubset(emitted_sources):
                 break
 
-        mutations = _web_mutations(sql, schema)
+        mutations = _web_mutations(
+            sql,
+            schema,
+            source_dialect,
+            record.get("schema_catalog"),
+        )
         rng.shuffle(mutations)
         for mutation_name, mutated_sql, mutation_labels in mutations[:max(0, mutations_per_query)]:
             case = _case(
@@ -750,6 +1147,9 @@ def _web_corpus_variants(
                 "source_kind": record.get("source_kind"),
                 "source_sql_dialect": source_dialect,
             })
+            boundary = _web_engine_boundary(sql) or _web_engine_boundary(mutated_sql)
+            if boundary:
+                case["known_boundary"] = boundary
             variants.append(case)
             emitted_sources.add(source_id)
             if len(variants) >= target_cases and required_sources.issubset(emitted_sources):
@@ -820,6 +1220,8 @@ def _classify_scope(result: dict[str, Any]) -> str:
     if result["capability_bucket"] == "supported":
         return "supported"
     if result.get("base_id") in KNOWN_BOUNDARY_IDS:
+        return "known_boundary"
+    if result.get("known_boundary"):
         return "known_boundary"
     return "unexpected_failure"
 
@@ -1059,7 +1461,8 @@ def main() -> None:
         raise SystemExit("generated-cases must be >= 0 and batch-size must be > 0")
     if args.web_cases < 0 or args.web_mutations_per_query < 0:
         raise SystemExit("web-cases and web-mutations-per-query must be >= 0")
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
     corpus = build_corpus(
         args.generated_cases,
         args.seed,
@@ -1070,7 +1473,7 @@ def main() -> None:
     if args.skip_fragment_stratum:
         corpus = [item for item in corpus if item.get("origin") != "fragment_stratum"]
     results: list[dict[str, Any]] = []
-    checkpoint_path = OUTPUT_DIR / "phase1_cfg_convergence_checkpoint.json"
+    checkpoint_path = output_dir / "phase1_cfg_convergence_checkpoint.json"
     seen_unexpected_signatures: set[str] = set()
     saturated_batches = 0
 
@@ -1123,21 +1526,32 @@ def main() -> None:
         "skip_fragment_stratum": args.skip_fragment_stratum,
         "actual_web_cases": sum(str(item.get("origin") or "").startswith("web_corpus") for item in corpus),
         "batch_size": args.batch_size,
+        "artifact_policy": args.artifact_policy,
         "summary": summarize(results, corpus[:len(results)], args.batch_size),
     }
-    report_path = OUTPUT_DIR / "phase1_cfg_convergence_report.json"
-    markdown_path = OUTPUT_DIR / "phase1_cfg_convergence_report.md"
-    all_path = OUTPUT_DIR / "phase1_cfg_convergence_all.jsonl"
-    passed_path = OUTPUT_DIR / "phase1_cfg_convergence_supported.jsonl"
-    failures_path = OUTPUT_DIR / "phase1_cfg_convergence_failures.jsonl"
-    evidence_path = OUTPUT_DIR / "phase1_cfg_convergence_detailed_evidence.jsonl"
+    report_path = output_dir / "phase1_cfg_convergence_report.json"
+    markdown_path = output_dir / "phase1_cfg_convergence_report.md"
+    all_path = output_dir / "phase1_cfg_convergence_all.jsonl"
+    passed_path = output_dir / "phase1_cfg_convergence_supported.jsonl"
+    failures_path = output_dir / "phase1_cfg_convergence_failures.jsonl"
+    evidence_path = output_dir / "phase1_cfg_convergence_detailed_evidence.jsonl"
     report_path.write_text(json.dumps(_json_safe(payload), ensure_ascii=False, indent=2), encoding="utf-8")
     markdown_path.write_text(render_markdown(payload), encoding="utf-8")
     compact_results = [_compact_result(item) for item in results]
-    _write_jsonl(all_path, compact_results)
-    _write_jsonl(passed_path, [item for item in compact_results if item["scope_status"] == "supported"])
-    _write_jsonl(failures_path, [item for item in results if item["scope_status"] != "supported"])
-    _write_jsonl(evidence_path, _unique_evidence(results))
+    failures = [item for item in results if item["scope_status"] != "supported"]
+    if args.artifact_policy == "full":
+        _write_jsonl(all_path, compact_results)
+        _write_jsonl(
+            passed_path,
+            [item for item in compact_results if item["scope_status"] == "supported"],
+        )
+        evidence = _unique_evidence(results)
+    else:
+        _write_jsonl(all_path, [])
+        _write_jsonl(passed_path, [])
+        evidence = _unique_evidence(failures)
+    _write_jsonl(failures_path, failures)
+    _write_jsonl(evidence_path, evidence)
     print(json.dumps(payload["summary"], ensure_ascii=False, indent=2))
 
 

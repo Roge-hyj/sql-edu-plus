@@ -42,19 +42,98 @@ class DistinguishingObligation:
     estimated_cost: int = 1
 
 
-def _json_safe(value: Any) -> Any:
+_NUMERIC_IDENTIFIER_NAME_RE = re.compile(r"^[0-9][A-Za-z0-9_$]*$")
+
+
+def _quoted_numeric_identifier_names(*values: Any) -> set[str]:
+    """Return quoted numeric-leading column/table names present in AST nodes.
+
+    The generic teaching corpus can spell a schema column such as ``2007``
+    without identifier quotes.  The execution path repairs that spelling to
+    ``"2007"`` so every parser/backend sees the same column.  Stable evidence
+    IDs must treat that representation-only repair as the same source
+    identity, while leaving unrelated double-quoted text untouched.
+    """
+    names: set[str] = set()
+    for value in values:
+        if isinstance(value, str):
+            names.update(re.findall(r'"([0-9][A-Za-z0-9_$]*)"', value))
+            continue
+        if not hasattr(value, "find_all"):
+            continue
+        for identifier in value.find_all(exp.Identifier):
+            name = str(identifier.this or "")
+            if identifier.quoted and _NUMERIC_IDENTIFIER_NAME_RE.fullmatch(name):
+                names.add(name)
+    return names
+
+
+def _canonicalize_quoted_numeric_identifiers(value: str, names: set[str]) -> str:
+    if not names:
+        return value
+
+    def replace(match: re.Match[str]) -> str:
+        return match.group(1) if match.group(1) in names else match.group(0)
+
+    return re.sub(r'"([0-9][A-Za-z0-9_$]*)"', replace, value)
+
+
+def _json_safe(value: Any, *, quoted_numeric_identifiers: set[str] | None = None) -> Any:
+    quoted_numeric_identifiers = quoted_numeric_identifiers or set()
     if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in sorted(value.items())}
+        return {
+            str(key): _json_safe(item, quoted_numeric_identifiers=quoted_numeric_identifiers)
+            for key, item in sorted(value.items())
+        }
     if isinstance(value, (list, tuple, set)):
-        return [_json_safe(item) for item in value]
+        return [
+            _json_safe(item, quoted_numeric_identifiers=quoted_numeric_identifiers)
+            for item in value
+        ]
     if hasattr(value, "sql"):
         try:
-            return value.sql(normalize=True)
+            return _canonicalize_quoted_numeric_identifiers(
+                value.sql(normalize=True), quoted_numeric_identifiers
+            )
         except Exception:  # noqa: BLE001 - stable fallback only.
-            return str(value)
+            return _canonicalize_quoted_numeric_identifiers(str(value), quoted_numeric_identifiers)
     if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
+        return (
+            _canonicalize_quoted_numeric_identifiers(value, quoted_numeric_identifiers)
+            if isinstance(value, str)
+            else value
+        )
     return str(value)
+
+
+def _like_context(sql: str) -> dict[str, Any] | None:
+    """Extract a bounded LIKE predicate, including NOT LIKE polarity."""
+    try:
+        root = parse_one(str(sql or ""), read="sqlite")
+    except Exception:
+        return None
+    like = root.find(exp.Like)
+    if not isinstance(like, exp.Like) or not isinstance(like.this, exp.Column):
+        return None
+    pattern = like.expression
+    if not isinstance(pattern, exp.Literal) or not pattern.is_string:
+        return None
+    table = next(root.find_all(exp.Table), None)
+    return {
+        "relation": str(table.name or "").lower() if table is not None else "",
+        "column": str(like.this.name or "").lower(),
+        "pattern": str(pattern.this),
+        "negated": isinstance(like.parent, exp.Not),
+    }
+
+
+def _query_source_table(sql: str) -> str:
+    try:
+        root = parse_one(str(sql or ""), read="sqlite")
+    except Exception:
+        return ""
+    table = next(root.find_all(exp.Table), None)
+    return str(table.name or "").lower() if table is not None else ""
 
 
 def stable_diff_id(diff: ASTDiffNode, index: int = 0) -> str:
@@ -68,15 +147,28 @@ def stable_diff_id(diff: ASTDiffNode, index: int = 0) -> str:
     semantic location; duplicate, byte-for-byte differences are intentionally
     treated as the same obligation by the Phase 1 compiler.
     """
+    quoted_numeric_identifiers = _quoted_numeric_identifier_names(
+        diff.standard_node,
+        diff.student_node,
+    )
     payload = {
         "clause": diff.clause_category,
         "diff_type": diff.diff_type,
         "table": diff.target_table,
         "column": diff.target_column,
         "knowledge_point_id": diff.knowledge_point_id,
-        "standard": _json_safe(diff.standard_node),
-        "student": _json_safe(diff.student_node),
-        "extra": _json_safe(diff.extra),
+        "standard": _json_safe(
+            diff.standard_node,
+            quoted_numeric_identifiers=quoted_numeric_identifiers,
+        ),
+        "student": _json_safe(
+            diff.student_node,
+            quoted_numeric_identifiers=quoted_numeric_identifiers,
+        ),
+        "extra": _json_safe(
+            diff.extra,
+            quoted_numeric_identifiers=quoted_numeric_identifiers,
+        ),
     }
     digest = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -236,6 +328,150 @@ def _column_refs(
     return references
 
 
+def _simple_in_exists_metadata(diff: ASTDiffNode) -> dict[str, str] | None:
+    """Describe the narrow uncorrelated IN/EXISTS rewrite we can witness.
+
+    This mirrors the data-generator guard intentionally: only a root single
+    table SELECT with one positive, single-table, no-filter subquery on each
+    side is promoted from a generic predicate obligation.  Broader shapes keep
+    the ordinary predicate validator and remain fail-closed.
+    """
+    standard_sql = str(diff.extra.get("standard_query_sql") or "")
+    student_sql = str(diff.extra.get("student_query_sql") or "")
+    if not standard_sql or not student_sql:
+        return None
+    try:
+        standard_ast = parse_one(standard_sql, read="sqlite")
+        student_ast = parse_one(student_sql, read="sqlite")
+    except Exception:
+        return None
+    if not isinstance(standard_ast, exp.Select) or not isinstance(student_ast, exp.Select):
+        return None
+
+    def root(select: exp.Select) -> tuple[exp.Table, exp.Expression] | None:
+        from_clause = select.args.get("from_") or select.args.get("from")
+        if (
+            not isinstance(from_clause, exp.From)
+            or not isinstance(from_clause.this, exp.Table)
+            or from_clause.expressions
+            or len(select.expressions or ()) != 1
+        ):
+            return None
+        projection = select.expressions[0]
+        projection = projection.this if isinstance(projection, exp.Alias) else projection
+        if not isinstance(projection, exp.Column):
+            return None
+        if any(
+            select.args.get(key) is not None
+            for key in (
+                "joins", "group", "having", "order", "limit", "offset",
+                "qualify", "distinct", "with", "with_",
+            )
+        ):
+            return None
+        where = select.args.get("where")
+        if not isinstance(where, exp.Where):
+            return None
+        predicate = where.this
+        while isinstance(predicate, exp.Paren):
+            predicate = predicate.this
+        if not isinstance(predicate, (exp.In, exp.Exists)):
+            return None
+        if isinstance(predicate, (exp.In, exp.Exists)) and isinstance(predicate.parent, exp.Not):
+            return None
+        return from_clause.this, predicate
+
+    standard_root = root(standard_ast)
+    student_root = root(student_ast)
+    if standard_root is None or student_root is None:
+        return None
+    standard_table, standard_predicate = standard_root
+    student_table, student_predicate = student_root
+    if isinstance(standard_predicate, exp.In) == isinstance(student_predicate, exp.In):
+        return None
+    in_node = standard_predicate if isinstance(standard_predicate, exp.In) else student_predicate
+    exists_node = standard_predicate if isinstance(standard_predicate, exp.Exists) else student_predicate
+    if not isinstance(in_node, exp.In) or not isinstance(exists_node, exp.Exists):
+        return None
+    outer_table = str(standard_table.name or "").lower()
+    if not outer_table or outer_table != str(student_table.name or "").lower():
+        return None
+
+    in_query = in_node.args.get("query")
+    in_inner = in_query.this if isinstance(in_query, exp.Subquery) else None
+    exists_inner = exists_node.this if isinstance(exists_node.this, exp.Select) else None
+    if not isinstance(in_inner, exp.Select) or not isinstance(exists_inner, exp.Select):
+        return None
+
+    def inner_table(select: exp.Select) -> exp.Table | None:
+        from_clause = select.args.get("from_") or select.args.get("from")
+        if (
+            not isinstance(from_clause, exp.From)
+            or not isinstance(from_clause.this, exp.Table)
+            or from_clause.expressions
+            or len(select.expressions or ()) != 1
+        ):
+            return None
+        if any(
+            select.args.get(key) is not None
+            for key in (
+                "where", "joins", "group", "having", "order", "limit", "offset",
+                "qualify", "distinct", "with", "with_",
+            )
+        ):
+            return None
+        return from_clause.this
+
+    in_table = inner_table(in_inner)
+    exists_table = inner_table(exists_inner)
+    if in_table is None or exists_table is None:
+        return None
+    inner_name = str(in_table.name or "").lower()
+    if not inner_name or inner_name != str(exists_table.name or "").lower() or inner_name == outer_table:
+        return None
+    projected = in_inner.expressions[0]
+    projected = projected.this if isinstance(projected, exp.Alias) else projected
+    exists_projected = exists_inner.expressions[0]
+    exists_projected = exists_projected.this if isinstance(exists_projected, exp.Alias) else exists_projected
+    if not isinstance(projected, exp.Column):
+        return None
+    if not isinstance(exists_projected, (exp.Column, exp.Literal, exp.Boolean, exp.Null)):
+        return None
+
+    def local_ref(column: exp.Column, select: exp.Select) -> tuple[str, str] | None:
+        table_bindings = {
+            str(table.alias or table.name or "").lower(): str(table.name or "").lower()
+            for table in select.find_all(exp.Table)
+            if table.find_ancestor(exp.Select) is select
+        }
+        qualifier = str(column.table or "").lower()
+        if qualifier:
+            physical = table_bindings.get(qualifier)
+            return (physical, str(column.name or "").lower()) if physical else None
+        if len(set(table_bindings.values())) != 1:
+            return None
+        return next(iter(table_bindings.values())), str(column.name or "").lower()
+
+    outer_ref = local_ref(in_node.this, standard_ast)
+    inner_ref = local_ref(projected, in_inner)
+    if outer_ref is None or inner_ref is None or outer_ref[0] != outer_table or inner_ref[0] != inner_name:
+        return None
+    if isinstance(exists_projected, exp.Column):
+        exists_ref = local_ref(exists_projected, exists_inner)
+        if exists_ref is None or exists_ref[0] != inner_name:
+            return None
+    return {
+        "standard_source_table": outer_table,
+        "standard_membership_table": inner_name,
+        "standard_outer_column": outer_ref[1],
+        "standard_membership_column": inner_ref[1],
+        "student_source_table": outer_table,
+        "student_membership_table": inner_name,
+        "student_outer_column": outer_ref[1],
+        "student_membership_column": inner_ref[1],
+    }
+
+
 def _constraint_templates(
     diff: ASTDiffNode,
     relation: str = "",
@@ -249,6 +485,49 @@ def _constraint_templates(
     aggregate_metadata = _aggregate_metadata(diff)
     if correlated_metadata:
         aggregate_metadata.update(correlated_metadata)
+    if diff_type == "where_changed":
+        standard_like = _like_context(str(diff.extra.get("standard_sql") or ""))
+        student_like = _like_context(str(diff.extra.get("student_sql") or ""))
+        if standard_like and student_like:
+            return [ConstraintSpec(
+                "like_pattern_separation",
+                standard_like["relation"] or relation,
+                standard_like["column"],
+                metadata=(
+                    ("standard_pattern", standard_like["pattern"]),
+                    ("student_pattern", student_like["pattern"]),
+                    ("standard_negated", standard_like["negated"]),
+                    ("student_negated", student_like["negated"]),
+                ),
+            )], 3, 2
+        standard_fragment = str(diff.extra.get("standard_sql") or "")
+        student_fragment = str(diff.extra.get("student_sql") or "")
+        if re.search(
+            r"\b(?:NOT\s+)?(?:EXISTS|IN)\b",
+            standard_fragment,
+            re.IGNORECASE,
+        ) or re.search(
+            r"\b(?:NOT\s+)?(?:EXISTS|IN)\b",
+            student_fragment,
+            re.IGNORECASE,
+        ) or re.search(
+            r"\bSELECT\b",
+            standard_fragment,
+            re.IGNORECASE,
+        ) or re.search(
+            r"\bSELECT\b",
+            student_fragment,
+            re.IGNORECASE,
+        ):
+            return [ConstraintSpec(
+                "subquery_predicate_paths",
+                relation,
+                column,
+                metadata=(
+                    ("standard_sql", standard_fragment),
+                    ("student_sql", student_fragment),
+                ),
+            )], 2, 2
     if (
         diff_type in {"comparison_operator_changed", "literal_changed"}
         and aggregate_metadata.get("scalar_subquery_boundary")
@@ -333,7 +612,16 @@ def _constraint_templates(
             metadata=tuple(sorted(aggregate_metadata.items())),
         )], minimum_rows, 2
     if diff_type in {"comparison_operator_changed", "literal_changed"}:
-        return [ConstraintSpec("boundary_tristate", relation, column, value)], 3, 1
+        return [ConstraintSpec(
+            "boundary_tristate",
+            relation,
+            column,
+            value,
+            metadata=(
+                ("standard_value_kind", diff.extra.get("standard_value_kind")),
+                ("student_value_kind", diff.extra.get("student_value_kind")),
+            ),
+        )], 3, 1
     if diff_type == "regex_pattern_changed":
         return [ConstraintSpec(
             "regex_pattern_separation",
@@ -429,6 +717,75 @@ def _constraint_templates(
             ),
         )], 4, 2
     if diff_type in {"predicate_missing", "predicate_added"}:
+        if diff.extra.get("subquery_depth"):
+            return [ConstraintSpec(
+                "subquery_predicate_paths",
+                relation,
+                column,
+                metadata=tuple(
+                    (key, diff.extra.get(key) or "")
+                    for key in (
+                        "standard_query_sql",
+                        "student_query_sql",
+                        "standard_sql",
+                        "student_sql",
+                    )
+                ),
+            )], 2, 2
+        simple_membership = _simple_in_exists_metadata(diff)
+        if simple_membership is not None:
+            return [ConstraintSpec(
+                "subquery_membership_paths",
+                simple_membership["standard_source_table"],
+                simple_membership["standard_outer_column"],
+                metadata=tuple(
+                    (key, value)
+                    for key, value in (
+                        *simple_membership.items(),
+                        ("require_inner_null", False),
+                        ("require_outer_null", False),
+                    )
+                    if value not in (None, "")
+                ),
+            )], 2, 3
+        # A non-trivial IN/EXISTS predicate (for example one whose inner
+        # query has its own WHERE or aggregate) cannot be reduced to a pair
+        # of physical membership columns.  Validate the bounded full query
+        # pair instead of sending the subquery expression to the row-local
+        # truth evaluator.
+        standard_fragment = str(diff.extra.get("standard_sql") or "")
+        student_fragment = str(diff.extra.get("student_sql") or "")
+        if re.search(
+            r"\b(?:NOT\s+)?(?:EXISTS|IN)\b",
+            standard_fragment,
+            re.IGNORECASE,
+        ) or re.search(
+            r"\b(?:NOT\s+)?(?:EXISTS|IN)\b",
+            student_fragment,
+            re.IGNORECASE,
+        ) or re.search(
+            r"\bSELECT\b",
+            standard_fragment,
+            re.IGNORECASE,
+        ) or re.search(
+            r"\bSELECT\b",
+            student_fragment,
+            re.IGNORECASE,
+        ):
+            return [ConstraintSpec(
+                "subquery_predicate_paths",
+                relation,
+                column,
+                metadata=tuple(
+                    (key, diff.extra.get(key) or "")
+                    for key in (
+                        "standard_query_sql",
+                        "student_query_sql",
+                        "standard_sql",
+                        "student_sql",
+                    )
+                ),
+            )], 2, 2
         return [ConstraintSpec(
             "predicate_positive_negative_paths",
             relation,
@@ -557,14 +914,36 @@ def _constraint_templates(
             column,
             metadata=tuple(sorted(window_metadata.items())),
         )], 4, 3
+    if diff_type == "order_by_changed":
+        source_table = str(
+            diff.extra.get("standard_source_table")
+            or _query_source_table(str(diff.extra.get("standard_query_sql") or ""))
+            or _query_source_table(str(diff.extra.get("standard_sql") or ""))
+            or relation
+        ).lower()
+        return [ConstraintSpec(
+            "order_key_separation",
+            source_table,
+            column,
+            metadata=(
+                ("standard_query_sql", diff.extra.get("standard_query_sql") or ""),
+                ("student_query_sql", diff.extra.get("student_query_sql") or ""),
+                ("standard_sql", diff.extra.get("standard_sql") or ""),
+                ("student_sql", diff.extra.get("student_sql") or ""),
+                ("standard_source_table", source_table),
+            ),
+        )], 3, 1
     if diff_type in {
         "order_direction_changed",
         "order_by_tiebreaker_missing",
         "order_by_key_added",
+        "order_nulls_changed",
     }:
         order_metadata = {
             "standard_order_keys": tuple(diff.extra.get("standard_order_keys") or ()),
             "student_order_keys": tuple(diff.extra.get("student_order_keys") or ()),
+            "standard_nulls_first": tuple(diff.extra.get("standard_nulls_first") or ()),
+            "student_nulls_first": tuple(diff.extra.get("student_nulls_first") or ()),
             "standard_source_table": diff.extra.get("standard_source_table") or "",
         }
         return [ConstraintSpec(
@@ -632,6 +1011,7 @@ def _constraint_templates(
                     "standard_case_when_predicates",
                     "student_case_when_predicates",
                     "standard_source_table",
+                    "required_case_branch_indexes",
                 )
                 if diff.extra.get(key) is not None
             ),
@@ -647,7 +1027,18 @@ def _constraint_templates(
         membership_metadata = {
             **diff.extra,
             **aggregate_metadata,
-            "require_inner_null": bool(aggregate_metadata.get("require_inner_null")),
+            "require_inner_null": bool(
+                diff.extra.get(
+                    "require_inner_null",
+                    aggregate_metadata.get("require_inner_null"),
+                )
+            ),
+            "require_outer_null": bool(
+                diff.extra.get(
+                    "require_outer_null",
+                    aggregate_metadata.get("require_outer_null"),
+                )
+            ),
         }
         return [ConstraintSpec(
             "subquery_membership_paths",
@@ -665,6 +1056,7 @@ def _constraint_templates(
                     "student_outer_column",
                     "student_membership_column",
                     "require_inner_null",
+                    "require_outer_null",
                 )
                 if membership_metadata.get(key) not in (None, "")
             ),
@@ -747,7 +1139,13 @@ def _constraint_templates(
     if diff_type == "null_equality_changed":
         return [ConstraintSpec("null_and_non_null_rows", relation, column)], 2, 1
     if diff_type == "null_predicate_negation_changed":
-        return [ConstraintSpec("null_and_non_null_rows", relation, column)], 2, 1
+        # ``IS NULL`` versus ``IS NOT NULL`` is distinguishable with either
+        # side of the NULL partition present.  Requiring both sides made a
+        # valid NOT-NULL schema (or a deliberately all-NULL fixture) fail
+        # semantic validation after execution had already shown a difference.
+        # Keep the stricter two-path obligation for null equality/coercion, but
+        # use a predicate-specific validator for the negation mutation.
+        return [ConstraintSpec("null_predicate_paths", relation, column)], 1, 1
     if diff_type == "distinct_on_changed":
         context = _distinct_on_context(diff)
         relation = str(context.get("source_table") or relation)
@@ -804,7 +1202,9 @@ def _join_metadata(diff: ASTDiffNode) -> tuple[tuple[str, Any], ...]:
         except Exception:
             continue
         pairs: list[tuple[str, str, str, str]] = []
-        for join in ast.find_all(exp.Join):
+        join_nodes = [ast] if isinstance(ast, exp.Join) else []
+        join_nodes.extend(ast.find_all(exp.Join))
+        for join in join_nodes:
             on = join.args.get("on")
             if on is None:
                 continue
@@ -1420,6 +1820,8 @@ def _derived_projection_provenance(diff: ASTDiffNode) -> dict[str, Any]:
 def _having_group_metadata(
     diff: ASTDiffNode,
     all_diffs: list[ASTDiffNode],
+    *,
+    include_aggregate: bool = False,
 ) -> dict[str, Any]:
     candidate_sql = _normalize_sql_fragment(diff.extra.get("standard_sql"))
     for item in all_diffs:
@@ -1427,9 +1829,18 @@ def _having_group_metadata(
             continue
         having_sql = _normalize_sql_fragment(item.extra.get("standard_sql"))
         if candidate_sql and candidate_sql in having_sql:
+            keys = ["standard_group_columns", "standard_source_table"]
+            if include_aggregate:
+                keys.extend(
+                    (
+                        "standard_aggregate_function",
+                        "standard_aggregate_argument",
+                        "standard_aggregate_distinct",
+                    )
+                )
             return {
                 key: item.extra[key]
-                for key in ("standard_group_columns", "standard_source_table")
+                for key in keys
                 if item.extra.get(key) is not None
             }
     return {}
@@ -1471,16 +1882,55 @@ def _having_summary_is_covered(diff: ASTDiffNode, all_diffs: list[ASTDiffNode]) 
         return False
     aggregate_comparisons = [
         item for item in all_diffs
-        if item.diff_type == "comparison_operator_changed"
+        # The nested predicate extractor represents a HAVING threshold edit
+        # either as an operator change (``>`` -> ``>=``) or as a literal
+        # change (``100`` -> ``101``).  Both are the atomic obligation; the
+        # clause-level ``having_changed`` node is only a summary and must not
+        # force a second witness/validator obligation.
+        if item.diff_type in {"comparison_operator_changed", "literal_changed"}
         and _normalize_sql_fragment(item.extra.get("standard_sql")) in having_sql
         and _aggregate_comparison_metadata(item)
+    ]
+    # A COUNT(*) -> COUNT(column) rewrite inside HAVING is represented by an
+    # aggregate diff rather than a comparison diff. Treat the clause node as
+    # the summary when that atomic aggregate is present.
+    aggregate_argument_changes = [
+        item
+        for item in all_diffs
+        if item.diff_type in {
+            "aggregate_argument_changed",
+            "aggregate_function_changed",
+            "aggregate_distinct_changed",
+        }
+        and any(
+            _normalize_sql_fragment(item.extra.get(key)) in having_sql
+            for key in ("standard_sql", "student_sql")
+            if item.extra.get(key)
+        )
+    ]
+    # Some dialects render a grouped alias in HAVING (``high_score >= 90``)
+    # instead of repeating the aggregate expression.  In that form the
+    # concrete comparison is still the owner even though the aggregate-aware
+    # metadata parser cannot recover ``MAX(score)`` from the fragment.
+    alias_comparisons = [
+        item
+        for item in all_diffs
+        if item.diff_type in {"comparison_operator_changed", "literal_changed"}
+        and str(item.extra.get("predicate_clause") or "").upper() == "HAVING"
+        and _normalize_sql_fragment(item.extra.get("standard_sql")) in having_sql
     ]
     expected = re.findall(
         r"(?:COUNT|SUM|AVG|MIN|MAX)\s*\([^)]*\)\s*(?:>=|<=|<>|!=|=|>|<)",
         str(diff.extra.get("standard_sql") or ""),
         flags=re.IGNORECASE,
     )
-    return bool(expected) and len(aggregate_comparisons) >= len(expected)
+    return bool(alias_comparisons) or (
+        bool(expected)
+        and (
+            len(aggregate_comparisons) >= len(expected)
+            or bool(aggregate_argument_changes)
+        )
+    )
 
 
 _COMPARISON_TYPES = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)
@@ -1514,7 +1964,149 @@ def is_redundant_summary_diff(
     all_diffs: list[ASTDiffNode],
 ) -> bool:
     specific_types = {item.diff_type for item in all_diffs if item is not diff}
+
+    def fragment_is_contained(summary: ASTDiffNode, candidate: ASTDiffNode) -> bool:
+        summary_fragments = {
+            side: _normalize_sql_fragment(summary.extra.get(f"{side}_sql"))
+            for side in ("standard", "student")
+        }
+        for side in ("standard", "student"):
+            candidate_fragment = _normalize_sql_fragment(
+                candidate.extra.get(f"{side}_sql")
+            )
+            if (
+                candidate_fragment
+                and len(candidate_fragment) >= 8
+                and candidate_fragment in summary_fragments[side]
+            ):
+                return True
+        return False
+
+    # ``IS NULL``/``= NULL`` is emitted once as a generic comparison change and
+    # once as the NULL-specific atomic change.  The latter owns the semantic
+    # obligation; retaining both creates duplicate witness/validator work.
+    if diff.diff_type == "comparison_operator_changed" and any(
+        item.diff_type == "null_equality_changed"
+        and fragment_is_contained(diff, item)
+        for item in all_diffs
+        if item is not diff
+    ):
+        return True
+
+    # The nested-query AST walker can report the same physical window
+    # expression once for every enclosing derived SELECT.  Keep the deepest
+    # occurrence as the owner of the witness; shallower copies are summaries
+    # of the same replacement and would make one mutation bind ambiguously to
+    # several otherwise identical window obligations.
+    if diff.diff_type in {"window_over_changed", "window_function_changed"}:
+        current_depth = diff.extra.get("subquery_depth")
+        try:
+            current_depth = int(current_depth)
+        except (TypeError, ValueError):
+            current_depth = -1
+        current_standard = _normalize_sql_fragment(diff.extra.get("standard_sql"))
+        current_student = _normalize_sql_fragment(diff.extra.get("student_sql"))
+        def _depth(value: Any) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return -1
+
+        if current_standard and current_student and any(
+                item is not diff
+                and item.diff_type == diff.diff_type
+                and _normalize_sql_fragment(item.extra.get("standard_sql"))
+                == current_standard
+                and _normalize_sql_fragment(item.extra.get("student_sql"))
+                == current_student
+                and _depth(item.extra.get("subquery_depth")) > current_depth
+                for item in all_diffs
+            ):
+                return True
+
+    # Nested aggregate extraction can report the same function replacement at
+    # each enclosing SELECT depth.  Keep the deepest occurrence as the owner
+    # so one aggregate mutation does not bind ambiguously to multiple worlds.
+    if diff.diff_type in {
+        "aggregate_function_changed",
+        "aggregate_argument_changed",
+        "aggregate_distinct_changed",
+    }:
+        current_depth = diff.extra.get("subquery_depth")
+        try:
+            current_depth = int(current_depth)
+        except (TypeError, ValueError):
+            current_depth = -1
+        current_standard = _normalize_sql_fragment(diff.extra.get("standard_sql"))
+        current_student = _normalize_sql_fragment(diff.extra.get("student_sql"))
+
+        def _depth(value: Any) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return -1
+
+        if current_standard and current_student and any(
+            item is not diff
+            and item.diff_type == diff.diff_type
+            and _normalize_sql_fragment(item.extra.get("standard_sql")) == current_standard
+            and _normalize_sql_fragment(item.extra.get("student_sql")) == current_student
+            and _depth(item.extra.get("subquery_depth")) > current_depth
+            for item in all_diffs
+        ):
+            return True
+
+    # Recursive CTE extraction intentionally emits a whole-CTE summary.  When
+    # a concrete predicate, literal, or recursive-step diff is also present,
+    # that atomic diff owns attribution.  Keep the summary for genuinely
+    # opaque recursive changes, and only suppress it when the concrete SQL
+    # fragment is actually present on the corresponding side.
+    if diff.diff_type == "recursive_cte_changed":
+        recursive_atomic_types = {
+            "comparison_operator_changed",
+            "literal_changed",
+            "logical_operator_changed",
+            "logical_precedence_tree_changed",
+            "predicate_added",
+            "predicate_missing",
+            "null_equality_changed",
+            "null_predicate_negation_changed",
+            "recursive_step_expression_changed",
+            "set_operator_changed",
+            "set_modifier_changed",
+            "set_all_modifier_changed",
+            "projection_changed",
+            "aggregate_function_changed",
+            "aggregate_argument_changed",
+            "aggregate_distinct_changed",
+        }
+        if any(
+            item.diff_type in recursive_atomic_types
+            and fragment_is_contained(diff, item)
+            for item in all_diffs
+            if item is not diff
+        ):
+            return True
+
     if diff.diff_type in {"predicate_missing", "predicate_added"}:
+        # AST extraction also emits predicate add/remove summaries for a
+        # changed aggregate expression in HAVING. The HAVING/aggregate diff
+        # owns that semantic obligation; retaining these summaries creates
+        # unsupported duplicate predicate obligations and breaks attribution.
+        predicate_sql = _normalize_sql_fragment(
+            diff.extra.get("standard_sql") or diff.extra.get("student_sql")
+        )
+        if predicate_sql:
+            for item in all_diffs:
+                if item.diff_type != "having_changed":
+                    continue
+                having_sql = " ".join(
+                    _normalize_sql_fragment(item.extra.get(key))
+                    for key in ("standard_sql", "student_sql")
+                    if item.extra.get(key)
+                )
+                if predicate_sql in having_sql and _having_summary_is_covered(item, all_diffs):
+                    return True
         node = diff.standard_node or diff.student_node
         inside_case = False
         while isinstance(node, exp.Expression):
@@ -1547,6 +2139,11 @@ def is_redundant_summary_diff(
                 "correlated_predicate_changed",
                 "aggregate_function_changed",
                 "aggregate_argument_changed",
+                "order_by_changed",
+                "order_direction_changed",
+                "order_by_tiebreaker_missing",
+                "order_by_key_added",
+                "order_nulls_changed",
             }
         )
     if diff.diff_type in {"logical_operator_changed", "logical_precedence_tree_changed"}:
@@ -1611,6 +2208,24 @@ def is_redundant_summary_diff(
         ):
             return True
     if diff.diff_type in {"subquery_added", "subquery_removed"}:
+        if any(
+            item.diff_type in {
+                "case_changed",
+                "case_when_missing",
+                "case_when_added",
+            }
+            and fragment_is_contained(item, diff)
+            for item in all_diffs
+            if item is not diff
+        ):
+            return True
+        if any(
+            item.diff_type in {"predicate_missing", "predicate_added"}
+            and fragment_is_contained(item, diff)
+            for item in all_diffs
+            if item is not diff
+        ):
+            return True
         return any(
             item.diff_type == "correlated_predicate_changed"
             and not item.extra.get("subquery_depth")
@@ -1639,8 +2254,55 @@ def is_redundant_summary_diff(
             and not item.extra.get("subquery_depth")
             for item in all_diffs
         )
+    if diff.diff_type == "correlated_predicate_changed":
+        # Nested SELECT extraction can emit a whole derived-query summary for
+        # a window partition change.  If the concrete window fragment is
+        # present in that summary, the window obligation owns the evidence;
+        # compiling the summary as a membership obligation has no physical
+        # relation/key metadata and can never validate it.
+        if any(
+            item.diff_type in {"window_over_changed", "window_function_changed"}
+            and fragment_is_contained(diff, item)
+            for item in all_diffs
+            if item is not diff
+        ):
+            return True
+        # IN/EXISTS mutations can also emit a correlated whole-predicate
+        # summary alongside a focused predicate_missing/added node.  A
+        # scalar/derived predicate has no independent physical membership
+        # key, so the focused bounded query-pair obligation owns it.  A
+        # cross-scope column comparison is different: it is the actual
+        # correlated membership path (for example ``b.employee_id <>
+        # employee.id``), and the correlated summary is its only
+        # relation-aware obligation.  Keep that summary so the witness
+        # planner can materialize both outer-membership paths.
+        focused_predicates = [
+            item
+            for item in all_diffs
+            if item is not diff
+            and item.diff_type in {"predicate_missing", "predicate_added"}
+            and fragment_is_contained(diff, item)
+        ]
+        direct_correlated_predicate = any(
+            str(item.extra.get("value_kind") or "").lower() == "column"
+            and item.extra.get("left_table")
+            and item.extra.get("right_table")
+            for item in focused_predicates
+        )
+        if focused_predicates and not direct_correlated_predicate:
+            return True
+    if diff.diff_type == "in_predicate_negation_changed" and any(
+        item.diff_type == "correlated_predicate_changed"
+        and fragment_is_contained(item, diff)
+        for item in all_diffs
+        if item is not diff
+    ):
+        # The standalone IN-list detector cannot express the enclosing
+        # correlated EXISTS path.  Let the correlated membership obligation
+        # own this nested predicate and its exact execution replacement.
+        return True
     if diff.diff_type == "case_changed":
-        return any(
+        if any(
             item.diff_type in {
                 "case_else_missing",
                 "case_else_added",
@@ -1648,6 +2310,18 @@ def is_redundant_summary_diff(
                 "case_when_added",
             }
             for item in all_diffs
+        ):
+            return True
+        return any(
+            item.diff_type in {
+                "null_equality_changed",
+                "null_predicate_negation_changed",
+                "comparison_operator_changed",
+                "literal_changed",
+            }
+            and fragment_is_contained(diff, item)
+            for item in all_diffs
+            if item is not diff
         )
     if diff.diff_type == "from_source_changed":
         return bool(
@@ -1659,6 +2333,8 @@ def is_redundant_summary_diff(
                 "correlated_predicate_changed",
                 "subquery_added",
                 "subquery_removed",
+                "window_over_changed",
+                "window_function_changed",
             }
         )
     if diff.diff_type == "join_key_column_changed":
@@ -1684,6 +2360,7 @@ def is_redundant_summary_diff(
                 "order_direction_changed",
                 "order_by_tiebreaker_missing",
                 "order_by_key_added",
+                "order_nulls_changed",
             }
         )
     if diff.diff_type == "top_n_ordering_missing":
@@ -1693,6 +2370,7 @@ def is_redundant_summary_diff(
                 "order_direction_changed",
                 "order_by_tiebreaker_missing",
                 "order_by_key_added",
+                "order_nulls_changed",
             }
         )
     if diff.diff_type == "cte_changed":
@@ -1739,6 +2417,22 @@ def _resolved_relation(
     column = target_column
     if not column or not schema:
         return ""
+    fragments = " ".join(
+        str(diff.extra.get(key) or "")
+        for key in ("standard_sql", "student_sql")
+    )
+    for alias, canonical in aliases.items():
+        if not re.search(
+            rf"(?<![A-Za-z0-9_$]){re.escape(alias)}\s*\.\s*",
+            fragments,
+            re.IGNORECASE,
+        ):
+            continue
+        if any(
+            str(item).strip().lower() == column
+            for item in schema.get(canonical, ())
+        ):
+            return canonical
     candidates = [
         table.lower()
         for table, columns in schema.items()
@@ -1776,8 +2470,14 @@ def compile_obligations(
             "order_direction_changed",
             "order_by_tiebreaker_missing",
             "order_by_key_added",
+            "order_nulls_changed",
+            "order_by_changed",
         }:
             table = str(diff.extra.get("standard_source_table") or "").lower()
+        if not table and schema and diff.diff_type in {"where_changed", "order_by_changed"}:
+            schema_tables = [str(name).lower() for name in schema]
+            if len(schema_tables) == 1:
+                table = schema_tables[0]
         if not table and diff.diff_type in {
             "logical_operator_changed",
             "logical_precedence_tree_changed",
@@ -1807,6 +2507,19 @@ def compile_obligations(
                 or ""
             )
         correlation = _having_boundary_context(diff, resolved_diffs)
+        if diff.diff_type == "literal_changed":
+            # Literal edits inside HAVING carry only the local comparison
+            # fragment. Recover the grouping/source/aggregate context from the
+            # clause-level summary before selecting the physical obligation
+            # relation; otherwise a valid threshold witness is reported as a
+            # missing table.
+            correlation.update(
+                _having_group_metadata(
+                    diff,
+                    resolved_diffs,
+                    include_aggregate=True,
+                )
+            )
         if diff.diff_type == "null_sensitive_antijoin_equivalence":
             related = next(
                 (
@@ -1825,7 +2538,12 @@ def compile_obligations(
                 ):
                     if related.extra.get(key) is not None:
                         correlation[key] = related.extra[key]
-            correlation["require_inner_null"] = True
+            correlation["require_inner_null"] = bool(
+                diff.extra.get("require_inner_null", True)
+            )
+            correlation["require_outer_null"] = bool(
+                diff.extra.get("require_outer_null", False)
+            )
         if diff.diff_type == "comparison_operator_changed":
             filtered_aggregate_context = _filtered_aggregate_boundary_metadata(
                 diff

@@ -319,6 +319,9 @@ def select_records(
     excluded = Counter()
     seen: set[str] = set()
     for raw_item in records:
+        if raw_item.get("replay_eligible") is False:
+            excluded["reference_only_schema"] += 1
+            continue
         item = _normalize_generic_schema(raw_item)
         sql = str(item.get("sql") or "").strip()
         if not re.match(r"(?is)^(?:select|with)\b", sql):
@@ -342,7 +345,12 @@ def select_records(
             excluded["duplicate"] += 1
             continue
         seen.add(key)
-        mutation_count = len(_web_mutations(sql, str(item.get("schema") or "")))
+        mutation_count = len(_web_mutations(
+            sql,
+            str(item.get("schema") or ""),
+            _web_sql_dialect(item),
+            item.get("schema_catalog"),
+        ))
         if mutation_count == 0:
             excluded["no_mutation_candidate"] += 1
             continue

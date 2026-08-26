@@ -396,6 +396,11 @@ def _direct_subquery_aliases(select: exp.Select) -> set[str]:
             alias = _norm(subquery.alias_or_name)
             if alias:
                 aliases.add(alias)
+    for lateral in select.find_all(exp.Lateral):
+        if _nearest_select(lateral) is select:
+            alias = _norm(lateral.alias_or_name)
+            if alias:
+                aliases.add(alias)
     return aliases
 
 
@@ -438,6 +443,21 @@ def _sqlite_double_quoted_literal_fallback(
     )
 
 
+def _dialect_pseudo_columns(dialect: str | None) -> set[str]:
+    """Return engine-generated names that are not physical schema columns.
+
+    Oracle's ``ROWNUM`` is evaluated by the engine for every row and therefore
+    must not be reported as a missing column during the pre-fixture safety
+    pass.  Keeping this list dialect-specific prevents the qualification layer
+    from weakening ordinary identifier checks in other engines.
+    """
+
+    normalized = str(dialect or "").strip().lower()
+    if normalized == "oracle":
+        return {"rownum"}
+    return set()
+
+
 def analyze_schema_qualification(
     sql: str,
     schema: dict[str, list[str]] | SchemaCatalog,
@@ -460,6 +480,7 @@ def analyze_schema_qualification(
     scope_ids = {id(select): f"scope_{index}" for index, select in enumerate(selects)}
     cte_names = _visible_cte_names(root)
     schema_names, schema_columns = _schema_index(catalog)
+    pseudo_columns = _dialect_pseudo_columns(dialect)
     scopes: list[QueryScope] = []
     all_physical: set[str] = set()
     missing_tables: set[str] = set()
@@ -500,6 +521,7 @@ def analyze_schema_qualification(
                 missing_tables.add(name)
 
         visible_physical_tables = dict(scope.physical_tables)
+        visible_query_relations = set(scope.ctes) | set(scope.derived_relations)
         parent_id = scope.parent_id
         while parent_id:
             parent_scope = next(
@@ -510,6 +532,11 @@ def analyze_schema_qualification(
                 break
             for alias, canonical in parent_scope.physical_tables.items():
                 visible_physical_tables.setdefault(alias, canonical)
+            # Correlated scalar/EXISTS subqueries may reference a CTE or
+            # derived relation introduced by an enclosing query block just as
+            # they may reference an enclosing physical-table alias.
+            visible_query_relations.update(parent_scope.ctes)
+            visible_query_relations.update(parent_scope.derived_relations)
             parent_id = parent_scope.parent_id
 
         for column in select.find_all(exp.Column):
@@ -517,6 +544,10 @@ def analyze_schema_qualification(
                 continue
             qualifier = _norm(column.table)
             column_name = _norm(column.name)
+            if not qualifier and column_name in pseudo_columns:
+                # Engine-generated pseudo columns (currently Oracle ROWNUM)
+                # have no physical schema entry but are valid in native SQL.
+                continue
             relation = relation_aliases.get(qualifier, qualifier)
             candidates: list[str] = []
             if not qualifier:
@@ -555,7 +586,7 @@ def analyze_schema_qualification(
                 # fail later as an opaque SQLite error.
                 known_relations = {
                     _norm(name) for name in visible_physical_tables
-                } | scope.ctes | scope.derived_relations
+                } | visible_query_relations
                 if qualifier not in known_relations:
                     missing_columns.add(reference)
                 elif relation in schema_columns and column_name not in schema_columns[relation]:

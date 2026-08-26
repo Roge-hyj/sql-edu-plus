@@ -189,6 +189,67 @@ def test_global_min_equality_and_less_equal_are_supported_equivalent():
     assert extract_ast_diffs(standard, student) == []
 
 
+def test_singleton_in_rewrite_is_supported_in_filter_context():
+    standard = "SELECT county FROM places WHERE listed = '1992-06-29'"
+    student = "SELECT county FROM places WHERE listed IN ('1992-06-29')"
+
+    assert extract_ast_diffs(standard, student) == []
+
+
+def test_singleton_in_rewrite_is_not_applied_to_projected_boolean_values():
+    standard = "SELECT listed = '1992-06-29' FROM places"
+    student = "SELECT listed IN ('1992-06-29') FROM places"
+
+    assert extract_ast_diffs(standard, student)
+
+
+def test_comparison_operand_mirror_is_equivalent_without_erasing_boolean_3vl():
+    standard = "SELECT AVG(yards) FROM plays WHERE yards > 214"
+    student = "SELECT AVG(yards) FROM plays WHERE 214 < yards"
+
+    assert extract_ast_diffs(standard, student) == []
+
+    projected_standard = "SELECT yards > 214 FROM plays"
+    projected_student = "SELECT (yards > 214) IS TRUE FROM plays"
+    assert extract_ast_diffs(projected_standard, projected_student)
+
+
+def test_correlated_exists_negation_keeps_polarity_in_atomic_variant():
+    result = generate_and_compare(
+        "students(id, name); scores(student_id);",
+        "SELECT s.name FROM students AS s WHERE EXISTS "
+        "(SELECT 1 FROM scores AS x WHERE x.student_id = s.id)",
+        "SELECT s.name FROM students AS s WHERE NOT EXISTS "
+        "(SELECT 1 FROM scores AS x WHERE x.student_id = s.id)",
+    )
+
+    assert result.executed is True
+    assert result.is_equivalent is False
+    effectiveness = result.data_evidence["obligation_effectiveness"]
+    assert effectiveness
+    assert effectiveness[0]["constraints_satisfied"] is True
+    assert effectiveness[0]["distinguished"] is True
+
+
+def test_correlated_predicate_mutation_replaces_not_exists_wrapper_and_binds_diff():
+    result = generate_and_compare(
+        "students(id, name); scores(student_id);",
+        "SELECT s.name FROM students AS s WHERE EXISTS "
+        "(SELECT 1 FROM scores AS x WHERE x.student_id = s.id)",
+        "SELECT s.name FROM students AS s WHERE NOT EXISTS "
+        "(SELECT 1 FROM scores AS x WHERE x.student_id = s.id)",
+    )
+
+    tests = result.mutation_evidence["tests"]
+    correlated = next(
+        item for item in tests if item["action"] == "restore_correlated_predicate"
+    )
+    assert correlated["fixed_by_replacement"] is True
+    assert correlated["binding_quality"] == "exact"
+    assert correlated["diff_ids"]
+    assert "NOT EXISTS" not in correlated["replacement_source_sql"].upper()
+
+
 def test_filtered_max_subquery_is_not_treated_as_extreme_equivalence():
     standard = (
         "SELECT InvoiceId FROM Invoice "

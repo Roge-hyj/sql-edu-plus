@@ -94,7 +94,7 @@ _CASES = (
         ),
         declared_dialect="mysql",
         expected_resolution_source="declared",
-        expected_version=re.compile(r"^8\.4(?:\.|$)"),
+        expected_version=re.compile(r"^8\.0\.46(?:[- .]|$)"),
         version_probe_sql="SELECT VERSION()",
         expected_mutation_clause="WHERE",
         expected_kp="comp-null",
@@ -245,6 +245,17 @@ def _probe(case: _LiveCase, url: str) -> str:
     )
     if not rows or not rows[0]:
         raise RuntimeError("version_probe_empty")
+    if case.backend == "mysql":
+        _, profile_rows = execute_native_query(
+            case.backend,
+            {},
+            {},
+            {},
+            "SELECT @@lower_case_table_names",
+            url,
+        )
+        if not profile_rows or not profile_rows[0] or int(profile_rows[0][0]) != 0:
+            raise RuntimeError("mysql_identifier_mode_mismatch")
     return str(rows[0][0])
 
 

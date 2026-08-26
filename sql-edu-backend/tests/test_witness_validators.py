@@ -51,6 +51,33 @@ def test_join_validator_requires_matched_and_dangling_key_paths():
     assert result.evidence["matched_values"] == [1]
 
 
+def test_join_validator_normalizes_typed_key_values_from_authoritative_schema():
+    obligation = _obligation(
+        "matched_and_dangling_join_rows", "singer", "Singer_ID"
+    )
+    obligation.hard_constraints[0] = ConstraintSpec(
+        "matched_and_dangling_join_rows",
+        "singer",
+        "Singer_ID",
+        metadata=(
+            (
+                "standard_join_pairs",
+                (("singer_in_concert", "Singer_ID", "singer", "Singer_ID"),),
+            ),
+        ),
+    )
+    world = SimpleNamespace(database={
+        "singer_in_concert": [{"Singer_ID": "1"}, {"Singer_ID": "900032"}],
+        "singer": [{"Singer_ID": 1}, {"Singer_ID": 2}],
+    })
+
+    result = validate_obligation(world, obligation)
+
+    assert result.constraints_satisfied is True
+    assert result.evidence["matched_values"] == ["1"]
+    assert result.evidence["dangling_left_values"] == ["900032"]
+
+
 def _join_drift_obligation(standard_pairs, student_pairs):
     obligation = _obligation(
         "standard_join_equal_student_join_unequal", "left_table", "id"
@@ -242,6 +269,62 @@ def test_aggregate_validator_requires_a_group_at_the_numeric_boundary():
 
     assert result.constraints_satisfied is True
     assert result.evidence["aggregate_group_counts"]["('A',)"] == 3
+
+
+def test_aggregate_validator_accepts_count_column_to_count_star_null_path():
+    world = SimpleNamespace(database={
+        "employee": [
+            {"manager_id": None},
+            {"manager_id": 7},
+            {"manager_id": 8},
+        ]
+    })
+    obligation = _obligation(
+        "aggregate_boundary_group", "employee", '"manager_id"'
+    )
+    obligation.diff_type = "aggregate_argument_changed"
+    obligation.hard_constraints[0] = ConstraintSpec(
+        "aggregate_boundary_group",
+        "employee",
+        '"manager_id"',
+        metadata=(
+            ("standard_aggregate_function", "COUNT"),
+            ("standard_aggregate_argument", '"manager_id"'),
+            ("student_aggregate_argument", "*"),
+            ("standard_group_columns", ()),
+        ),
+    )
+
+    result = validate_obligation(world, obligation)
+
+    assert result.constraints_satisfied is True
+    assert result.evidence["nullable_argument_column"] == "manager_id"
+    assert result.evidence["null_row_indexes"] == [0]
+
+
+def test_aggregate_validator_rejects_count_column_to_count_star_without_null():
+    world = SimpleNamespace(database={
+        "employee": [{"manager_id": 7}, {"manager_id": 8}],
+    })
+    obligation = _obligation(
+        "aggregate_boundary_group", "employee", '"manager_id"'
+    )
+    obligation.diff_type = "aggregate_argument_changed"
+    obligation.hard_constraints[0] = ConstraintSpec(
+        "aggregate_boundary_group",
+        "employee",
+        '"manager_id"',
+        metadata=(
+            ("standard_aggregate_function", "COUNT"),
+            ("standard_aggregate_argument", '"manager_id"'),
+            ("student_aggregate_argument", "*"),
+        ),
+    )
+
+    result = validate_obligation(world, obligation)
+
+    assert result.constraints_satisfied is False
+    assert "aggregate_nullable_argument_path_missing" in result.diagnostics
 
 
 def test_joined_count_validator_rejects_base_boundary_multiplied_by_join():
