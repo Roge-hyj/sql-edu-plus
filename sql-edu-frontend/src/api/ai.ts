@@ -2,6 +2,7 @@ import { request } from "@/utils/request";
 import type {
   AiLanguage,
   ChatMessage,
+  MasteryRadar,
   SqlCheckResponse,
   SqlHintResponse,
   SubmissionOut,
@@ -16,6 +17,7 @@ import type {
 export type {
   AiLanguage,
   ChatMessage,
+  MasteryRadar,
   SqlCheckResponse,
   SqlHintResponse,
   SubmissionOut,
@@ -124,5 +126,13 @@ export function chatWithTeacher(data: {
     url: "/ai/chat",
     method: "POST",
     data,
+  });
+}
+
+/** BKT 学习画像（原始后验掌握度，按知识点 id 索引） */
+export function getMasteryRadar() {
+  return request<MasteryRadar>({
+    url: "/ai/mastery-radar",
+    method: "GET",
   });
 }

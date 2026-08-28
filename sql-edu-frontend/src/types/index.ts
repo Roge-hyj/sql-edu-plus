@@ -61,6 +61,10 @@ export type QuestionOut = {
   title_zh_tw?: string | null;
   content_zh_tw?: string | null;
   difficulty: number;
+  /** 题目绑定的 SQL 方言（mysql/postgres/tsql/oracle 等；null 表示自动解析） */
+  sql_dialect?: string | null;
+  /** 判题引擎版本（如 MySQL 8.0.46） */
+  engine_version?: string | null;
   /** 仅教师端写接口/受权响应返回；学生公开题目接口不会下发答案。 */
   correct_sql?: string;
   /** 表结构预览 JSON：tables[{name,columns,rows}]，供学生查看列名与示例数据 */
@@ -268,4 +272,30 @@ export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
   created_at: string;
+};
+
+// ==================== 学习画像相关 ====================
+
+/** /ai/mastery-radar 返回的 BKT 掌握度原始画像 */
+export type MasteryRadar = {
+  schema_version: string;
+  /** 课程知识点 id → 后验掌握度（未观测时为 BKT P(L0)） */
+  mastery_state: Record<string, number>;
+  /** 原子技能 id → 后验掌握度 */
+  atomic_mastery_state: Record<string, number>;
+  state_details: Array<{
+    taxonomy_version: string;
+    skill_id: string;
+    posterior_mastery: number;
+    next_prior: number;
+    observation_count: number;
+    bkt_parameter_version: string;
+    state_version: number;
+  }>;
+  display_value: string;
+  unobserved_prior: number;
+  bkt_parameter_version: string;
+  bkt_calibration_status: string;
+  bkt_calibration_artifact_digest: string | null;
+  calibration_status: string;
 };

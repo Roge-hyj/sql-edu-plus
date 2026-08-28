@@ -1,28 +1,47 @@
 {
-	"pages": [
-	  {
-	    "path": "pages/login/index",
-	    "style": {
-	      "navigationBarTitleText": "登录"
-	    }
-	  },
-	  {
-	    "path": "pages/index/index",
-	    "style": {
-	      "navigationBarTitleText": "首页"
-	    }
-	  },
-	  {
-	    "path": "pages/teacher/index",
-	    "style": {
-	      "navigationBarTitleText": "题目管理（教师端）"
-	    }
-	  }
-	],
-	"globalStyle": {
-	  "navigationBarTextStyle": "black",
-	  "navigationBarTitleText": "uni-app",
-	  "navigationBarBackgroundColor": "#F8F8F8",
-	  "backgroundColor": "#F8F8F8"
-	}
+  "pages": [
+    {
+      "path": "pages/login/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "登录"
+      }
+    },
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "backgroundTextStyle": "dark",
+        "navigationBarTitleText": "题库"
+      }
+    },
+    {
+      "path": "pages/practice/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "练习"
+      }
+    },
+    {
+      "path": "pages/teacher/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "题目管理"
+      }
+    },
+    {
+      "path": "pages/profile/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "我的"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationStyle": "custom",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "SQL Learning Lab",
+    "backgroundColor": "#F4F6FB"
+  }
 }

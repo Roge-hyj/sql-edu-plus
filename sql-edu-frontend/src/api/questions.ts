@@ -118,3 +118,12 @@ export function generateQuestionsByAI(data: { knowledge_point_id: string; count?
     data: { knowledge_point_id: data.knowledge_point_id, count: data.count ?? 1 },
   });
 }
+
+/** 根据标准答案 SQL 解析要求的结果列名（教师端预览用） */
+export function inferOutputColumns(correctSql: string) {
+  return request<{ required_output_columns: string }>({
+    url: "/questions/infer-output-columns",
+    method: "POST",
+    data: { correct_sql: correctSql },
+  });
+}
