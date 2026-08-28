@@ -14,7 +14,6 @@ from schemas.user import (
 from pydantic import BaseModel
 from models.user import User
 from core.auth import AuthHandler
-from core.experience_service import get_level_from_total
 from settings.config import settings
 import hmac
 
@@ -162,16 +161,11 @@ async def Login(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="用户名/邮箱或密码错误！")
     #3.生成JWToken
     tokens = auth_handler.encode_login_token(user.id)
-    total_xp = getattr(user, "total_experience", 0) or 0
-    level, exp_in_level, xp_to_next = get_level_from_total(total_xp)
     user_schema = UserSchema(
         id=user.id,
         email=user.email,
         username=user.username,
         role=user.role,
-        level=level,
-        experience_in_level=exp_in_level,
-        xp_to_next_level=xp_to_next,
     )
     return {
         "user": user_schema,
@@ -279,7 +273,7 @@ async def get_profile(
     user_id: int = Depends(auth_handler.auth_access_dependency),
     session: AsyncSession = Depends(get_session),
 ):
-    """获取当前用户信息（含等级经验，供学生端展示）。"""
+    """获取当前用户信息。"""
     user_repo = UserRepository(session)
     user = await user_repo.get_by_id(user_id)
     
@@ -289,16 +283,11 @@ async def get_profile(
             detail="用户不存在"
         )
     
-    total_xp = getattr(user, "total_experience", 0) or 0
-    level, exp_in_level, xp_to_next = get_level_from_total(total_xp)
     return UserSchema(
         id=user.id,
         email=user.email,
         username=user.username,
         role=user.role,
-        level=level,
-        experience_in_level=exp_in_level,
-        xp_to_next_level=xp_to_next,
     )
 
 
@@ -341,16 +330,11 @@ async def update_profile(
         
         await session.commit()
         await session.refresh(user)
-        total_xp = getattr(user, "total_experience", 0) or 0
-        level, exp_in_level, xp_to_next = get_level_from_total(total_xp)
         return UserSchema(
             id=user.id,
             email=user.email,
             username=user.username,
             role=user.role,
-            level=level,
-            experience_in_level=exp_in_level,
-            xp_to_next_level=xp_to_next,
         )
         
     except Exception as e:

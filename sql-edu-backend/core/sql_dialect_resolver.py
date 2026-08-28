@@ -250,7 +250,17 @@ _FEATURE_RULES: tuple[_FeatureRule, ...] = (
     _rule("TSQL_ISNULL_FUNCTION", ("tsql",), r"\bISNULL\s*\("),
     _rule("TSQL_GETDATE_FUNCTION", ("tsql",), r"\bGETDATE\s*\(\s*\)"),
     _rule("TSQL_DATEADD_FUNCTION", ("tsql",), r"\bDATEADD\s*\("),
-    _rule("TSQL_DATEDIFF_FUNCTION", ("tsql",), r"\bDATEDIFF(?:_BIG)?\s*\("),
+    # MySQL also has a two-argument DATEDIFF(date, date).  Only the T-SQL
+    # three-argument form has a date-part token followed by a comma, so keep
+    # automatic detection narrow enough not to reject legitimate MySQL
+    # queries that happen to use DATEDIFF.
+    _rule(
+        "TSQL_DATEDIFF_FUNCTION",
+        ("tsql",),
+        r"\bDATEDIFF(?:_BIG)?\s*\(\s*"
+        r"(?:YEAR|QUARTER|MONTH|WEEK|DAY|HOUR|MINUTE|SECOND|"
+        r"MILLISECOND|MICROSECOND|NANOSECOND)\s*,",
+    ),
     _rule("TSQL_LEN_FUNCTION", ("tsql",), r"\bLEN\s*\("),
     _rule("TSQL_IIF_FUNCTION", ("tsql",), r"\bIIF\s*\("),
     _rule("SQLITE_GLOB", ("sqlite",), r"\bGLOB\b"),

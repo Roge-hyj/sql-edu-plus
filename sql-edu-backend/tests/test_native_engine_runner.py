@@ -7,8 +7,10 @@ from types import SimpleNamespace
 from urllib.parse import quote_plus
 
 import pytest
+from sqlglot import parse_one
 
 import core.native_engine_runner as runner
+import core.parseval_data_generator as generator
 
 
 class FakeCursor:
@@ -465,6 +467,40 @@ def test_fixture_identifiers_are_quoted_and_native_case_folded():
     assert runner._fold_fixture_identifier("Mixed_Name", "mysql") == "Mixed_Name"
     assert runner._MYSQL_TARGET_VERSION == "8.0.46"
     assert runner._MYSQL_REQUIRED_LOWER_CASE_TABLE_NAMES == 0
+
+
+def test_mysql_fixture_preserves_indexable_text_types_and_fits_generated_values():
+    code_spec = runner._column_spec(
+        "mysql", "CHAR(4)", ["Code_1"], "Code", indexed=True
+    )
+    provider_spec = runner._column_spec(
+        "mysql", "VARCHAR(40)", ["HAL"], "Provider", indexed=True
+    )
+    text_key_spec = runner._column_spec(
+        "mysql", "TEXT", ["unbounded-key"], "Code", indexed=True
+    )
+
+    assert code_spec.sql_type == "CHAR(4)"
+    assert provider_spec.sql_type == "VARCHAR(40)"
+    assert text_key_spec.sql_type == "VARCHAR(768)"
+    assert runner._coerce_parameter("Code_1", "mysql", code_spec) == "Cod1"
+    assert runner._coerce_parameter(
+        "Movie_1", "mysql", runner._ColumnSpec("BIGINT", "int")
+    ) == 1
+
+
+def test_mysql_mutation_replay_restores_authoritative_table_qualifier_case():
+    ast = parse_one(
+        "SELECT boxes.code FROM warehouses "
+        "LEFT JOIN boxes ON boxes.warehouse = warehouses.code",
+        read="mysql",
+    )
+
+    generator._restore_native_table_spelling(ast, ["Warehouses", "Boxes"])
+    rendered = ast.sql(dialect="mysql")
+
+    assert "Warehouses" in rendered
+    assert "Boxes" in rendered
 
 
 def test_successful_execution_with_failed_cleanup_is_explicit(monkeypatch):

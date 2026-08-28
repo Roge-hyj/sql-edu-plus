@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import pytest
 from fastapi.middleware.cors import CORSMiddleware
 
 from main import app
 from models import engine
 from routers.auth import resolve_registration_role
-from settings.config import Settings, settings, validate_business_db_url
+from settings.config import Settings, settings, validate_business_db_url, validate_phase1_worker_config
 
 
 def _cors_options() -> dict[str, object]:
@@ -27,6 +28,53 @@ def test_business_database_contract_is_single_mysql_runtime() -> None:
     assert Settings.model_fields["BUSINESS_DB_DIALECT"].default == "mysql"
     assert Settings.model_fields["BUSINESS_DB_VERSION"].default == "8.0.46"
     assert Settings.model_fields["BUSINESS_DB_CHARSET"].default == "utf8mb4"
+
+
+def test_native_mysql_example_matches_fixed_contract_version() -> None:
+    example = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
+    assert "PARSEVAL_MYSQL_VERSION=8.0.46" in example
+
+
+def test_phase1_worker_thread_mode_is_rejected_outside_debug() -> None:
+    with pytest.raises(RuntimeError, match="禁止.*thread"):
+        validate_phase1_worker_config(
+            mode="thread",
+            debug=False,
+            start_method="spawn",
+            max_concurrency=2,
+            queue_limit=8,
+            memory_mb=2048,
+            cpu_seconds=50,
+        )
+
+
+def test_phase1_worker_process_mode_accepts_bounded_production_defaults() -> None:
+    validate_phase1_worker_config(
+        mode="process",
+        debug=False,
+        start_method="spawn",
+        max_concurrency=2,
+        queue_limit=8,
+        memory_mb=2048,
+        cpu_seconds=50,
+    )
+
+
+def test_phase1_worker_limits_are_explicit_and_bounded() -> None:
+    fields = Settings.model_fields
+    assert fields["PARSEVAL_WORKER_MAX_CONCURRENCY"].default == 2
+    assert fields["PARSEVAL_WORKER_QUEUE_LIMIT"].default == 8
+    assert fields["PARSEVAL_WORKER_MEMORY_MB"].default == 2048
+    assert fields["PARSEVAL_WORKER_CPU_SECONDS"].default == 50
+
+    example = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
+    for key in (
+        "PARSEVAL_WORKER_MAX_CONCURRENCY=2",
+        "PARSEVAL_WORKER_QUEUE_LIMIT=8",
+        "PARSEVAL_WORKER_MEMORY_MB=2048",
+        "PARSEVAL_WORKER_CPU_SECONDS=50",
+    ):
+        assert key in example
 
 
 @pytest.mark.parametrize(

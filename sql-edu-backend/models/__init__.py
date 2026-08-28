@@ -7,6 +7,8 @@ from .question_skill import (
     QuestionSkillRole,
 )
 from .phase3_learning import (
+    Phase3BehaviorEvent,
+    Phase3BehaviorEventKind,
     SkillObservationEvent,
     SkillObservationResult,
     SkillObservationSource,
@@ -61,6 +63,8 @@ __all__ = [
     "QuestionSkill",
     "QuestionSkillProvenance",
     "QuestionSkillRole",
+    "Phase3BehaviorEvent",
+    "Phase3BehaviorEventKind",
     "SkillObservationEvent",
     "SkillObservationResult",
     "SkillObservationSource",

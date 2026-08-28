@@ -5,7 +5,8 @@ This module dynamically computes the display difficulty of questions by combinin
 - Teacher's initial configuration difficulty.
 - Objective performance statistics (total submissions, correct submissions, chat count).
 - Subjective feedback from students.
-It also calculates suggested challenge duration based on the display difficulty.
+It does not calculate challenge timers; timed challenges are outside the
+current product contract.
 """
 
 
@@ -75,19 +76,3 @@ def compute_display_difficulty(
     # Merge teacher's baseline with average of objective and subjective metrics
     combined = (1.0 - w) * base + w * (0.5 * objective_norm + 0.5 * subjective_norm)
     return round(max(1.0, min(10.0, combined)), 1)
-
-
-def suggested_time_seconds(display_difficulty: float, _teacher_time_limit: int | None = None) -> int:
-    """
-    Suggests a challenge timer limit in seconds based on the display difficulty.
-
-    Args:
-        display_difficulty (float): The calculated display difficulty rating (1.0 to 10.0).
-        _teacher_time_limit (int | None, optional): Deprecated parameter for custom time limit override.
-
-    Returns:
-        int: Recommended time limit in seconds, ranging from 180s (3m) to 600s (10m).
-    """
-    d = max(1.0, min(10.0, display_difficulty))
-    # Map [1.0, 10.0] difficulty linearly to [180s, 600s] duration (3 to 10 minutes)
-    return int(120 + 48 * d)

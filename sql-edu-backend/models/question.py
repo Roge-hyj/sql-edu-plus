@@ -1,7 +1,12 @@
 from sqlalchemy import Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from typing import TYPE_CHECKING
+
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+
+if TYPE_CHECKING:
+    from .question_skill import QuestionSkill
 
 
 class Question(Base):
@@ -22,12 +27,17 @@ class Question(Base):
     # 空值表示题目不限制方言，由判题器按语法特征和系统默认引擎选择。
     sql_dialect: Mapped[str | None] = mapped_column(String(20), nullable=True)
     engine_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    # 限时挑战可选时长（秒），为空则可由前端根据难度推算
-    time_limit_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 表结构预览（JSON：tables[{name,columns,rows}]），供学生查看列名与示例数据
     schema_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 要求的结果列名（如「order_id, user_id, order_amount, cumulative_amount」或完整说明），供学生端显著展示，避免列名不规范错误
     required_output_columns: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skill_mappings: Mapped[list["QuestionSkill"]] = relationship(
+        "QuestionSkill",
+        back_populates="question",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="QuestionSkill.id",
+    )
 
 
 __all__ = ["Question"]

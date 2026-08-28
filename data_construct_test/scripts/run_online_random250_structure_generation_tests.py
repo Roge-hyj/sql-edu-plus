@@ -9,15 +9,19 @@ ASTDiff and ParSEval-style data generator can be tested against known mistakes.
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
 import hashlib
 import html
 import json
 import multiprocessing
+import os
+import pickle
 import random
 import re
 import resource
+import signal
 import sys
+import tempfile
+import time
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
@@ -377,6 +381,36 @@ def collect_online_queries(offline_cache_only: bool = False, timeout: int = 60) 
 def _first_int(text: str) -> int | None:
     match = re.search(r"\b(\d+)\b", text)
     return int(match.group(1)) if match else None
+
+
+def _run_with_parser_timeout(function, *, timeout_seconds: float = 1.0):
+    """Bound parser/mutation work before it enters the isolated evaluator.
+
+    Candidate construction runs in the parent process, so a pathological
+    public SQL string must not be allowed to wedge the whole corpus build.
+    ``SIGALRM`` interrupts SQLGlot's Python parser on the POSIX/WSL target;
+    non-POSIX callers retain the previous behavior because ``setitimer`` is
+    not universally available there.
+    """
+
+    if not hasattr(signal, "SIGALRM") or not hasattr(signal, "setitimer"):
+        return function()
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, 0)
+
+    def _timeout_handler(_signum, _frame):
+        raise TimeoutError("public SQL parser exceeded its construction budget")
+
+    signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.setitimer(signal.ITIMER_REAL, max(0.01, float(timeout_seconds)))
+    try:
+        return function()
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0] or previous_timer[1]:
+            signal.setitimer(signal.ITIMER_REAL, *previous_timer)
 
 
 def _bump_first_int(sql: str, delta: int = 1) -> str:
@@ -785,10 +819,20 @@ def _mutate_dialect_boundary(sql: str) -> str:
 
 
 def _case_from_record(record: dict[str, Any], category: str) -> dict[str, Any] | None:
-    student, target = mutate_sql(record["sql"], category)
-    if not student or student == record["sql"]:
+    try:
+        student, target = _run_with_parser_timeout(
+            lambda: mutate_sql(record["sql"], category)
+        )
+        if not student or student == record["sql"]:
+            return None
+        standard_ast = _run_with_parser_timeout(lambda: _parse_sql(record["sql"]))
+        student_ast = _run_with_parser_timeout(lambda: _parse_sql(student))
+    except (TimeoutError, RecursionError, MemoryError, ValueError):
+        # Public sources are inputs, not trusted parser fixtures.  A malformed
+        # or pathological candidate is excluded from the smoke corpus rather
+        # than blocking generation or being treated as a product capability.
         return None
-    if _parse_sql(record["sql"]) is None or _parse_sql(student) is None:
+    if standard_ast is None or student_ast is None:
         return None
     case_key = hashlib.sha256(f"{record['id']}\0{category}\0{student}".encode()).hexdigest()[:20]
     return {
@@ -1039,9 +1083,125 @@ def _configure_worker_memory(memory_mb: int) -> None:
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 
 
-def _evaluate_case_payload(payload: tuple[dict[str, Any], int]) -> dict[str, Any]:
-    case, max_rows = payload
-    return evaluate_case(case, max_rows=max_rows)
+_CASE_EVALUATION_TIMEOUT_SECONDS = 15.0
+
+
+def _case_worker_entry(
+    case: dict[str, Any],
+    max_rows: int,
+    result_path: str,
+    worker_memory_mb: int,
+) -> None:
+    """Evaluate one public case in a killable process group."""
+
+    try:
+        if os.name == "posix":
+            try:
+                os.setsid()
+            except OSError:
+                pass
+        _configure_worker_memory(worker_memory_mb)
+        envelope = ("ok", evaluate_case(case, max_rows=max_rows))
+    except BaseException as exc:  # pragma: no cover - exercised through parent projection
+        envelope = ("error", type(exc).__name__, str(exc))
+    with open(result_path, "wb") as handle:
+        pickle.dump(envelope, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def _terminate_case_process(process: multiprocessing.Process) -> None:
+    """Kill a case child and its private descendants without touching parent."""
+
+    if not process.is_alive():
+        process.join(timeout=1.0)
+        return
+    if os.name == "posix" and process.pid is not None:
+        try:
+            process_group = os.getpgid(process.pid)
+        except (ProcessLookupError, OSError):
+            process_group = None
+        if process_group == process.pid:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
+    else:
+        process.kill()
+    process.join(timeout=1.0)
+
+
+def _resource_timeout_result(case: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Project an evaluator timeout/crash without inventing a SQL verdict."""
+
+    return {
+        **case,
+        "standard_parse_ok": False,
+        "student_parse_ok": False,
+        "executed": False,
+        "execution_error": reason,
+        "row_equivalent": False,
+        "observable_mismatch": False,
+        "verdict_status": "SUPPORTED_WITH_LIMITS",
+        "equivalence_conclusion": "UNDECIDED",
+        "error_code": "RESOURCE_LIMIT",
+        "boundary_evidence": {"reason": reason},
+        "generation_tactics": [],
+        "mutation_summary": {},
+        "data_generation_status": "RESOURCE_LIMIT",
+        "errors": ["RESOURCE_LIMIT"],
+        "strict_pass": False,
+    }
+
+
+def _evaluate_case_bounded(
+    case: dict[str, Any],
+    *,
+    max_rows: int,
+    worker_memory_mb: int,
+    timeout_seconds: float = _CASE_EVALUATION_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Run one evaluator with a hard wall-clock bound and killable cleanup."""
+
+    context = multiprocessing.get_context("spawn")
+    result_fd, result_path = tempfile.mkstemp(
+        prefix="sql-edu-public-case-", suffix=".pickle"
+    )
+    os.close(result_fd)
+    process = context.Process(
+        target=_case_worker_entry,
+        args=(case, max_rows, result_path, worker_memory_mb),
+        daemon=True,
+    )
+    started = False
+    try:
+        process.start()
+        started = True
+        deadline = time.monotonic() + max(0.01, float(timeout_seconds))
+        while process.is_alive():
+            if time.monotonic() >= deadline:
+                _terminate_case_process(process)
+                return _resource_timeout_result(case, "case evaluator exceeded wall-clock budget")
+            time.sleep(0.01)
+        process.join(timeout=0)
+        try:
+            with open(result_path, "rb") as handle:
+                envelope = pickle.load(handle)
+        except Exception as exc:
+            return _resource_timeout_result(
+                case,
+                f"case evaluator exited without a result (exitcode={process.exitcode}): {exc}",
+            )
+        if envelope[0] == "ok":
+            return envelope[1]
+        return _resource_timeout_result(case, f"case evaluator failed: {envelope[1]}: {envelope[2]}")
+    finally:
+        if started:
+            _terminate_case_process(process)
+        try:
+            os.unlink(result_path)
+        except FileNotFoundError:
+            pass
 
 
 def evaluate_cases_isolated(
@@ -1051,27 +1211,26 @@ def evaluate_cases_isolated(
     worker_memory_mb: int = 1536,
     worker_recycle_cases: int = 1,
 ) -> list[dict[str, Any]]:
-    """Evaluate cases in one bounded worker, recycled before memory accumulates.
+    """Evaluate cases one-by-one in killable workers with bounded memory/time.
 
     SQL ASTs contain parent links and the witness suite retains several worlds
-    during one comparison.  Running hundreds of cases in the parent process
-    allows those temporary object graphs to accumulate.  A single spawned
-    worker preserves deterministic ordering and CPU usage, while
-    ``max_tasks_per_child`` bounds retained memory without parallel fan-out.
+    during one comparison.  A fresh spawned child per case prevents object
+    graphs from accumulating and, unlike ``ProcessPoolExecutor.map``, lets the
+    parent terminate one pathological case without waiting for pool shutdown.
+    ``worker_recycle_cases`` remains accepted for CLI compatibility; each case
+    is stricter than that setting and receives a fresh child.
     """
 
     if not cases:
         return []
-    context = multiprocessing.get_context("spawn")
-    payloads = [(case, max_rows) for case in cases]
-    with ProcessPoolExecutor(
-        max_workers=1,
-        mp_context=context,
-        initializer=_configure_worker_memory,
-        initargs=(worker_memory_mb,),
-        max_tasks_per_child=max(1, int(worker_recycle_cases)),
-    ) as executor:
-        return list(executor.map(_evaluate_case_payload, payloads, chunksize=1))
+    return [
+        _evaluate_case_bounded(
+            case,
+            max_rows=max_rows,
+            worker_memory_mb=worker_memory_mb,
+        )
+        for case in cases
+    ]
 
 
 def _data_generation_status(result: dict[str, Any]) -> str:
@@ -1129,12 +1288,18 @@ def summarize(records: list[dict[str, Any]], cases: list[dict[str, Any]], result
     }
 
 
-def write_outputs(records: list[dict[str, Any]], results: list[dict[str, Any]], summary: dict[str, Any]) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    report_json = OUTPUT_DIR / "online_random250_structure_generation_report.json"
-    cases_jsonl = OUTPUT_DIR / "online_random250_structure_generation_cases.jsonl"
-    report_md = OUTPUT_DIR / "online_random250_structure_generation_report.md"
-    corpus_jsonl = OUTPUT_DIR / "online_random250_mined_corpus.jsonl"
+def write_outputs(
+    records: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+    summary: dict[str, Any],
+    *,
+    output_dir: Path = OUTPUT_DIR,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_json = output_dir / "online_random250_structure_generation_report.json"
+    cases_jsonl = output_dir / "online_random250_structure_generation_cases.jsonl"
+    report_md = output_dir / "online_random250_structure_generation_report.md"
+    corpus_jsonl = output_dir / "online_random250_mined_corpus.jsonl"
 
     report_json.write_text(json.dumps({"summary": summary, "results": results}, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     with cases_jsonl.open("w", encoding="utf-8") as fh:
@@ -1233,6 +1398,12 @@ def main() -> None:
         action="store_true",
         help="evaluate and print without replacing report files",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=OUTPUT_DIR,
+        help="directory for generated report/corpus artifacts",
+    )
     args = parser.parse_args()
 
     if not 1 <= args.max_rows <= 32:
@@ -1262,7 +1433,7 @@ def main() -> None:
         )
     summary = summarize(records, cases, results, args.seed)
     if not args.no_write:
-        write_outputs(records, results, summary)
+        write_outputs(records, results, summary, output_dir=args.output_dir)
     if args.print_summary:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
 

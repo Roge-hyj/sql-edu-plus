@@ -40,10 +40,6 @@ class UserSchema(BaseModel):
     email: EmailStr
     username: Usernamestr
     role: Literal["student", "teacher"] = "student"
-    # 等级系统（学生端展示，教师可为 1/0/100）
-    level: int = 1
-    experience_in_level: int = 0
-    xp_to_next_level: int = 100
 
 # 2. 登录响应：后端回传双 Token
 # 注意：这跟 core/auth.py 里 encode_login_token 返回的字典结构必须一致
@@ -100,7 +96,6 @@ __all__ = [
     "LoginIn", "UserSchema", "LoginOut", "DeleteAccountIn", "ChangePasswordIn",
     "UserProfileUpdate"
 ]
-
 
 
 

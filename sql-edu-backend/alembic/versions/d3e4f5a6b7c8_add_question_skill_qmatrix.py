@@ -36,7 +36,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "provenance IN "
-            "('AUTHOR_DECLARED', 'AI_GENERATED', 'INFERRED_REVIEWED')",
+            "('AUTHOR_DECLARED', 'GENERATED', 'INFERRED')",
             name="provenance_allowed",
         ),
         sa.CheckConstraint(

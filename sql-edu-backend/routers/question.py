@@ -7,16 +7,27 @@ from typing import Annotated
 
 from repository import (
     QuestionRepository,
+    QuestionSkillRepository,
+    QuestionSkillSpec,
     SubmissionRepository,
     ChatRepository,
     DifficultyFeedbackRepository,
 )
-from schemas.question import QuestionOut, QuestionCreate, DifficultyFeedbackIn
+from schemas.question import (
+    QuestionOut,
+    QuestionPublicOut,
+    QuestionCreate,
+    QuestionSkillDeclaration,
+    QuestionSkillOut,
+    DifficultyFeedbackIn,
+)
 from schemas import ResponseOut
 from dependencies import get_session, require_teacher
 from core.auth import AuthHandler
+from core.public_schema_preview import sanitize_schema_preview
 from models.question import Question
-from core.difficulty_service import compute_display_difficulty, suggested_time_seconds
+from models.question_skill import QuestionSkillProvenance
+from core.difficulty_service import compute_display_difficulty
 from core.sql_knowledge_points import get_all_knowledge_points, get_knowledge_point_by_id
 from core.ai_question_generator import (
     generate_questions_for_knowledge_point,
@@ -29,6 +40,24 @@ from core.sql_parser import infer_output_columns_from_sql
 
 router = APIRouter(prefix="/questions", tags=["questions"])
 auth_handler = AuthHandler()
+
+
+def _declared_skill_specs(
+    skills: list[QuestionSkillDeclaration] | None,
+) -> list[QuestionSkillSpec]:
+    specs: list[QuestionSkillSpec] = []
+    for item in skills or []:
+        if item.taxonomy_version is None:  # defensive: schema validator resolves it
+            raise ValueError("taxonomy_version 未解析")
+        specs.append(
+            QuestionSkillSpec(
+                skill_id=item.skill_id,
+                taxonomy_version=item.taxonomy_version,
+                role=item.role,
+                observable_on_correct=bool(item.observable_on_correct),
+            )
+        )
+    return specs
 
 
 def _has_alias_requirement_in_content_quick(content: str | None) -> bool:
@@ -75,14 +104,16 @@ async def _enrich_question_out(
     session: AsyncSession,
     question: Question,
 ) -> QuestionOut:
-    """为题目附加动态难度与限时建议。"""
+    """为题目附加动态难度。"""
     sub_repo = SubmissionRepository(session)
     chat_repo = ChatRepository(session)
     feedback_repo = DifficultyFeedbackRepository(session)
+    skill_repo = QuestionSkillRepository(session)
 
     sub_stats = await sub_repo.get_question_submission_stats(question.id)
     chat_count = await chat_repo.count_messages_by_question(question.id)
     feedback_stats = await feedback_repo.get_question_stats(question.id)
+    skill_rows = await skill_repo.list_by_question_id(question.id)
 
     disp = compute_display_difficulty(
         teacher_difficulty=question.difficulty,
@@ -92,7 +123,6 @@ async def _enrich_question_out(
         feedback_count=feedback_stats["feedback_count"],
         avg_student_rating=feedback_stats.get("avg_rating"),
     )
-    sug = suggested_time_seconds(disp, question.time_limit_seconds)
     required_cols = getattr(question, "required_output_columns", None)
     # 不再从 SQL 推断填充，只返回数据库中实际存储的值（题目描述有别名要求时才会存储）
 
@@ -108,15 +138,62 @@ async def _enrich_question_out(
         correct_sql=question.correct_sql,
         sql_dialect=getattr(question, "sql_dialect", None),
         engine_version=getattr(question, "engine_version", None),
-        time_limit_seconds=question.time_limit_seconds,
         schema_preview=getattr(question, "schema_preview", None),
         required_output_columns=required_cols,
         display_difficulty=disp,
-        suggested_time_seconds=sug,
+        skills=[QuestionSkillOut.model_validate(row) for row in skill_rows],
     )
 
 
-@router.get("/", response_model=list[QuestionOut])
+def _question_public_out(
+    question: Question,
+    *,
+    display_difficulty: float,
+) -> QuestionPublicOut:
+    """Build the learner DTO without ever copying ``correct_sql``."""
+    return QuestionPublicOut(
+        id=question.id,
+        title=question.title,
+        content=question.content,
+        title_en=getattr(question, "title_en", None),
+        content_en=getattr(question, "content_en", None),
+        title_zh_tw=getattr(question, "title_zh_tw", None),
+        content_zh_tw=getattr(question, "content_zh_tw", None),
+        difficulty=question.difficulty,
+        sql_dialect=getattr(question, "sql_dialect", None),
+        engine_version=getattr(question, "engine_version", None),
+        schema_preview=sanitize_schema_preview(
+            getattr(question, "schema_preview", None),
+            forbidden_sql=getattr(question, "correct_sql", "") or "",
+        ),
+        required_output_columns=getattr(question, "required_output_columns", None),
+        display_difficulty=display_difficulty,
+    )
+
+
+async def _enrich_public_question_out(
+    session: AsyncSession,
+    question: Question,
+) -> QuestionPublicOut:
+    """Add dynamic learner metadata while retaining the public-only shape."""
+    sub_repo = SubmissionRepository(session)
+    chat_repo = ChatRepository(session)
+    feedback_repo = DifficultyFeedbackRepository(session)
+    sub_stats = await sub_repo.get_question_submission_stats(question.id)
+    chat_count = await chat_repo.count_messages_by_question(question.id)
+    feedback_stats = await feedback_repo.get_question_stats(question.id)
+    disp = compute_display_difficulty(
+        teacher_difficulty=question.difficulty,
+        total_submissions=sub_stats["total_submissions"],
+        correct_submissions=sub_stats["correct_submissions"],
+        total_chat_messages=chat_count,
+        feedback_count=feedback_stats["feedback_count"],
+        avg_student_rating=feedback_stats.get("avg_rating"),
+    )
+    return _question_public_out(question, display_difficulty=disp)
+
+
+@router.get("/", response_model=list[QuestionPublicOut])
 async def get_questions(
     skip: Annotated[int, Query(ge=0, description="跳过数量")] = 0,
     # 放宽单次最大返回数量上限，便于「无限加题」场景。
@@ -124,7 +201,7 @@ async def get_questions(
     limit: Annotated[int, Query(ge=1, le=10000, description="限制数量")] = 1000,
     session: AsyncSession = Depends(get_session),
 ):
-    """获取题目列表（分页）。返回含动态难度与限时建议。"""
+    """获取题目列表（分页）。返回动态难度。"""
     repo = QuestionRepository(session)
     questions = await repo.get_all(skip=skip, limit=limit)
     if not questions:
@@ -152,27 +229,11 @@ async def get_questions(
             fb["feedback_count"],
             fb.get("avg_rating"),
         )
-        sug = suggested_time_seconds(disp, q.time_limit_seconds)
-        required_cols = getattr(q, "required_output_columns", None)
         # 不再从 SQL 推断填充，只返回数据库中实际存储的值
         out.append(
-            QuestionOut(
-                id=q.id,
-                title=q.title,
-                content=q.content,
-                title_en=getattr(q, "title_en", None),
-                content_en=getattr(q, "content_en", None),
-                title_zh_tw=getattr(q, "title_zh_tw", None),
-                content_zh_tw=getattr(q, "content_zh_tw", None),
-                difficulty=q.difficulty,
-                correct_sql=q.correct_sql,
-                sql_dialect=getattr(q, "sql_dialect", None),
-                engine_version=getattr(q, "engine_version", None),
-                time_limit_seconds=q.time_limit_seconds,
-                schema_preview=getattr(q, "schema_preview", None),
-                required_output_columns=required_cols,
+            _question_public_out(
+                q,
                 display_difficulty=disp,
-                suggested_time_seconds=sug,
             )
         )
     return out
@@ -229,32 +290,42 @@ async def generate_questions_by_ai(
             detail="AI 未返回有效题目，请稍后重试或更换知识点",
         )
     created: list[Question] = []
-    for item in items:
-        correct_sql = item["correct_sql"]
-        content_str = (item.get("content") or "").strip()
-        # 只有当题干里「明确提出别名要求」时，才根据标准答案 SQL 解析并启用列名校验
-        needs_alias = await _has_alias_requirement_in_content(content_str)
-        required_cols = infer_output_columns_from_sql(correct_sql) if needs_alias else None
-        q = Question(
-            title=item["title"],
-            content=content_str,
-            title_en=item.get("title_en"),
-            content_en=item.get("content_en"),
-            title_zh_tw=item.get("title_zh_tw"),
-            content_zh_tw=item.get("content_zh_tw"),
-            difficulty=max(1, min(10, item["difficulty"])),
-            correct_sql=correct_sql,
-            sql_dialect=item.get("sql_dialect"),
-            engine_version=item.get("engine_version"),
-            time_limit_seconds=None,
-            schema_preview=item.get("schema_preview"),
-            required_output_columns=required_cols,
-        )
-        session.add(q)
-        await session.flush()
-        await session.refresh(q)
-        created.append(q)
-    await session.commit()
+    skill_repo = QuestionSkillRepository(session)
+    try:
+        for item in items:
+            correct_sql = item["correct_sql"]
+            content_str = (item.get("content") or "").strip()
+            # 只有当题干里「明确提出别名要求」时，才根据标准答案 SQL 解析并启用列名校验
+            needs_alias = await _has_alias_requirement_in_content(content_str)
+            required_cols = (
+                infer_output_columns_from_sql(correct_sql) if needs_alias else None
+            )
+            q = Question(
+                title=item["title"],
+                content=content_str,
+                title_en=item.get("title_en"),
+                content_en=item.get("content_en"),
+                title_zh_tw=item.get("title_zh_tw"),
+                content_zh_tw=item.get("content_zh_tw"),
+                difficulty=max(1, min(10, item["difficulty"])),
+                correct_sql=correct_sql,
+                sql_dialect=item.get("sql_dialect"),
+                engine_version=item.get("engine_version"),
+                schema_preview=item.get("schema_preview"),
+                required_output_columns=required_cols,
+            )
+            session.add(q)
+            await session.flush()
+            await skill_repo.add_ai_generated_primary(
+                q.id,
+                payload.knowledge_point_id,
+            )
+            await session.refresh(q)
+            created.append(q)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
     out = []
     for q in created:
         await session.refresh(q)
@@ -294,7 +365,7 @@ async def generate_schema_preview(
     return await _enrich_question_out(session, question)
 
 
-@router.post("/{question_id}/generate-i18n", response_model=QuestionOut)
+@router.post("/{question_id}/generate-i18n", response_model=QuestionPublicOut)
 async def generate_question_i18n(
     question_id: int,
     user_id: int = Depends(auth_handler.auth_access_dependency),
@@ -315,7 +386,7 @@ async def generate_question_i18n(
     has_en = bool(getattr(question, "title_en", None)) and bool(getattr(question, "content_en", None))
     has_tw = bool(getattr(question, "title_zh_tw", None)) and bool(getattr(question, "content_zh_tw", None))
     if has_en and has_tw:
-        return await _enrich_question_out(session, question)
+        return await _enrich_public_question_out(session, question)
 
     result = await infer_question_i18n_from_zh(question.title, question.content)
     if not result:
@@ -336,15 +407,15 @@ async def generate_question_i18n(
     )
     await session.commit()
     await session.refresh(question)
-    return await _enrich_question_out(session, question)
+    return await _enrich_public_question_out(session, question)
 
 
-@router.get("/{question_id}", response_model=QuestionOut)
+@router.get("/{question_id}", response_model=QuestionPublicOut)
 async def get_question(
     question_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """获取题目详情。返回含动态难度与限时建议。若本题尚无表结构预览则自动生成并落库，保证学生端能看见表参考。"""
+    """获取题目详情。返回动态难度；若本题尚无表结构预览则自动生成并落库。"""
     repo = QuestionRepository(session)
     question = await repo.get_by_id(question_id)
     if not question:
@@ -363,7 +434,7 @@ async def get_question(
             )
             await session.commit()
             await session.refresh(question)
-    return await _enrich_question_out(session, question)
+    return await _enrich_public_question_out(session, question)
 
 
 @router.post("/", response_model=QuestionOut, status_code=status.HTTP_201_CREATED)
@@ -393,16 +464,21 @@ async def create_question(
             correct_sql=question_data.correct_sql,
             sql_dialect=question_data.sql_dialect,
             engine_version=question_data.engine_version,
-            time_limit_seconds=question_data.time_limit_seconds,
             schema_preview=question_data.schema_preview,
             required_output_columns=required_cols,
         )
         session.add(question)
         await session.flush()
+        if question_data.skills is not None:
+            await QuestionSkillRepository(session).replace_for_question(
+                question.id,
+                _declared_skill_specs(question_data.skills),
+                provenance=QuestionSkillProvenance.AUTHOR_DECLARED,
+            )
         await session.refresh(question)
         await session.commit()
 
-        # 统一返回 QuestionOut，附带动态难度与建议限时等字段
+        # 统一返回 QuestionOut，附带动态难度
         return await _enrich_question_out(session, question)
     except Exception as e:
         await session.rollback()
@@ -451,8 +527,6 @@ async def update_question(
         fields_set = getattr(question_data, "model_fields_set", set())
         if "sql_dialect" in fields_set:
             values["sql_dialect"] = question_data.sql_dialect
-        if "time_limit_seconds" in fields_set:
-            values["time_limit_seconds"] = question_data.time_limit_seconds
         if "schema_preview" in fields_set:
             values["schema_preview"] = question_data.schema_preview
         if "engine_version" in fields_set:
@@ -468,10 +542,16 @@ async def update_question(
 
         stmt = update(Question).where(Question.id == question_id).values(**values)
         await session.execute(stmt)
+        if "skills" in fields_set and question_data.skills is not None:
+            await QuestionSkillRepository(session).replace_for_question(
+                question_id,
+                _declared_skill_specs(question_data.skills),
+                provenance=QuestionSkillProvenance.AUTHOR_DECLARED,
+            )
         await session.commit()
         await session.refresh(question)
 
-        # 统一返回 QuestionOut，附带动态难度与建议限时等字段
+        # 统一返回 QuestionOut，附带动态难度
         return await _enrich_question_out(session, question)
     except Exception as e:
         await session.rollback()

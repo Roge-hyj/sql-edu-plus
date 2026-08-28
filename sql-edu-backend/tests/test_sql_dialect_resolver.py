@@ -320,6 +320,18 @@ def test_common_teaching_vendor_features_select_their_native_dialect(
     )
 
 
+def test_mysql_two_argument_datediff_is_not_misclassified_as_tsql():
+    resolution = resolve_sql_dialect(
+        "SELECT DATEDIFF(end_date, start_date) FROM events",
+        default_dialect="sqlite",
+    )
+
+    assert resolution.status == DialectResolutionStatus.RESOLVED
+    assert resolution.source == DialectResolutionSource.DEFAULT
+    assert resolution.dialect == "sqlite"
+    assert "TSQL_DATEDIFF_FUNCTION" not in resolution.detected_features
+
+
 @pytest.mark.parametrize("keyword", ["PIVOT", "UNPIVOT"])
 def test_pivot_requires_tsql_or_oracle_declaration(keyword):
     if keyword == "PIVOT":

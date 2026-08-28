@@ -8,6 +8,9 @@ import routers.ai as ai_router
 from routers.ai import SQLCheckRequest, check_sql
 
 
+TEST_ATTEMPT_ID = "00000000-0000-4000-8000-000000000002"
+
+
 @pytest.mark.parametrize(
     ("dialect", "setting_name", "url"),
     [
@@ -63,7 +66,7 @@ def test_engine_version_contract_accepts_major_compatible_runner(monkeypatch):
 
 
 def test_engine_version_contract_accepts_same_numeric_major(monkeypatch):
-    monkeypatch.setattr(ai_router.settings, "PARSEVAL_MYSQL_VERSION", "8.4")
+    monkeypatch.setattr(ai_router.settings, "PARSEVAL_MYSQL_VERSION", "8.0.46")
 
     ai_router._validate_native_engine_version("mysql", "8.0")
 
@@ -92,10 +95,25 @@ class _TrackingSubmissionRepository:
     def __init__(self, _session):
         pass
 
-    async def get_failure_count(self, _user_id, _question_id):
+    async def get_by_attempt_id(self, *_args, **_kwargs):
+        return None
+
+    async def get_failure_count(
+        self,
+        _user_id,
+        _question_id,
+        *,
+        for_update=False,
+    ):
         return 0
 
-    async def get_correct_count(self, _user_id, _question_id):
+    async def get_correct_count(
+        self,
+        _user_id,
+        _question_id,
+        *,
+        for_update=False,
+    ):
         return 0
 
     async def create(self, _submission_data):
@@ -118,6 +136,7 @@ async def test_dialect_conflict_returns_422_before_learning_state_access(monkeyp
         sql_dialect=None,
     )
     session = _NoWriteSession()
+    _TrackingSubmissionRepository.created = 0
 
     monkeypatch.setattr(
         ai_router,
@@ -128,15 +147,17 @@ async def test_dialect_conflict_returns_422_before_learning_state_access(monkeyp
     def reject_learning_repository(_session):
         raise AssertionError("dialect conflicts must return before learning-state repositories")
 
-    monkeypatch.setattr(ai_router, "SubmissionRepository", reject_learning_repository)
+    # The attempt-id idempotency gate performs a read-only submission lookup
+    # before dialect resolution.  That read is allowed; writes are not.
+    monkeypatch.setattr(ai_router, "SubmissionRepository", _TrackingSubmissionRepository)
     monkeypatch.setattr(ai_router, "ChatRepository", reject_learning_repository)
-    monkeypatch.setattr(ai_router, "UserRepository", reject_learning_repository)
 
     with pytest.raises(HTTPException) as caught:
         await check_sql(
             payload=SQLCheckRequest(
                 student_sql="SELECT id::INT FROM users",
                 question_id=question.id,
+                attempt_id=TEST_ATTEMPT_ID,
             ),
             user_id=7,
             session=session,
@@ -146,6 +167,7 @@ async def test_dialect_conflict_returns_422_before_learning_state_access(monkeyp
     assert caught.value.detail["code"] == "DIALECT_CONFLICT"
     assert caught.value.detail["judge_status"] == "UNSUPPORTED"
     assert caught.value.detail["dialect_resolution"]["status"] == "DIALECT_CONFLICT"
+    assert _TrackingSubmissionRepository.created == 0
     assert session.commits == 0
 
 
@@ -186,10 +208,9 @@ async def test_platform_failure_does_not_write_learning_state(
     monkeypatch.setattr(ai_router, "SubmissionRepository", _TrackingSubmissionRepository)
 
     def reject_write_repository(_session):
-        raise AssertionError("platform failures must not reach chat or XP repositories")
+        raise AssertionError("platform failures must not reach chat or learning repositories")
 
     monkeypatch.setattr(ai_router, "ChatRepository", reject_write_repository)
-    monkeypatch.setattr(ai_router, "UserRepository", reject_write_repository)
     monkeypatch.setattr(
         ai_router.settings,
         "PARSEVAL_POSTGRES_URL",
@@ -222,6 +243,7 @@ async def test_platform_failure_does_not_write_learning_state(
             payload=SQLCheckRequest(
                 student_sql="SELECT id FROM users",
                 question_id=question.id,
+                attempt_id=TEST_ATTEMPT_ID,
             ),
             user_id=11,
             session=session,
@@ -306,7 +328,6 @@ async def test_native_security_rejection_returns_422_without_learning_writes(mon
         raise AssertionError("security rejection must not write learning state")
 
     monkeypatch.setattr(ai_router, "ChatRepository", reject_write_repository)
-    monkeypatch.setattr(ai_router, "UserRepository", reject_write_repository)
     monkeypatch.setattr(ai_router.settings, "PARSEVAL_EXECUTION_BACKEND", "auto")
     monkeypatch.setattr(
         ai_router.settings,
@@ -342,6 +363,7 @@ async def test_native_security_rejection_returns_422_without_learning_writes(mon
             payload=SQLCheckRequest(
                 student_sql="SELECT id FROM users",
                 question_id=question.id,
+                attempt_id=TEST_ATTEMPT_ID,
             ),
             user_id=11,
             session=session,
@@ -400,6 +422,7 @@ async def test_phase1_execution_is_offloaded_from_the_event_loop(monkeypatch):
             payload=SQLCheckRequest(
                 student_sql="SELECT id FROM users",
                 question_id=question.id,
+                attempt_id=TEST_ATTEMPT_ID,
             ),
             user_id=11,
             session=session,

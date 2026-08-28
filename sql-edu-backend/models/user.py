@@ -17,9 +17,6 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     # 角色：student / teacher，默认学生
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="student")
-    # 学生等级经验：累计经验值，用于计算等级（仅学生有意义，教师可忽略）
-    total_experience: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-
     # 数据库里存的是这个字段
     _password: Mapped[str] = mapped_column(String(200), nullable=False)
 
@@ -43,5 +40,4 @@ class User(Base):
     DateTime, 
     default=datetime.utcnow, 
     )
-
 

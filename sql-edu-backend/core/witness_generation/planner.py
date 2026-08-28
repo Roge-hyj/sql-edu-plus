@@ -469,6 +469,21 @@ def _semantic_cell_constraints(obligation: DistinguishingObligation) -> list[Cel
             metadata = dict(spec.metadata)
             standard_items = tuple(metadata.get("standard_window_order_items") or ())
             student_items = tuple(metadata.get("student_window_order_items") or ())
+            # sqlglot serializes the dialect default NULL placement on every
+            # ordered item.  That derived bit changes when ASC is replaced by
+            # DESC (for example ``DESC`` -> ``ASC``), even though the source
+            # query did not ask for a NULLS FIRST/LAST change.  Treating that
+            # bit as an explicit NULL-placement obligation would lock a
+            # three-row NULL/10/20 fixture over the dedicated window
+            # materializer's four distinct rows and can make ROW_NUMBER's
+            # middle rank identical in both directions.  Only emit concrete
+            # NULL cells when the source syntax explicitly names NULLS.
+            standard_order = str(metadata.get("standard_window_order") or "")
+            student_order = str(metadata.get("student_window_order") or "")
+            explicit_null_placement = bool(
+                re.search(r"\bNULLS\s+(?:FIRST|LAST)\b", standard_order, re.IGNORECASE)
+                or re.search(r"\bNULLS\s+(?:FIRST|LAST)\b", student_order, re.IGNORECASE)
+            )
             changed_index = next(
                 (
                     index
@@ -486,7 +501,11 @@ def _semantic_cell_constraints(obligation: DistinguishingObligation) -> list[Cel
                 or metadata.get("student_window_order_columns")
                 or ()
             )
-            if changed_index is not None and changed_index < len(order_columns):
+            if (
+                explicit_null_placement
+                and changed_index is not None
+                and changed_index < len(order_columns)
+            ):
                 order_column = str(order_columns[changed_index]).split(".")[-1].strip('`" ')
                 target_table = str(
                     metadata.get("standard_window_source_table")

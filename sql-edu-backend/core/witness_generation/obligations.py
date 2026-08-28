@@ -1167,7 +1167,12 @@ def _constraint_templates(
             column,
             metadata=tuple(
                 (key, diff.extra.get(key))
-                for key in ("query_scope", "standard_projection_columns")
+                for key in (
+                    "query_scope",
+                    "standard_projection_columns",
+                    "standard_query_sql",
+                    "student_query_sql",
+                )
                 if diff.extra.get(key) not in (None, "", ())
             ),
         )], 2, 1
@@ -2460,6 +2465,16 @@ def compile_obligations(
             distinct_on = _distinct_on_context(diff)
             target_column = target_column or str(distinct_on.get("payload_column") or "")
             table = table or str(distinct_on.get("source_table") or "")
+        if diff.diff_type == "distinct_changed" and not table:
+            # Resolve the direct physical source of a nested/CTE DISTINCT
+            # when the generic target-column resolver has no table.  A
+            # derived source is intentionally left unresolved and is handled
+            # by the exact nested-query validator instead of guessed metadata.
+            nested_select = _nearest_select(diff.standard_node)
+            if isinstance(nested_select, exp.Select):
+                direct_tables = _direct_tables(nested_select)
+                if len(direct_tables) == 1:
+                    table = str(direct_tables[0].name or "").lower()
         if not table and diff.diff_type in {"window_over_changed", "window_function_changed"}:
             table = str(
                 diff.extra.get("standard_window_source_table")

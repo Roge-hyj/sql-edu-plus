@@ -14,6 +14,7 @@ from typing import Any
 from openai import AsyncOpenAI  # Official Async OpenAI client SDK for model requests
 
 from settings import get_settings
+from core.public_schema_preview import sanitize_schema_preview
 from core.sql_knowledge_points import get_knowledge_point_by_id
 
 _settings = get_settings()  # Global application configuration settings (API keys, endpoints, model configurations)
@@ -30,6 +31,87 @@ def _get_client() -> AsyncOpenAI:
         api_key=_settings.AI_API_KEY,   # Client authentication key
         base_url=_settings.AI_BASE_URL, # Optional proxy or third-party endpoint URL
     )
+
+
+def _extract_response_text(response: Any) -> str:
+    """Extract text from either Chat Completions or Responses SDK objects."""
+
+    output_text = getattr(response, "output_text", None)
+    if output_text is None and isinstance(response, dict):
+        output_text = response.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    output = getattr(response, "output", None)
+    if output is None and isinstance(response, dict):
+        output = response.get("output")
+    if isinstance(output, list):
+        parts: list[str] = []
+        for item in output:
+            content = getattr(item, "content", None)
+            if content is None and isinstance(item, dict):
+                content = item.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    text = getattr(block, "text", None)
+                    if text is None and isinstance(block, dict):
+                        text = block.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+        if parts:
+            return "".join(parts).strip()
+
+    choices = getattr(response, "choices", None)
+    if choices is None and isinstance(response, dict):
+        choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    message = getattr(first, "message", None)
+    if message is None and isinstance(first, dict):
+        message = first.get("message")
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "".join(
+            item if isinstance(item, str) else item.get("text", "")
+            for item in content
+            if isinstance(item, str) or isinstance(item, dict)
+        ).strip()
+    return ""
+
+
+async def _create_model_text(
+    client: AsyncOpenAI,
+    *,
+    system: str,
+    user: str,
+    temperature: float,
+) -> str:
+    """Call the configured wire protocol and return only response text."""
+
+    if str(getattr(_settings, "AI_WIRE_API", "chat_completions")).lower() == "responses":
+        response = await client.responses.create(
+            model=(_settings.AI_MODEL_NAME or "gpt-3.5-turbo").strip(),
+            instructions=system,
+            input=user,
+            store=False,
+        )
+    else:
+        response = await client.chat.completions.create(
+            model=(_settings.AI_MODEL_NAME or "gpt-3.5-turbo").strip(),
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=temperature,
+        )
+    return _extract_response_text(response)
 
 
 # Hint instructions injected into system prompts to guide LLM schema designs.
@@ -103,21 +185,12 @@ async def generate_questions_for_knowledge_point(
     client = _get_client()
     try:
         # Request completion from the language model
-        response = await client.chat.completions.create(
-            model=(_settings.AI_MODEL_NAME or "gpt-3.5-turbo").strip(),
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+        content = await _create_model_text(
+            client,
+            system=system,
+            user=user,
             temperature=_settings.AI_TEMPERATURE,
         )
-        
-        # Support both object attribute and dictionary subscription outputs (SDK version safety)
-        content = ""
-        if hasattr(response, "choices") and response.choices:
-            content = (response.choices[0].message.content or "").strip()
-        elif isinstance(response, dict):
-            content = (response.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
             
         if not content:
             return []
@@ -157,13 +230,10 @@ async def generate_questions_for_knowledge_point(
                 
             # Accept only valid queries that contain SELECT statements
             if title and content_str and correct_sql and correct_sql.strip().upper().startswith("SELECT"):
-                schema_preview = item.get("schema_preview")
-                schema_str = None
-                if isinstance(schema_preview, dict) and schema_preview.get("tables"):
-                    try:
-                        schema_str = json.dumps(schema_preview, ensure_ascii=False)
-                    except Exception:
-                        schema_str = None
+                schema_str = sanitize_schema_preview(
+                    item.get("schema_preview"),
+                    forbidden_sql=correct_sql,
+                )
                         
                 out.append({
                     "title": title[:200],
@@ -217,18 +287,12 @@ async def infer_difficulty_from_question(content: str, correct_sql: str) -> int:
     
     try:
         client = _get_client()
-        response = await client.chat.completions.create(
-            model=(_settings.AI_MODEL_NAME or "gpt-3.5-turbo").strip(),
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+        text = await _create_model_text(
+            client,
+            system=system,
+            user=user,
             temperature=_settings.AI_TEMPERATURE,
         )
-        
-        text = ""
-        if hasattr(response, "choices") and response.choices:
-            text = (response.choices[0].message.content or "").strip()
             
         if not text:
             return 5
@@ -268,18 +332,12 @@ async def infer_schema_preview_from_sql(content: str, correct_sql: str) -> str |
     
     try:
         client = _get_client()
-        response = await client.chat.completions.create(
-            model=(_settings.AI_MODEL_NAME or "gpt-3.5-turbo").strip(),
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+        text = await _create_model_text(
+            client,
+            system=system,
+            user=user,
             temperature=_settings.AI_TEMPERATURE,
         )
-        
-        text = ""
-        if hasattr(response, "choices") and response.choices:
-            text = (response.choices[0].message.content or "").strip()
             
         if not text:
             return None
@@ -287,8 +345,7 @@ async def infer_schema_preview_from_sql(content: str, correct_sql: str) -> str |
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text).strip()
         obj = json.loads(text)
-        if isinstance(obj, dict) and obj.get("tables"):
-            return json.dumps(obj, ensure_ascii=False)
+        return sanitize_schema_preview(obj, forbidden_sql=correct_sql)
     except Exception:
         traceback.print_exc()
     return None
@@ -319,18 +376,12 @@ async def infer_question_i18n_from_zh(title: str, content: str) -> dict[str, str
     
     try:
         client = _get_client()
-        response = await client.chat.completions.create(
-            model=(_settings.AI_MODEL_NAME or "gpt-3.5-turbo").strip(),
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+        text = await _create_model_text(
+            client,
+            system=system,
+            user=user,
             temperature=_settings.AI_TEMPERATURE,
         )
-        
-        text = ""
-        if hasattr(response, "choices") and response.choices:
-            text = (response.choices[0].message.content or "").strip()
             
         if not text:
             return None
@@ -378,18 +429,14 @@ async def infer_alias_requirement_from_content(content: str) -> bool:
     
     try:
         client = _get_client()
-        response = await client.chat.completions.create(
-            model=(_settings.AI_MODEL_NAME or "gpt-3.5-turbo").strip(),
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.1,  # Low temperature value for deterministic validation
-        )
-        
-        text = ""
-        if hasattr(response, "choices") and response.choices:
-            text = (response.choices[0].message.content or "").strip().lower()
+        text = (
+            await _create_model_text(
+                client,
+                system=system,
+                user=user,
+                temperature=0.1,
+            )
+        ).lower()
         return text == "true"
     except Exception:
         traceback.print_exc()

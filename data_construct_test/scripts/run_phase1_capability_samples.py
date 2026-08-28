@@ -741,7 +741,11 @@ def _hit_expected_kp(kp_ids: list[str], expected: list[str]) -> bool:
     return any(kp in kp_ids for kp in expected)
 
 
-def run_case(case: dict[str, Any]) -> dict[str, Any]:
+def run_case(
+    case: dict[str, Any],
+    *,
+    native_executor_url: str | None = None,
+) -> dict[str, Any]:
     try:
         resolution = resolve_sql_dialect_or_raise(
             declared_dialect=case.get("declared_sql_dialect"),
@@ -788,6 +792,9 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
             max_rows_per_table=case["max_rows_per_table"],
             sql_dialect=case.get("declared_sql_dialect"),
             execution_backend=case.get("execution_backend", "sqlite"),
+            native_executor_url=(
+                native_executor_url or case.get("native_executor_url")
+            ),
             schema_catalog=case.get("schema_catalog"),
         )
         attr = evidence_weights_from_observation(
@@ -879,8 +886,14 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         else "known_gap"
     )
 
+    # Connection URLs are credentials-bearing deployment inputs.  They are
+    # accepted out-of-band for native runs and must never be copied into a
+    # corpus result or evidence artifact.
+    public_case = {
+        key: value for key, value in case.items() if key != "native_executor_url"
+    }
     return {
-        **case,
+        **public_case,
         "capability_bucket": capability_bucket,
         "expectation_met": expectation_met,
         "strict_standard_parse_ok": std_parse_ok,
@@ -997,8 +1010,30 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "unresolved_cases": total - supported,
         "support_rate": round(supported / total, 4) if total else 0.0,
-        "validation_mode": "sqlite_compatibility",
-        "native_semantics_verified": False,
+        "validation_mode": (
+            "native"
+            if any(
+                item.get("actual_execution_backend") in {
+                    "mysql",
+                    "postgres",
+                    "tsql",
+                    "oracle",
+                }
+                for item in results
+            )
+            else "sqlite_compatibility"
+        ),
+        "native_semantics_verified": bool(results)
+        and all(
+            item.get("actual_execution_backend") in {
+                "mysql",
+                "postgres",
+                "tsql",
+                "oracle",
+            }
+            and item.get("executed")
+            for item in results
+        ),
         "declared_dialect_counts": dict(
             Counter(str(item.get("declared_sql_dialect") or "auto") for item in results)
         ),

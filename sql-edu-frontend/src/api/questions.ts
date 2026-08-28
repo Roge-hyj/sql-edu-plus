@@ -1,5 +1,9 @@
 import { request } from "@/utils/request";
-import type { QuestionOut, KnowledgePoint } from "@/types";
+import type {
+  QuestionOut,
+  KnowledgePoint,
+  QuestionSkillDeclaration,
+} from "@/types";
 
 // 重新导出类型，保持向后兼容
 export type { QuestionOut, KnowledgePoint } from "@/types";
@@ -31,9 +35,9 @@ export function createQuestion(data: {
   content_zh_tw?: string | null;
   correct_sql: string;
   difficulty?: number | null;
-  time_limit_seconds?: number | null;
   schema_preview?: string | null;
   required_output_columns?: string | null;
+  skills?: QuestionSkillDeclaration[] | null;
 }) {
   return request<QuestionOut>({
     // 后端路由是 /questions/（带尾斜杠），避免 307 重定向导致 Authorization 丢失
@@ -54,9 +58,10 @@ export function updateQuestion(
     content_zh_tw?: string | null;
     correct_sql: string;
     difficulty?: number | null;
-    time_limit_seconds?: number | null;
     schema_preview?: string | null;
     required_output_columns?: string | null;
+    /** 省略保留原映射；显式 [] 清空。 */
+    skills?: QuestionSkillDeclaration[] | null;
   }
 ) {
   return request<QuestionOut>({
@@ -113,4 +118,3 @@ export function generateQuestionsByAI(data: { knowledge_point_id: string; count?
     data: { knowledge_point_id: data.knowledge_point_id, count: data.count ?? 1 },
   });
 }
-

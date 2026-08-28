@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections import Counter, defaultdict
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
+from datetime import date, datetime
 import re
 import sqlite3
 from typing import Any
@@ -79,6 +80,11 @@ def _table_rows(world: Any, table: str) -> list[dict[str, Any]]:
         if name.lower() == table.lower():
             return rows
     return []
+
+
+def _relation_key(value: Any) -> str:
+    """Normalize a relation/CTE name for bounded validator bookkeeping."""
+    return re.sub(r"[^a-z0-9_]", "", str(value or "").strip().lower())
 
 
 def _column_name(rows: list[dict[str, Any]], requested: str) -> str | None:
@@ -605,6 +611,83 @@ def _execute_sqlite_diagnostic(
     """Execute one bounded, read-only semantic diagnostic over a witness."""
     connection = sqlite3.connect(":memory:")
     progress_calls = 0
+
+    def _number_to_str(*values: Any) -> str | None:
+        """Cover SQLGlot's SQLite lowering of MySQL ``FORMAT``.
+
+        Set-operator validators execute individual branches directly instead
+        of going through the main ParseVal adapter.  Register the same small
+        deterministic compatibility surface here so a branch containing
+        ``FORMAT`` is diagnosed semantically rather than rejected as an
+        unsupported SQLite function.
+        """
+        if len(values) < 2 or values[0] is None or values[1] is None:
+            return None
+        try:
+            places = int(values[1])
+            if places < 0:
+                return None
+            number = Decimal(str(values[0]))
+            if not number.is_finite():
+                return None
+            quantizer = Decimal(1).scaleb(-places)
+            with localcontext() as context:
+                context.rounding = ROUND_HALF_UP
+                rounded = number.quantize(quantizer)
+            return format(rounded, f",.{places}f")
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+    def _coerce_date(value: Any) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        text = str(value).strip()
+        for parser in (
+            lambda item: datetime.fromisoformat(item.replace("Z", "+00:00")).date(),
+            lambda item: datetime.strptime(item, "%d-%b-%y").date(),
+            lambda item: datetime.strptime(item, "%Y/%m/%d").date(),
+        ):
+            try:
+                return parser(text)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _date_diff(left: Any, right: Any) -> int | None:
+        start, end = _coerce_date(left), _coerce_date(right)
+        if start is None or end is None:
+            return None
+        return (start - end).days
+
+    # Keep this registry deliberately small and deterministic.  These are
+    # compatibility functions used by diagnostics, not a second SQL engine.
+    connection.create_function("NUMBER_TO_STR", -1, _number_to_str)
+    connection.create_function("FORMAT", -1, _number_to_str)
+    connection.create_function(
+        "CONCAT",
+        -1,
+        lambda *values: "".join("" if value is None else str(value) for value in values),
+    )
+    connection.create_function(
+        "LEFT",
+        2,
+        lambda value, size: str(value or "")[: max(0, int(size or 0))],
+    )
+    connection.create_function(
+        "RIGHT",
+        2,
+        lambda value, size: str(value or "")[-max(0, int(size or 0)) :],
+    )
+    connection.create_function("LEN", 1, lambda value: len(str(value or "")))
+    connection.create_function("STR_TO_DATE", 2, lambda value, _format: value)
+    connection.create_function("DATEDIFF", 2, _date_diff)
+    connection.create_function("YEAR", 1, lambda value: (_coerce_date(value) or date.min).year)
+    connection.create_function("MONTH", 1, lambda value: (_coerce_date(value) or date.min).month)
+    connection.create_function("DAY", 1, lambda value: (_coerce_date(value) or date.min).day)
 
     def _abort_large_diagnostic() -> int:
         nonlocal progress_calls
@@ -1658,7 +1741,24 @@ def _validate_window_paths(world: Any, obligation: DistinguishingObligation) -> 
 
     standard_function = str(metadata.get("standard_window_function") or "").upper()
     student_function = str(metadata.get("student_window_function") or "").upper()
-    nulls_changed = any(
+    # The third serialized order-item flag includes the dialect's implicit
+    # NULL placement.  ASC and DESC therefore commonly produce different
+    # flags even when neither query contains an explicit ``NULLS`` clause.
+    # Such a derived difference belongs to the direction witness, not to a
+    # separate NULL-path requirement.
+    explicit_null_placement = bool(
+        re.search(
+            r"\bNULLS\s+(?:FIRST|LAST)\b",
+            str(metadata.get("standard_window_order") or ""),
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"\bNULLS\s+(?:FIRST|LAST)\b",
+            str(metadata.get("student_window_order") or ""),
+            re.IGNORECASE,
+        )
+    )
+    nulls_changed = explicit_null_placement and any(
         len(standard_item) >= 3
         and len(student_item) >= 3
         and bool(standard_item[2]) != bool(student_item[2])
@@ -1813,11 +1913,22 @@ def _validate_order_paths(world: Any, obligation: DistinguishingObligation) -> t
     standard_keys = _order_keys(metadata.get("standard_order_keys"))
     student_keys = _order_keys(metadata.get("student_order_keys"))
     relation = str(spec.relation or metadata.get("standard_source_table") or "")
+    context = getattr(world, "execution", {}).get("validation_context", {})
+    if (
+        not relation
+        and obligation.diff_type == "order_by_changed"
+        and context.get("standard_sql")
+        and context.get("student_sql")
+    ):
+        # Expression/alias ordering over a derived query has no physical
+        # relation to put in the legacy metadata.  Use bounded full-result
+        # execution as the semantic owner instead of rejecting an otherwise
+        # valid order witness for missing table metadata.
+        relation = "__query_result__"
     if not relation:
         return False, {}, ["order_table_metadata_missing"]
     rows = _table_rows(world, relation)
     if obligation.diff_type == "order_by_changed" and not standard_keys and not student_keys:
-        context = getattr(world, "execution", {}).get("validation_context", {})
         standard_sql = str(context.get("standard_sql") or "").strip().rstrip(";")
         student_sql = str(context.get("student_sql") or "").strip().rstrip(";")
         if standard_sql and student_sql:
@@ -2458,8 +2569,13 @@ def _ordered_counter_rows(counter: Counter) -> list[list[Any]]:
 def _execute_set_branch(
     world: Any,
     branch: exp.Expression,
+    *,
+    with_sql: str = "",
+    cte_names: set[str] | None = None,
 ) -> tuple[list[tuple[Any, ...]] | None, str | None, int]:
     branch_sql = branch.sql(dialect="sqlite")
+    if with_sql:
+        branch_sql = f"{with_sql} {branch_sql}"
     try:
         parsed = parse_one(branch_sql, read="sqlite")
     except Exception as exc:  # noqa: BLE001 - diagnostic boundary only.
@@ -2473,7 +2589,10 @@ def _execute_set_branch(
         if owner_select is not None and _nearest_select(table) is owner_select
     ))
     candidate_product = 1
+    known_ctes = {_relation_key(name) for name in (cte_names or set())}
     for table_name in direct_tables:
+        if _relation_key(table_name) in known_ctes:
+            continue
         rows = _table_rows(world, table_name)
         if not rows:
             return None, "table_missing", candidate_product
@@ -2535,6 +2654,18 @@ def _validate_set_query_paths(
     standard_ast, student_ast, validation_source = parsed_pair
     standard_node = _set_operation_node(standard_ast)
     student_node = _set_operation_node(student_ast)
+    with_node = (
+        standard_ast.args.get("with_")
+        or standard_ast.args.get("with")
+        or standard_node.args.get("with_")
+        or standard_node.args.get("with")
+    )
+    with_sql = with_node.sql(dialect="sqlite") if isinstance(with_node, exp.With) else ""
+    cte_names = {
+        _relation_key(cte.alias or "")
+        for cte in (with_node.expressions if isinstance(with_node, exp.With) else ())
+        if cte.alias
+    }
     if not isinstance(standard_node, (exp.Union, exp.Intersect, exp.Except)) or not isinstance(
         student_node, (exp.Union, exp.Intersect, exp.Except)
     ):
@@ -2553,7 +2684,12 @@ def _validate_set_query_paths(
     student_results: list[list[tuple[Any, ...]]] = []
     products: list[int] = []
     for branch in (*standard_branches, *student_branches):
-        result, error, product = _execute_set_branch(world, branch)
+        result, error, product = _execute_set_branch(
+            world,
+            branch,
+            with_sql=with_sql,
+            cte_names=cte_names,
+        )
         products.append(product)
         if result is None:
             if error == "product_limit":
@@ -3817,6 +3953,65 @@ def _validate_duplicate(world: Any, obligation: DistinguishingObligation) -> tup
             return satisfied, evidence, [] if satisfied else ["duplicate_projection_not_observed"]
 
         if query_scope != "root":
+            # Validate the exact nested/CTE block when its SQL is available.
+            # Looking only at the outer result can hide a duplicate behind a
+            # GROUP BY, scalar aggregate, or another DISTINCT.  This remains
+            # bounded, read-only execution over the generated fixture.
+            standard_query_sql = str(
+                metadata.get("standard_query_sql") or ""
+            ).strip().rstrip(";")
+            student_query_sql = str(
+                metadata.get("student_query_sql") or ""
+            ).strip().rstrip(";")
+            if standard_query_sql and student_query_sql:
+                standard_nested, standard_error = _execute_sqlite_diagnostic(
+                    world,
+                    f'SELECT * FROM ({standard_query_sql}) AS "__distinct_standard"',
+                )
+                student_nested, student_error = _execute_sqlite_diagnostic(
+                    world,
+                    f'SELECT * FROM ({student_query_sql}) AS "__distinct_student"',
+                )
+                if standard_nested is not None and student_nested is not None:
+                    standard_counts = Counter(
+                        _freeze_result_value(row) for row in standard_nested
+                    )
+                    student_counts = Counter(
+                        _freeze_result_value(row) for row in student_nested
+                    )
+                    standard_duplicate_count = sum(
+                        count - 1 for count in standard_counts.values()
+                    )
+                    student_duplicate_count = sum(
+                        count - 1 for count in student_counts.values()
+                    )
+                    same_projected_values = set(standard_counts) == set(student_counts)
+                    satisfied = bool(
+                        same_projected_values
+                        and bool(standard_duplicate_count) != bool(student_duplicate_count)
+                    )
+                    return satisfied, {
+                        # Keep the long-standing CTE evidence label stable for
+                        # downstream consumers: the duplicate still originates
+                        # in the CTE input relation.  Record the stronger
+                        # execution method separately so the label is not
+                        # mistaken for an unexecuted physical-table fallback.
+                        "source": (
+                            "nested_query_input"
+                            if query_scope.startswith("cte:")
+                            else "executed_nested_projection"
+                        ),
+                        "validation_method": "executed_nested_projection",
+                        "query_scope": query_scope,
+                        "standard_row_count": len(standard_nested),
+                        "student_row_count": len(student_nested),
+                        "standard_duplicate_count": standard_duplicate_count,
+                        "student_duplicate_count": student_duplicate_count,
+                        "same_projected_values": same_projected_values,
+                        "standard_execution_error": standard_error,
+                        "student_execution_error": student_error,
+                    }, [] if satisfied else ["nested_duplicate_tuple_not_observed"]
+
             rows = _table_rows(world, spec.relation)
             requested = tuple(metadata.get("standard_projection_columns") or ())
             columns = [_column_name(rows, str(column)) for column in requested]

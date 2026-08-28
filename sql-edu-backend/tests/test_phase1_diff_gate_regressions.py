@@ -5,10 +5,23 @@ supported boolean-absorption rewrite detector cannot hide a real top-level
 set-operation or DISTINCT change.
 """
 
+import sys
+from pathlib import Path
+
+from sqlglot import exp, parse_one
+
 from core.parseval_data_generator import (
     _parse_sql,
     extract_ast_diffs,
     generate_and_compare,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "data_construct_test" / "scripts"))
+from run_phase1_cfg_convergence_benchmark import (  # noqa: E402
+    _has_ancestor,
+    _web_mutations,
 )
 
 
@@ -21,8 +34,73 @@ def test_guarded_parser_accepts_lowercase_aggregate_function_roundtrip():
     assert "COUNT(*)" in parsed.sql()
 
 
+def test_guarded_parser_accepts_dialect_function_alias_roundtrip():
+    parsed = _parse_sql(
+        "SELECT SUBSTR(code, 1, 2) FROM catalog WHERE code NOT IN ('x')",
+        dialect="mysql",
+    )
+
+    assert parsed is not None
+    assert "SUBSTRING" in parsed.sql(dialect="mysql")
+
+
 def test_guarded_parser_still_rejects_a_silently_dropped_table_token():
     assert _parse_sql("SELECT * FORM orders") is None
+
+
+def test_web_order_mutation_does_not_target_window_order_by():
+    window_only = "SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn FROM t"
+    assert not any(
+        name.startswith("order_")
+        for name, _sql, _labels in _web_mutations(
+            window_only,
+            declared_dialect="mysql",
+        )
+    )
+
+    mixed = (
+        "SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn "
+        "FROM t ORDER BY id DESC"
+    )
+    mutation = next(
+        (item for item in _web_mutations(mixed, declared_dialect="mysql") if item[0].startswith("order_")),
+        None,
+    )
+    assert mutation is not None
+    parsed = parse_one(mutation[1], read="mysql")
+    window_order = next(
+        node
+        for node in parsed.walk()
+        if isinstance(node, exp.Ordered) and _has_ancestor(node, exp.Window)
+    )
+    assert window_order.args.get("desc") is True
+    assert "ID ASC" in mutation[1].upper()
+
+
+def test_not_in_to_in_keeps_atomic_diff_when_other_mysql_aliases_are_present():
+    standard = (
+        "SELECT DISTINCT SUBSTR(code, 1, 2) AS prefix, id "
+        "FROM catalog WHERE id NOT IN ('x', 'y')"
+    )
+    student = standard.replace("SUBSTR", "SUBSTRING").replace("NOT IN", "IN")
+
+    diffs = extract_ast_diffs(standard, student, dialect="mysql")
+
+    assert any(diff.diff_type == "in_predicate_negation_changed" for diff in diffs)
+
+
+def test_correlated_subquery_distinct_change_is_not_mislabeled_as_correlation_change():
+    standard = (
+        "SELECT o.id FROM outer_rows o WHERE o.id IN ("
+        "SELECT DISTINCT i.id FROM inner_rows i WHERE i.outer_id = o.id)"
+    )
+    student = standard.replace("SELECT DISTINCT i.id", "SELECT i.id")
+
+    diffs = extract_ast_diffs(standard, student, dialect="mysql")
+    diff_types = {diff.diff_type for diff in diffs}
+
+    assert "distinct_changed" in diff_types
+    assert "correlated_predicate_changed" not in diff_types
 
 
 def test_set_operator_change_is_not_suppressed_by_boolean_rewrite_gate():
@@ -39,6 +117,21 @@ def test_set_operator_change_is_not_suppressed_by_boolean_rewrite_gate():
 
     assert any(diff.diff_type == "set_operator_changed" for diff in diffs)
     assert any(diff.knowledge_point_id == "intersect" for diff in diffs)
+
+
+def test_removed_set_operator_produces_atomic_repair_evidence():
+    result = generate_and_compare(
+        "course(id, title, dept_name);",
+        "SELECT title FROM course EXCEPT "
+        "SELECT title FROM course WHERE dept_name = 'History'",
+        "SELECT title FROM course",
+        sql_dialect="sqlite",
+    )
+
+    assert result.executed is True
+    assert result.is_equivalent is False
+    assert result.mutation_evidence["summary"]["fixed_by_replacement"] == 1
+    assert result.mutation_evidence["tests"][0]["action"] == "restore_removed_set_operator"
 
 
 def test_union_right_branch_predicate_change_is_not_suppressed_as_equivalent():

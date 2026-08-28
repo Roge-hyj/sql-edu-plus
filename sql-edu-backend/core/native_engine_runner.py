@@ -11,7 +11,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+import hashlib
 import importlib
 import json
 import math
@@ -198,6 +199,8 @@ def execute_native_query(
     rows: dict[str, list[dict[str, Any]]],
     sql: str,
     connection_url: str,
+    *,
+    schema_catalog: Any | None = None,
 ) -> NativeQueryResult:
     """Load one fixture and execute one query in an isolated native namespace.
 
@@ -214,6 +217,7 @@ def execute_native_query(
         rows,
         [sql],
         connection_url,
+        schema_catalog=schema_catalog,
     )
     outcome = outcomes[0]
     if outcome.error is not None:  # defensive: the single-query wrapper stops on errors
@@ -229,6 +233,7 @@ def execute_native_queries(
     queries: Iterable[str],
     connection_url: str,
     *,
+    schema_catalog: Any | None = None,
     query_timeout_seconds: int = _STATEMENT_TIMEOUT_MS // 1000,
     max_result_rows: int = _MAX_RESULT_ROWS,
     max_result_bytes: int = _MAX_RESULT_BYTES,
@@ -259,6 +264,7 @@ def execute_native_queries(
         schema_types,
         rows,
         connection_url,
+        schema_catalog=schema_catalog,
         query_timeout_seconds=query_timeout_seconds,
         max_result_rows=max_result_rows,
         max_result_bytes=max_result_bytes,
@@ -284,6 +290,7 @@ def native_query_session(
     rows: dict[str, list[dict[str, Any]]],
     connection_url: str,
     *,
+    schema_catalog: Any | None = None,
     query_timeout_seconds: int = _STATEMENT_TIMEOUT_MS // 1000,
     max_result_rows: int = _MAX_RESULT_ROWS,
     max_result_bytes: int = _MAX_RESULT_BYTES,
@@ -315,6 +322,7 @@ def native_query_session(
         rows,
         connection_url,
         query_timeout_seconds,
+        schema_catalog,
     ) as cursor:
         yield NativeQuerySession(
             normalized, cursor, max_result_rows, max_result_bytes
@@ -394,6 +402,7 @@ def _mysql_session(
     rows: dict[str, list[dict[str, Any]]],
     connection_url: str,
     query_timeout_seconds: int,
+    schema_catalog: Any | None = None,
 ) -> Iterator[Any]:
     params = _mysql_connection_params(connection_url)
     database = f"parseval_{uuid.uuid4().hex[:20]}"
@@ -425,7 +434,14 @@ def _mysql_session(
         )
         database_created = True
         admin_cursor.execute(f"USE {_quote_ident(database, 'mysql')}")
-        _load_fixture(admin_cursor, "mysql", schema, schema_types, rows)
+        _load_fixture(
+            admin_cursor,
+            "mysql",
+            schema,
+            schema_types,
+            rows,
+            schema_catalog=schema_catalog,
+        )
         account = f"{_quote_mysql_string(query_user)}@'%'"
         admin_cursor.execute(
             f"CREATE USER {account} IDENTIFIED BY {_quote_mysql_string(query_password)}"
@@ -555,6 +571,7 @@ def _postgres_session(
     rows: dict[str, list[dict[str, Any]]],
     connection_url: str,
     query_timeout_seconds: int,
+    schema_catalog: Any | None = None,
 ) -> Iterator[Any]:
     namespace = f"parseval_{uuid.uuid4().hex[:20]}"
     conn = driver.connect(_postgres_driver_url(connection_url), connect_timeout=3)
@@ -584,7 +601,14 @@ def _postgres_session(
         cursor.execute(
             f"SET LOCAL search_path TO {_quote_ident(namespace, 'postgres')}, pg_catalog"
         )
-        _load_fixture(cursor, "postgres", schema, schema_types, rows)
+        _load_fixture(
+            cursor,
+            "postgres",
+            schema,
+            schema_types,
+            rows,
+            schema_catalog=schema_catalog,
+        )
         cursor.execute(
             f"GRANT USAGE ON SCHEMA {_quote_ident(namespace, 'postgres')} "
             f"TO {_quote_ident(role, 'postgres')}"
@@ -623,6 +647,7 @@ def _tsql_session(
     rows: dict[str, list[dict[str, Any]]],
     connection_url: str,
     query_timeout_seconds: int,
+    schema_catalog: Any | None = None,
 ) -> Iterator[Any]:
     database = f"parseval_{uuid.uuid4().hex[:20]}"
     conn = driver.connect(
@@ -650,7 +675,14 @@ def _tsql_session(
         for statement in _TSQL_DETERMINISTIC_SESSION_STATEMENTS:
             cursor.execute(statement)
         cursor.execute(f"SET LOCK_TIMEOUT {query_timeout_seconds * 1000}")
-        _load_fixture(cursor, "tsql", schema, schema_types, rows)
+        _load_fixture(
+            cursor,
+            "tsql",
+            schema,
+            schema_types,
+            rows,
+            schema_catalog=schema_catalog,
+        )
         query_user = f"parseval_user_{uuid.uuid4().hex[:16]}"
         cursor.execute(
             f"CREATE USER {_quote_ident(query_user, 'tsql')} WITHOUT LOGIN"
@@ -744,6 +776,7 @@ def _oracle_session(
     rows: dict[str, list[dict[str, Any]]],
     connection_url: str,
     query_timeout_seconds: int,
+    schema_catalog: Any | None = None,
 ) -> Iterator[Any]:
     params = _oracle_connection_params(driver, connection_url)
     admin_kwargs = dict(params["connect_kwargs"])
@@ -803,7 +836,14 @@ def _oracle_session(
             owner_conn.call_timeout = query_timeout_seconds * 1000
         owner_cursor = owner_conn.cursor()
         _configure_oracle_session(owner_cursor)
-        _load_fixture(owner_cursor, "oracle", schema, schema_types, rows)
+        _load_fixture(
+            owner_cursor,
+            "oracle",
+            schema,
+            schema_types,
+            rows,
+            schema_catalog=schema_catalog,
+        )
         if hasattr(owner_conn, "commit"):
             owner_conn.commit()
         for table in schema:
@@ -936,6 +976,8 @@ def _load_fixture(
     schema: dict[str, list[str]],
     schema_types: dict[str, dict[str, str]],
     rows: dict[str, list[dict[str, Any]]],
+    *,
+    schema_catalog: Any | None = None,
 ) -> None:
     placeholder = {"mysql": "%s", "postgres": "%s", "tsql": "?", "oracle": None}[
         backend
@@ -949,12 +991,22 @@ def _load_fixture(
             )
         fixture_table = _fold_fixture_identifier(table, backend)
         fixture_columns = [_fold_fixture_identifier(column, backend) for column in columns]
+        primary_columns = {
+            _normalize_fixture_name(column)
+            for column in _fixture_primary_columns(
+                table,
+                columns,
+                schema_types.get(table) or {},
+                schema_catalog,
+            )
+        }
         specs = [
             _column_spec(
                 backend,
                 (schema_types.get(table) or {}).get(column),
                 (row.get(column) for row in rows.get(table, [])),
                 column,
+                indexed=_normalize_fixture_name(column) in primary_columns,
             )
             for column in columns
         ]
@@ -962,6 +1014,16 @@ def _load_fixture(
             f"{_quote_ident(fixture_column, backend)} {spec.sql_type}"
             for fixture_column, spec in zip(fixture_columns, specs)
         )
+        constraint_sql = _fixture_key_constraints(
+            table,
+            columns,
+            fixture_columns,
+            schema_types.get(table) or {},
+            schema_catalog,
+            backend,
+        )
+        if constraint_sql:
+            definitions = ", ".join((definitions, *constraint_sql))
         cursor.execute(f"CREATE TABLE {_quote_ident(fixture_table, backend)} ({definitions})")
         values = [
             tuple(
@@ -986,6 +1048,110 @@ def _load_fixture(
             f"VALUES ({placeholders})",
             values,
         )
+
+
+def _fixture_key_constraints(
+    table: str,
+    columns: list[str],
+    fixture_columns: list[str],
+    table_types: dict[str, str],
+    schema_catalog: Any | None,
+    backend: str,
+) -> list[str]:
+    """Return safe key declarations for a native fixture table.
+
+    The compact ``schema_types`` representation retains inline ``PRIMARY KEY``
+    markers, while an authoritative ``SchemaCatalog`` retains composite keys
+    separately.  The old loader discarded both forms when it reduced the
+    catalog to column SQL types.  PostgreSQL then could not apply its normal
+    functional-dependency rule for queries grouped by a primary key, which
+    made valid PGExercises answers fail only in the native runner.
+
+    Only primary keys are declared here.  They are needed for native grouping
+    semantics and are safe to install before data loading.  Foreign keys are
+    intentionally not added inline: their referenced table may be created
+    later, and witness worlds are allowed to contain an unmatched join side.
+    The query sandbox remains read-only, so omitting FK enforcement cannot be
+    used by submitted SQL to mutate or inspect the host database.
+    """
+
+    source_to_fixture = {
+        _normalize_fixture_name(source): fixture
+        for source, fixture in zip(columns, fixture_columns)
+    }
+    primary_names = _fixture_primary_columns(
+        table, columns, table_types, schema_catalog
+    )
+    fixture_primary_names = [
+        source_to_fixture[_normalize_fixture_name(name)]
+        for name in primary_names
+        if _normalize_fixture_name(name) in source_to_fixture
+    ]
+    if not fixture_primary_names or len(set(fixture_primary_names)) != len(fixture_primary_names):
+        return []
+    return [
+        "PRIMARY KEY ("
+        + ", ".join(_quote_ident(column, backend) for column in fixture_primary_names)
+        + ")"
+    ]
+
+
+def _fixture_primary_columns(
+    table: str,
+    columns: list[str],
+    table_types: dict[str, str],
+    schema_catalog: Any | None,
+) -> list[str]:
+    """Return source-spelled primary-key columns for one fixture table."""
+
+    source_by_normalized_name = {
+        _normalize_fixture_name(column): column for column in columns
+    }
+    primary_names: list[str] = []
+    catalog_table = None
+    if schema_catalog is not None:
+        table_lookup = getattr(schema_catalog, "table", None)
+        if callable(table_lookup):
+            try:
+                catalog_table = table_lookup(table)
+            except (TypeError, ValueError, AttributeError):
+                catalog_table = None
+        elif isinstance(schema_catalog, dict):
+            for candidate in schema_catalog.get("tables") or ():
+                if isinstance(candidate, dict) and _normalize_fixture_name(
+                    candidate.get("name")
+                ) == _normalize_fixture_name(table):
+                    catalog_table = candidate
+                    break
+
+    raw_primary = (
+        getattr(catalog_table, "primary_key", None)
+        if catalog_table is not None and not isinstance(catalog_table, dict)
+        else (catalog_table or {}).get("primary_key")
+        if isinstance(catalog_table, dict)
+        else None
+    )
+    if isinstance(raw_primary, str):
+        raw_primary = [raw_primary]
+    if isinstance(raw_primary, (list, tuple)):
+        primary_names = [
+            source_by_normalized_name[_normalize_fixture_name(name)]
+            for name in raw_primary
+            if _normalize_fixture_name(name) in source_by_normalized_name
+        ]
+
+    if not primary_names:
+        primary_names = [
+            source_by_normalized_name[_normalize_fixture_name(column)]
+            for column, type_hint in table_types.items()
+            if "PRIMARY KEY" in str(type_hint).upper()
+            and _normalize_fixture_name(column) in source_by_normalized_name
+        ]
+    return primary_names
+
+
+def _normalize_fixture_name(value: Any) -> str:
+    return str(value or "").strip().strip('`"[]').casefold()
 
 
 def _quote_ident(name: str, backend: str) -> str:
@@ -1038,6 +1204,8 @@ def _column_spec(
     type_hint: str | None,
     values: Iterable[Any],
     column: str,
+    *,
+    indexed: bool = False,
 ) -> _ColumnSpec:
     materialized = [value for value in values if value is not None]
     hint = (type_hint or "").strip().upper()
@@ -1059,6 +1227,11 @@ def _column_spec(
             "uuid": "CHAR(36)",
             "text": "LONGTEXT",
         }
+        if kind == "text":
+            return _ColumnSpec(
+                _mysql_text_type_from_hint(hint, indexed=indexed),
+                kind,
+            )
         return _ColumnSpec(types.get(kind, "LONGTEXT"), kind)
     if backend == "postgres":
         types = {
@@ -1115,6 +1288,40 @@ def _column_spec(
         "text": "VARCHAR2(4000 CHAR)",
     }
     return _ColumnSpec(types.get(kind, "VARCHAR2(4000 CHAR)"), kind)
+
+
+def _mysql_text_type_from_hint(hint: str, *, indexed: bool) -> str:
+    """Preserve bounded MySQL string declarations without invalid key DDL.
+
+    The compact schema representation keeps the declared type as a hint.  A
+    previous implementation collapsed every CHAR/VARCHAR/TEXT hint to
+    LONGTEXT.  That was permissive in SQLite but made a native MySQL fixture
+    impossible whenever a source CHAR/VARCHAR column was a primary key: MySQL
+    does not allow a BLOB/TEXT column in a key without a prefix.  Preserve
+    bounded declarations, and use an indexable bounded fallback only for an
+    actual TEXT-like key.
+    """
+
+    bounded = re.search(
+        r"\b(N?CHAR|N?VARCHAR|VARCHAR2)\s*\(\s*(\d+)\s*(?:CHAR|BYTE)?\s*\)",
+        hint,
+    )
+    if bounded:
+        family = bounded.group(1).upper()
+        length = max(1, int(bounded.group(2)))
+        if family in {"NCHAR", "CHAR"}:
+            return f"CHAR({min(length, 255)})"
+        # MySQL's maximum VARCHAR length is byte-limited.  The runner uses
+        # utf8mb4, so keep the fallback within the InnoDB key/row limits.
+        return f"VARCHAR({min(length, 16383)})"
+    if indexed:
+        # 768 utf8mb4 characters fit the 3072-byte InnoDB index limit.  This
+        # path is only for an unbounded TEXT/CLOB-like key declaration.
+        return "VARCHAR(768)"
+    if re.search(r"\b(TEXT|CLOB)\b", hint):
+        return "LONGTEXT"
+    # An undeclared/inferred text column should remain permissive.
+    return "LONGTEXT"
 
 
 def _kind_from_hint(hint: str, backend: str) -> str | None:
@@ -1219,6 +1426,10 @@ def _coerce_parameter(value: Any, backend: str, spec: _ColumnSpec) -> Any:
         return value.tobytes()
     if spec.kind == "binary" and isinstance(value, bytearray):
         return bytes(value)
+    if spec.kind == "int" and isinstance(value, str):
+        return _coerce_integer_token(value)
+    if spec.kind == "text" and backend == "mysql":
+        return _fit_mysql_text_value(value, spec.sql_type)
     if spec.kind == "bool" and backend == "oracle":
         return 1 if bool(value) else 0
     if spec.kind in {"date", "datetime", "datetime_tz"} and isinstance(value, str):
@@ -1227,8 +1438,77 @@ def _coerce_parameter(value: Any, backend: str, spec: _ColumnSpec) -> Any:
                 return date.fromisoformat(value.strip()[:10])
             return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
         except ValueError:
-            return value
+            # Witness generation deliberately uses textual counter-values
+            # such as ``not_2012-09-01`` for an unselected branch.  SQLite is
+            # permissive about storing those strings, but PostgreSQL/MySQL
+            # typed columns are not.  Preserve the branch as a deterministic
+            # temporal outlier instead of letting fixture loading fail before
+            # either query executes.
+            return (
+                date(1900, 1, 1)
+                if spec.kind == "date"
+                else datetime(1900, 1, 1)
+            )
+    if spec.kind == "time" and isinstance(value, str):
+        try:
+            return time.fromisoformat(value.strip())
+        except ValueError:
+            return time(0, 0, 0)
     return value
+
+
+def _coerce_integer_token(value: str) -> int:
+    """Turn generated textual sentinels into deterministic BIGINT values.
+
+    Witness construction can use values such as ``Movie_1`` when a relation
+    needs a non-null membership marker.  SQLite stores that string in an
+    INTEGER column, while strict native engines reject it.  Prefer the
+    explicit numeric token (so ``Movie_1`` remains the key ``1``); otherwise
+    use a stable bounded digest instead of Python's process-randomized hash.
+    """
+
+    text = value.strip()
+    try:
+        parsed = int(text, 10)
+    except ValueError:
+        token = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+        if token:
+            try:
+                parsed = int(Decimal(token.group(0)))
+            except (InvalidOperation, ValueError):
+                parsed = 0
+        else:
+            digest = hashlib.sha256(text.encode("utf-8")).digest()
+            parsed = int.from_bytes(digest[:8], "big", signed=False)
+    return max(-(2**63), min(2**63 - 1, parsed))
+
+
+def _fit_mysql_text_value(value: Any, sql_type: str) -> Any:
+    """Keep generated text inside a declared CHAR/VARCHAR width."""
+
+    if not isinstance(value, str):
+        return value
+    match = re.search(r"\b(?:CHAR|VARCHAR)\s*\(\s*(\d+)\s*\)", sql_type.upper())
+    if not match:
+        return value
+    limit = max(1, int(match.group(1)))
+    if len(value) <= limit:
+        return value
+
+    # Generated identifiers normally end in a row number.  Keep that suffix
+    # and the shortest stable prefix so distinct rows remain distinct after
+    # fitting (for example Code_1 -> Cod1 for CHAR(4)).
+    suffix_match = re.search(r"(\d+)\s*$", value)
+    suffix = suffix_match.group(1) if suffix_match else ""
+    if suffix:
+        if len(suffix) >= limit:
+            return suffix[-limit:]
+        return value[: limit - len(suffix)] + suffix
+
+    if limit <= 9:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()[:limit]
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+    return value[: limit - 9] + "_" + digest
 
 
 def _read_result(

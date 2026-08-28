@@ -27,13 +27,21 @@ class ChatRepository:
         result = await self.session.scalars(stmt)
         return list(result.all())
 
-    async def count_messages_for_user_question(self, user_id: int, question_id: int) -> int:
-        """统计该用户在该题目下的对话条数（用于经验投入度）。"""
+    async def count_messages_for_user_question(
+        self,
+        user_id: int,
+        question_id: int,
+        *,
+        for_update: bool = False,
+    ) -> int:
+        """统计该用户在该题目下的对话条数。"""
         stmt = (
             select(func.count(ChatMessage.id))
             .where(ChatMessage.user_id == user_id)
             .where(ChatMessage.question_id == question_id)
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         return await self.session.scalar(stmt) or 0
 
     async def count_messages_by_question(self, question_id: int) -> int:
@@ -65,4 +73,3 @@ class ChatRepository:
 
 
 __all__ = ["ChatRepository"]
-

@@ -9,6 +9,8 @@ refer only to unqualified fixture tables.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
+import math
 from typing import Final
 
 import sqlglot
@@ -383,6 +385,8 @@ def validate_native_query_safety(
     query: str | exp.Expression,
     dialect: str | None = None,
     allowed_tables: Iterable[str] | None = None,
+    *,
+    allow_bounded_generate_series: bool = False,
 ) -> exp.Query:
     """Validate and return one side-effect-free native DQL AST.
 
@@ -403,7 +407,11 @@ def validate_native_query_safety(
     _reject_unsafe_xml_nodes(ast)
     _reject_side_effect_nodes(ast)
     _reject_dangerous_functions(ast, dialect)
-    _enforce_function_allowlist(ast, dialect)
+    _enforce_function_allowlist(
+        ast,
+        dialect,
+        allow_bounded_generate_series=allow_bounded_generate_series,
+    )
     _reject_unsafe_tables(ast, normalized_allowed_tables)
     _reject_system_parameters(ast)
     return ast
@@ -651,7 +659,12 @@ def _reject_dangerous_functions(ast: exp.Query, dialect: str | None) -> None:
             _fail(code, f"function is not allowed in the native sandbox: {dangerous}")
 
 
-def _enforce_function_allowlist(ast: exp.Query, dialect: str | None) -> None:
+def _enforce_function_allowlist(
+    ast: exp.Query,
+    dialect: str | None,
+    *,
+    allow_bounded_generate_series: bool = False,
+) -> None:
     normalized_dialect = None
     if dialect is not None:
         try:
@@ -663,6 +676,18 @@ def _enforce_function_allowlist(ast: exp.Query, dialect: str | None) -> None:
         anonymous_allowed = set(_ALLOWED_ANONYMOUS_FUNCTIONS[normalized_dialect])
 
     for function in ast.find_all(exp.Func):
+        series_type = getattr(exp, "ExplodingGenerateSeries", None)
+        if series_type is not None and isinstance(function, series_type):
+            if allow_bounded_generate_series and _is_bounded_generate_series(
+                ast,
+                function,
+                normalized_dialect,
+            ):
+                continue
+            _fail(
+                NATIVE_SQL_UNSAFE_FUNCTION,
+                "generate_series must use one bounded literal PostgreSQL date interval",
+            )
         qualified = _qualified_function_names(function)
         if qualified:
             _fail(
@@ -682,7 +707,74 @@ def _enforce_function_allowlist(ast: exp.Query, dialect: str | None) -> None:
             _fail(
                 NATIVE_SQL_UNSAFE_FUNCTION,
                 f"function is outside the native sandbox allow-list: {node_name}",
-            )
+                )
+
+
+def _is_bounded_generate_series(
+    ast: exp.Query,
+    series: exp.Expression,
+    normalized_dialect: str | None,
+) -> bool:
+    """Prove that a PostgreSQL date series cannot be an unbounded row source.
+
+    ``generate_series`` is a table-valued function, so allowing it by name
+    would permit a student query to create an arbitrarily large relation.
+    The teaching corpus only needs the literal timestamp/date form.  Permit
+    exactly one such node, with a positive DAY/MONTH/YEAR interval and at most
+    366 generated values.  Dynamic bounds, integer series, multiple series,
+    and zero/negative steps remain rejected by the native policy.
+    """
+
+    if normalized_dialect != "postgres":
+        return False
+    series_type = getattr(exp, "ExplodingGenerateSeries", None)
+    if series_type is None or not isinstance(series, series_type):
+        return False
+    if sum(1 for node in ast.find_all(series_type)) != 1:
+        return False
+
+    start = _bounded_series_datetime(series.args.get("start"))
+    end = _bounded_series_datetime(series.args.get("end"))
+    step = series.args.get("step")
+    if start is None or end is None or end < start or not isinstance(step, exp.Interval):
+        return False
+    amount = step.this
+    unit_node = step.args.get("unit")
+    # SQLGlot represents the amount in ``INTERVAL '1 DAY'`` as a string
+    # literal even though the grammar restricts it to a numeric token.
+    if not isinstance(amount, exp.Literal):
+        return False
+    try:
+        count = int(str(amount.this))
+    except (TypeError, ValueError):
+        return False
+    unit = str(getattr(unit_node, "this", unit_node) or "").upper()
+    if count <= 0 or unit not in {"DAY", "MONTH", "YEAR"}:
+        return False
+
+    if unit == "DAY":
+        step_seconds = count * 24 * 60 * 60
+        span_seconds = max(0.0, (end - start).total_seconds())
+        size = math.floor(span_seconds / step_seconds) + 1
+    else:
+        # A conservative calendar bound is sufficient for safety.  It may
+        # reject an unusual end-of-month shape, but it never approves more
+        # than the configured row budget.
+        months = (end.year - start.year) * 12 + end.month - start.month
+        divisor = count if unit == "MONTH" else count * 12
+        size = months // divisor + 1
+    return 1 <= size <= 366
+
+
+def _bounded_series_datetime(node: exp.Expression | None) -> datetime | None:
+    while isinstance(node, exp.Cast):
+        node = node.this
+    if not isinstance(node, exp.Literal) or not node.is_string:
+        return None
+    try:
+        return datetime.fromisoformat(str(node.this).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _function_name(function: exp.Func) -> str:

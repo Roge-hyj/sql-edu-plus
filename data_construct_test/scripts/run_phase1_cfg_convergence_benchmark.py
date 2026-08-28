@@ -82,6 +82,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--web-mutations-per-query", type=int, default=2)
     parser.add_argument("--seed", type=int, default=20260722)
     parser.add_argument("--batch-size", type=int, default=1000)
+    parser.add_argument(
+        "--execution-backend",
+        choices=("sqlite", "mysql", "postgres", "tsql", "oracle"),
+        default="sqlite",
+        help="override the execution backend for every generated case",
+    )
+    parser.add_argument(
+        "--native-executor-url",
+        default=None,
+        help="native runner URL; required when --execution-backend is not sqlite",
+    )
     parser.add_argument("--early-stop-after-saturated-batches", type=int, default=0)
     parser.add_argument(
         "--skip-fragment-stratum",
@@ -752,6 +763,42 @@ def _projection_changes_source_shape(
     )
 
 
+def _rewrite_projection_order_aliases_for_star(select: exp.Select) -> None:
+    """Keep a projection-to-star mutation executable.
+
+    ``ORDER BY`` may legally refer to an alias produced by the original
+    projection.  Replacing that projection with ``*`` removes the alias and
+    therefore makes the otherwise useful mutation invalid on PostgreSQL (and
+    on most other engines).  Replace only unqualified order keys that resolve
+    to a projected alias with the original expression; direction/nulls
+    modifiers remain on the surrounding ``Ordered`` node.
+    """
+    order = select.args.get("order")
+    if not isinstance(order, exp.Order):
+        return
+    aliases: dict[str, exp.Expression] = {}
+    for expression in select.expressions or ():
+        if isinstance(expression, exp.Alias):
+            alias = expression.alias
+            if alias:
+                aliases[alias.lower()] = expression.this
+        elif isinstance(expression, exp.Column) and expression.name:
+            aliases.setdefault(expression.name.lower(), expression)
+    if not aliases:
+        return
+    for ordered in order.expressions or ():
+        expression = ordered.this if isinstance(ordered, exp.Ordered) else ordered
+        if not isinstance(expression, exp.Column) or expression.table:
+            continue
+        replacement = aliases.get(expression.name.lower())
+        if replacement is None or isinstance(replacement, exp.Star):
+            continue
+        if isinstance(ordered, exp.Ordered):
+            ordered.set("this", replacement.copy())
+        else:
+            ordered.replace(replacement.copy())
+
+
 def _quote_unsafe_schema_identifiers(sql: str, schema_text: str) -> str:
     """Quote schema-owned identifiers that generic corpus SQL left bare."""
     reserved = {
@@ -970,7 +1017,18 @@ def _web_mutations(
         add("except_removed", root, ["except"])
 
     root = original.copy()
-    ordered = next((node for node in root.walk() if isinstance(node, exp.Ordered)), None)
+    # A window's ORDER BY is not the result ordering of the query.  Mutating
+    # it while labelling the case ``order_*`` creates a false mutation and
+    # makes the later AST attribution point at the wrong teaching concept.
+    # Only select an ORDER BY that is not nested below a window expression.
+    ordered = next(
+        (
+            node
+            for node in root.walk()
+            if isinstance(node, exp.Ordered) and not _has_ancestor(node, exp.Window)
+        ),
+        None,
+    )
     if ordered is not None and ordered.args.get("desc") is True:
         ordered.set("desc", False)
         add("order_desc_to_asc", root, ["order-by"])
@@ -992,6 +1050,7 @@ def _web_mutations(
         and not all(isinstance(expression, exp.Star) for expression in projection.expressions)
         and _projection_changes_source_shape(projection, schema_text)
     ):
+        _rewrite_projection_order_aliases_for_star(projection)
         projection.set("expressions", [exp.Star()])
         add("projection_to_star", root, ["select-basic"])
     return candidates
@@ -1219,6 +1278,43 @@ def _wilson_interval(failures: int, total: int, z: float = 1.96) -> tuple[float,
 def _classify_scope(result: dict[str, Any]) -> str:
     if result["capability_bucket"] == "supported":
         return "supported"
+    error_text = " ".join(
+        str(result.get(key) or "")
+        for key in ("error", "failure_signature", "verdict_status", "error_code")
+    ).lower()
+    if (
+        "standard_schema_qualification_failed" in error_text
+        or "missing_physical_columns" in error_text
+        or str(result.get("verdict_status") or "").upper() == "INPUT_GAP"
+    ):
+        # The source record cannot be replayed against its own authoritative
+        # catalog. Keep it visible in scope_counts/failure artifacts, but do
+        # not call it a Phase 1 engine failure or put it in the capability
+        # denominator.
+        return "input_schema_gap"
+    if (
+        str(result.get("expectation") or "") == "not_equivalent"
+        and result.get("executed") is True
+        and result.get("is_equivalent") is True
+        and str(result.get("equivalence_conclusion") or "")
+        in {"UNDECIDED", "NO_COUNTEREXAMPLE_FOUND"}
+    ):
+        # The generated world did not separate an intentionally non-equivalent
+        # mutation. This is evidence/fixture insufficiency, not a claim that
+        # the student SQL is correct and not an engine crash.
+        return "witness_evidence_gap"
+    if (
+        str(result.get("expectation") or "") == "not_equivalent"
+        and result.get("executed") is True
+        and result.get("is_equivalent") is False
+        and not int(
+            (result.get("mutation_summary") or {}).get("fixed_by_replacement") or 0
+        )
+    ):
+        # The main judge found a real difference, but isolated mutation repair
+        # did not close. Keep it visible as an evidence gap instead of
+        # inflating the unexpected engine-failure rate.
+        return "mutation_evidence_gap"
     if result.get("base_id") in KNOWN_BOUNDARY_IDS:
         return "known_boundary"
     if result.get("known_boundary"):
@@ -1251,6 +1347,9 @@ def _convergence(results: list[dict[str, Any]], batch_size: int) -> list[dict[st
             "cases": len(chunk),
             "supported": sum(item["scope_status"] == "supported" for item in chunk),
             "known_boundaries": sum(item["scope_status"] == "known_boundary" for item in chunk),
+            "input_schema_gaps": sum(item["scope_status"] == "input_schema_gap" for item in chunk),
+            "witness_evidence_gaps": sum(item["scope_status"] == "witness_evidence_gap" for item in chunk),
+            "mutation_evidence_gaps": sum(item["scope_status"] == "mutation_evidence_gap" for item in chunk),
             "unexpected_failures": sum(item["scope_status"] == "unexpected_failure" for item in chunk),
             "new_failure_signatures": sorted(new_all),
             "new_unexpected_signatures": sorted(new_unexpected),
@@ -1271,7 +1370,17 @@ def summarize(
     for item in results:
         family_counts[item["family"]][item["scope_status"]] += 1
 
-    measured = [item for item in results if item["scope_status"] != "known_boundary"]
+    measured = [
+        item for item in results
+        if item["scope_status"] not in {"known_boundary", "input_schema_gap"}
+    ]
+    input_schema_gaps = [item for item in results if item["scope_status"] == "input_schema_gap"]
+    witness_evidence_gaps = [
+        item for item in results if item["scope_status"] == "witness_evidence_gap"
+    ]
+    mutation_evidence_gaps = [
+        item for item in results if item["scope_status"] == "mutation_evidence_gap"
+    ]
     unexpected = [item for item in measured if item["scope_status"] == "unexpected_failure"]
     lower, upper = _wilson_interval(len(unexpected), len(measured))
     negative = [item for item in measured if item["expectation"] == "not_equivalent"]
@@ -1315,6 +1424,10 @@ def summarize(
     return {
         "total_cases": len(results),
         "scope_counts": dict(scope_counts),
+        "measured_cases": len(measured),
+        "input_schema_gap_count": len(input_schema_gaps),
+        "witness_evidence_gap_count": len(witness_evidence_gaps),
+        "mutation_evidence_gap_count": len(mutation_evidence_gaps),
         "expectation_counts": dict(expectation_counts),
         "corpus_origin_counts": dict(origin_counts),
         "web_source_counts": dict(web_source_counts),
@@ -1383,6 +1496,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- Total attacks: `{summary['total_cases']}`",
         f"- Scope outcomes: `{summary['scope_counts']}`",
+        f"- Measured cases: `{summary['measured_cases']}`",
+        f"- Input/schema gaps (excluded from capability denominator): `{summary['input_schema_gap_count']}`",
+        f"- Witness evidence gaps: `{summary['witness_evidence_gap_count']}`",
+        f"- Mutation evidence gaps: `{summary['mutation_evidence_gap_count']}`",
         f"- Corpus origins: `{summary['corpus_origin_counts']}`",
         f"- Web source counts: `{summary['web_source_counts']}`",
         f"- Web labels: `{summary['web_label_counts']}`",
@@ -1413,13 +1530,15 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Convergence",
         "",
-        "| batch | cases | supported | known boundary | unexpected | new failure signatures | new unexpected signatures |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| batch | cases | supported | known boundary | input schema | witness gap | mutation gap | unexpected | new failure signatures | new unexpected signatures |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
     for batch in summary["convergence_batches"]:
         lines.append(
             f"| {batch['batch']} | {batch['cases']} | {batch['supported']} | "
-            f"{batch['known_boundaries']} | {batch['unexpected_failures']} | "
+            f"{batch['known_boundaries']} | {batch['input_schema_gaps']} | "
+            f"{batch['witness_evidence_gaps']} | {batch['mutation_evidence_gaps']} | "
+            f"{batch['unexpected_failures']} | "
             f"{len(batch['new_failure_signatures'])} | {len(batch['new_unexpected_signatures'])} |"
         )
     lines.extend(["", "## Failure Signatures", ""])
@@ -1461,6 +1580,10 @@ def main() -> None:
         raise SystemExit("generated-cases must be >= 0 and batch-size must be > 0")
     if args.web_cases < 0 or args.web_mutations_per_query < 0:
         raise SystemExit("web-cases and web-mutations-per-query must be >= 0")
+    if args.execution_backend != "sqlite" and not str(args.native_executor_url or "").strip():
+        raise SystemExit(
+            "--native-executor-url is required for a non-sqlite execution backend"
+        )
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     corpus = build_corpus(
@@ -1478,7 +1601,9 @@ def main() -> None:
     saturated_batches = 0
 
     for index, case in enumerate(corpus, start=1):
-        result = run_case(case)
+        if args.execution_backend != "sqlite":
+            case["execution_backend"] = args.execution_backend
+        result = run_case(case, native_executor_url=args.native_executor_url)
         result["failure_class"] = classify_failure(result)
         result["scope_status"] = _classify_scope(result)
         result["failure_signature"] = _failure_signature(result)

@@ -10,6 +10,8 @@ class SubmissionBase(BaseModel):
 
 
 class SubmissionCreate(SubmissionBase):
+    attempt_id: str | None = None
+    request_fingerprint: str | None = None
     ai_hint: str | None = None
     is_correct: bool = False
     hint_level: int = 1
@@ -17,6 +19,7 @@ class SubmissionCreate(SubmissionBase):
 
 class SubmissionOut(SubmissionBase):
     id: int
+    attempt_id: str | None
     ai_hint: str | None
     is_correct: bool
     hint_level: int

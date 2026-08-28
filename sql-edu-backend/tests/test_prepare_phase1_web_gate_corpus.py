@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 from pathlib import Path
+import sqlite3
 import sys
+import tarfile
+import time
 
+import pytest
 import sqlglot
 
 
@@ -25,6 +30,12 @@ SPIDER_SCHEMA_CATALOG_PATH = (
     / "data_construct_test"
     / "scripts"
     / "spider_schema_catalog.py"
+)
+ONLINE_RANDOM250_PATH = (
+    PROJECT_ROOT
+    / "data_construct_test"
+    / "scripts"
+    / "run_online_random250_structure_generation_tests.py"
 )
 
 
@@ -53,6 +64,53 @@ def _load_spider_schema_catalog_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_online_random250_module():
+    spec = importlib.util.spec_from_file_location(
+        "run_online_random250_structure_generation_tests", ONLINE_RANDOM250_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_online_mutation_builder_bounds_pathological_parser_work():
+    online = _load_online_random250_module()
+    if not hasattr(online.signal, "SIGALRM"):
+        pytest.skip("POSIX parser timeout is not available on this platform")
+
+    with pytest.raises(TimeoutError, match="construction budget"):
+        online._run_with_parser_timeout(lambda: time.sleep(0.1), timeout_seconds=0.01)
+
+    assert online._run_with_parser_timeout(lambda: "ok", timeout_seconds=0.1) == "ok"
+
+
+def test_online_case_evaluator_has_hard_timeout_and_fail_closed_projection():
+    online = _load_online_random250_module()
+    case = {
+        "id": "bounded-evaluator-fixture",
+        "dataset": "fixture",
+        "structure": "SELECT",
+        "source": "fixture",
+        "source_id": "fixture",
+        "source_url": "https://example.invalid/fixture",
+        "member": "fixture.sql",
+        "standard": "SELECT 1",
+        "student": "SELECT 1",
+        "expected_equivalent": True,
+    }
+    result = online._evaluate_case_bounded(
+        case,
+        max_rows=4,
+        worker_memory_mb=512,
+        timeout_seconds=0.0001,
+    )
+    assert result["data_generation_status"] == "RESOURCE_LIMIT"
+    assert result["equivalence_conclusion"] == "UNDECIDED"
+    assert result["strict_pass"] is False
 
 
 def test_spider_tables_json_catalog_preserves_physical_schema_and_keys():
@@ -144,6 +202,180 @@ def test_collector_rejects_select_into_and_delete_cte():
     assert collector._is_read_only_query(
         "WITH duplicate_rows AS (SELECT id FROM employee) DELETE FROM duplicate_rows"
     ) is False
+
+
+def test_collector_never_starts_a_query_inside_tutorial_comments():
+    collector = _load_collector_module()
+    extracted = list(collector._extract_sql_text(
+        """
+        -- Select all departments whose budget is above average.
+        SELECT * FROM departments
+        WHERE budget > (SELECT AVG(budget) FROM departments);
+        /* With a subquery */
+        SELECT title FROM movies WHERE code NOT IN (
+          SELECT movie FROM theaters WHERE movie IS NOT NULL
+        );
+        """
+    ))
+
+    assert len(extracted) == 2
+    assert extracted[0]["sql"].startswith("SELECT * FROM departments")
+    assert extracted[1]["sql"].startswith("SELECT title FROM movies")
+
+
+def test_ddl_catalog_preserves_types_nullability_primary_and_foreign_keys():
+    collector = _load_collector_module()
+    catalog = collector._parse_ddl_catalog(
+        """
+        CREATE TABLE departments (
+          id INTEGER PRIMARY KEY,
+          name VARCHAR(80) NOT NULL UNIQUE
+        );
+        CREATE TABLE employees (
+          id INTEGER NOT NULL,
+          department_id INTEGER,
+          salary DECIMAL(10, 2),
+          CONSTRAINT employees_pk PRIMARY KEY (id),
+          CONSTRAINT employee_department_fk FOREIGN KEY (department_id)
+            REFERENCES departments(id)
+        );
+        """,
+        dialect="postgresql",
+        source_id="fixture",
+        database_id="fixture-db",
+    )
+
+    departments, employees = catalog["tables"]
+    assert departments["primary_key"] == ["id"]
+    assert departments["columns"][1]["nullable"] is False
+    assert departments["unique_constraints"] == [["name"], ["id"]]
+    assert employees["primary_key"] == ["id"]
+    assert employees["foreign_keys"] == [{
+        "columns": ["department_id"],
+        "references_table": "departments",
+        "references_columns": ["id"],
+    }]
+    assert employees["columns"][2]["data_type"].startswith("DECIMAL")
+
+
+def test_archive_collector_pairs_each_answer_directory_with_its_ddl(tmp_path):
+    collector = _load_collector_module()
+    archive_path = tmp_path / "teaching.tar.gz"
+    documents = {
+        "repo/SQL_exercise_01/1_build_schema.sql": b"""
+            CREATE TABLE Manufacturers (Code INTEGER PRIMARY KEY, Name TEXT NOT NULL);
+            CREATE TABLE Products (
+              Code INTEGER PRIMARY KEY,
+              Name TEXT NOT NULL,
+              Manufacturer INTEGER REFERENCES Manufacturers(Code)
+            );
+        """,
+        "repo/SQL_exercise_01/1_questions_and_solutions.sql": b"""
+            -- 1.1 Select product names.
+            SELECT Name FROM Products;
+            -- 1.2 Select products and manufacturers.
+            SELECT p.Name, m.Name FROM Products p
+            JOIN Manufacturers m ON p.Manufacturer = m.Code;
+            INSERT INTO Products VALUES (2, 'unsafe', 1);
+        """,
+    }
+    with tarfile.open(archive_path, "w:gz") as archive:
+        for name, payload in documents.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+
+    source = {
+        "id": "paired-fixture",
+        "name": "paired fixture",
+        "kind": "real_sql_tutorial_repository",
+        "local_path": str(archive_path),
+        "dialect": "postgresql",
+        "extraction": {
+            "mode": "archive_ddl_queries",
+            "query_members": ["*/SQL_exercise_*/*questions_and_solution*.sql"],
+            "schema_members": ["*/SQL_exercise_*/*build_schema.sql"],
+            "schema_pairing": "directory",
+            "query_format": "numbered_comments",
+        },
+    }
+    records = collector.collect_source(source, tmp_path, 1, True, 10)
+
+    assert len(records) == 2
+    assert all(record["replay_eligible"] is True for record in records)
+    assert all(record["schema_trust"] == "authoritative_source_catalog" for record in records)
+    assert all("INSERT" not in record["sql"].upper() for record in records)
+    products = records[0]["schema_catalog"]["tables"][1]
+    assert products["primary_key"] == ["Code"]
+    assert products["foreign_keys"][0]["references_table"] == "Manufacturers"
+
+
+def test_sqlite_catalog_reads_schema_without_loading_table_rows():
+    collector = _load_collector_module()
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.executescript(
+            "CREATE TABLE parent(id INTEGER PRIMARY KEY, code TEXT UNIQUE);"
+            "CREATE TABLE child(id INTEGER PRIMARY KEY, parent_id INTEGER, "
+            "FOREIGN KEY(parent_id) REFERENCES parent(id));"
+        )
+        raw = connection.serialize()
+    finally:
+        connection.close()
+
+    catalog = collector._sqlite_catalog(raw, source_id="sqlite-fixture", database_id="fixture")
+
+    tables = {table["name"]: table for table in catalog["tables"]}
+    parent, child = tables["parent"], tables["child"]
+    assert parent["primary_key"] == ["id"]
+    assert ["code"] in parent["unique_constraints"]
+    assert child["foreign_keys"] == [{
+        "columns": ["parent_id"],
+        "references_table": "parent",
+        "references_columns": ["id"],
+    }]
+
+
+def test_query_inferred_schema_is_reference_only():
+    collector = _load_collector_module()
+    record = collector._record(
+        {"id": "inferred", "kind": "fixture", "dialect": "generic"},
+        "SELECT score FROM attempts",
+        "",
+        "fixture.sql",
+        "generic_recursive",
+    )
+
+    assert record["schema_trust"] == "query_text_inferred"
+    assert record["replay_eligible"] is False
+
+
+def test_archive_admission_detects_mixed_dialects_and_catalog_mismatches():
+    collector = _load_collector_module()
+    catalog = {
+        "tables": [{"name": "Products", "columns": [{"name": "name"}]}],
+    }
+
+    dialect = collector._detected_query_dialect(
+        "SELECT TOP 1 name FROM Products",
+        "mysql",
+        mixed=True,
+    )
+    ast = collector._strict_query_ast("SELECT TOP 1 name FROM Products", dialect)
+
+    assert dialect == "tsql"
+    assert ast is not None
+    assert collector._catalog_query_compatibility(ast, catalog) == (True, [])
+    system_ast = collector._strict_query_ast(
+        "SELECT * FROM SYS.ALL_INDEXES",
+        "oracle",
+    )
+    assert system_ast is not None
+    assert collector._catalog_query_compatibility(system_ast, catalog) == (
+        False,
+        ["all_indexes"],
+    )
+    assert collector._strict_query_ast("SELECT name FROM Products )", "mysql") is None
     assert collector._is_read_only_query(
         "WITH active AS (SELECT id FROM employee) SELECT id FROM active"
     ) is True
@@ -185,6 +417,50 @@ def test_spider_preflight_forwards_authoritative_schema_catalog(monkeypatch):
         "schema_catalog": catalog,
     }) is True
     assert captured["schema_catalog"] is catalog
+
+
+def test_spider_collector_accepts_authoritative_schema_retained_in_local_snapshot(tmp_path):
+    collector = _load_collector_module()
+    source_file = tmp_path / "spider_snapshot.jsonl"
+    source_file.write_text(
+        '{"query":"SELECT age FROM head WHERE age > 56",'
+        '"schema":"head(age);","schema_catalog":{"db_id":"department_management"},'
+        '"db_id":"department_management"}\n',
+        encoding="utf-8",
+    )
+    records = collector._collect_generic(
+        source_file,
+        {
+            "id": "spider_hf_train",
+            "name": "Spider local snapshot",
+            "kind": "text_to_sql_benchmark",
+            "dialect": "generic",
+            "extraction": {"mode": "json_recursive"},
+        },
+        max_items=10,
+        spider_catalog=None,
+    )
+    assert len(records) == 1
+    assert records[0]["schema"] == "head(age);"
+    assert records[0]["schema_trust"] == "authoritative_source_catalog"
+    assert records[0]["source_id"] == "spider_hf_train"
+
+
+def test_spider_collector_rejects_query_inferred_schema_without_catalog(tmp_path):
+    collector = _load_collector_module()
+    source_file = tmp_path / "spider_inferred.jsonl"
+    source_file.write_text(
+        '{"query":"SELECT age FROM head WHERE age > 56",'
+        '"schema":"head(age);","db_id":"department_management"}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="authoritative schema catalog"):
+        collector._collect_generic(
+            source_file,
+            {"id": "spider_hf_train", "dialect": "generic", "extraction": {}},
+            max_items=10,
+            spider_catalog=None,
+        )
 
 
 def _record(
@@ -239,6 +515,27 @@ def test_selector_rejects_corpus_below_minimum_record_count(monkeypatch):
         assert "record count 3" in str(exc)
     else:
         raise AssertionError("selector should reject an undersized corpus")
+
+
+def test_selector_excludes_explicit_reference_only_schema(monkeypatch):
+    selector = _load_selector_module()
+    monkeypatch.setattr(selector, "_identity_passes", lambda item: True)
+    records = [
+        _record(index)
+        for index in range(4)
+    ] + [{**_record(99), "replay_eligible": False}]
+
+    selected, report = selector.select_records(
+        records,
+        max_sql_length=800,
+        max_records=4,
+        minimum_records=4,
+        minimum_mutations=1,
+        seed=7,
+    )
+
+    assert len(selected) == 4
+    assert report["excluded_counts"]["reference_only_schema"] == 1
 
 
 def test_generic_multi_table_schema_deduplicates_unqualified_columns():
@@ -361,6 +658,50 @@ def test_generic_top_query_uses_tsql_for_structure_preflight():
     assert result["standard_ir_build_ok"] is True
 
 
+def test_identity_attribution_uses_the_declared_postgres_dialect():
+    selector = _load_selector_module()
+    sql = "SELECT TIMESTAMP '2012-08-31 01:00:00'"
+    case = selector._case(
+        "postgres-identity-attribution",
+        "WEB_CORPUS_PREFLIGHT",
+        "equivalent",
+        "",
+        sql,
+        sql,
+        [],
+        max_rows_per_table=4,
+        sql_dialect="postgres",
+    )
+
+    result = selector.run_case(case)
+
+    assert result["data_stage_met"] is True
+    assert result["attribution_stage_met"] is True
+    assert result["top_attributions"] == []
+
+
+def test_capability_reporting_does_not_count_undecided_equivalence_as_supported():
+    selector = _load_selector_module()
+    case = selector._case(
+        "finite-cardinality-undecided",
+        "WEB_CORPUS_PREFLIGHT",
+        "equivalent",
+        "course(id);",
+        "SELECT id FROM course LIMIT 100",
+        "SELECT id FROM course",
+        [],
+        max_rows_per_table=4,
+    )
+
+    result = selector.run_case(case)
+
+    assert result["verdict_status"] == "SEMANTIC_BOUNDARY"
+    assert result["equivalence_conclusion"] == "UNDECIDED"
+    assert result["data_stage_met"] is False
+    assert result["expectation_met"] is False
+    assert result["capability_bucket"] == "semantic_boundary"
+
+
 def test_web_mutations_skip_semantically_redundant_changes():
     selector = _load_selector_module()
 
@@ -419,6 +760,70 @@ def test_web_mutations_skip_semantically_redundant_changes():
         )
     }
     assert "limit_plus_one" not in nested_limit_names
+
+
+def test_web_mutations_skip_finite_single_parent_recursive_union_modifiers():
+    selector = _load_selector_module()
+    schema = (
+        "members(memid INT PRIMARY KEY, firstname TEXT, surname TEXT, "
+        "recommendedby INT);"
+    )
+    ancestor_paths = (
+        "WITH RECURSIVE recommenders(recommender, member) AS ("
+        "SELECT recommendedby, memid FROM members "
+        "UNION ALL "
+        "SELECT mems.recommendedby, recs.member FROM recommenders recs "
+        "JOIN members mems ON mems.memid = recs.recommender) "
+        "SELECT member, recommender FROM recommenders"
+    )
+    descendant_paths = (
+        "WITH RECURSIVE recommendeds(memid) AS ("
+        "SELECT memid FROM members WHERE recommendedby = 1 "
+        "UNION ALL "
+        "SELECT mems.memid FROM recommendeds recs "
+        "JOIN members mems ON mems.recommendedby = recs.memid) "
+        "SELECT memid FROM recommendeds"
+    )
+
+    for sql in (ancestor_paths, descendant_paths):
+        names = {name for name, _, _ in selector._web_mutations(sql, schema)}
+        assert "union_all_to_union" not in names
+
+
+def test_web_mutations_keep_observable_recursive_union_attacks():
+    selector = _load_selector_module()
+    graph_sql = (
+        "WITH RECURSIVE reachable(node) AS ("
+        "SELECT 1 "
+        "UNION ALL "
+        "SELECT edges.target FROM reachable r "
+        "JOIN edges ON edges.source = r.node) "
+        "SELECT node FROM reachable"
+    )
+    overlapping_anchor_sql = (
+        "WITH RECURSIVE descendants(memid) AS ("
+        "SELECT memid FROM members "
+        "UNION ALL "
+        "SELECT child.memid FROM descendants parent "
+        "JOIN members child ON child.recommendedby = parent.memid) "
+        "SELECT memid FROM descendants"
+    )
+
+    graph_names = {
+        name for name, _, _ in selector._web_mutations(
+            graph_sql,
+            "edges(edgeid INT PRIMARY KEY, source INT, target INT);",
+        )
+    }
+    overlapping_names = {
+        name for name, _, _ in selector._web_mutations(
+            overlapping_anchor_sql,
+            "members(memid INT PRIMARY KEY, recommendedby INT);",
+        )
+    }
+
+    assert "union_all_to_union" in graph_names
+    assert "union_all_to_union" in overlapping_names
 
 
 def test_digit_leading_schema_identifier_is_rendered_with_dialect_quotes():

@@ -1419,6 +1419,30 @@ def test_set_operator_mutation_replacement_identifies_union_all():
     assert tests[0]["fixed_by_replacement"] is True
 
 
+def test_nested_set_operator_mutation_replacement_identifies_union_all():
+    standard = (
+        "SELECT title FROM ("
+        "SELECT title FROM course WHERE dept_name = 'CS' "
+        "UNION ALL "
+        "SELECT title FROM course WHERE credits > 3"
+        ") AS combined"
+    )
+    student = standard.replace("UNION ALL", "UNION")
+
+    run = generate_and_compare(
+        "course(title, dept_name, credits);",
+        standard,
+        student,
+        sql_dialect="mysql",
+    )
+
+    tests = [item for item in run.mutation_evidence["tests"] if item["clause"] == "UNION"]
+    assert run.executed is True, run.error
+    assert run.is_equivalent is False
+    assert tests
+    assert tests[0]["fixed_by_replacement"] is True
+
+
 @pytest.mark.parametrize(
     ("standard_operator", "student_operator"),
     [("UNION", "INTERSECT"), ("INTERSECT", "UNION")],
@@ -1507,6 +1531,153 @@ def test_generate_and_compare_rejects_malformed_sql_before_transpilation():
     assert run.executed is False
     assert run.error == "student_sql_parse_failed"
     assert run.test_database == {}
+
+
+def test_mysql_compatibility_registers_bounded_date_membership_and_format_functions():
+    sql = (
+        "SELECT STR_TO_DATE('01/31/2024', '%m/%d/%Y'), "
+        "FIND_IN_SET('b', 'a,b,c'), NUMBER_TO_STR(1234.5, 1), "
+        "TIMESTAMPDIFF(MINUTE, STR_TO_DATE('0100PM', '%h%i%p'), "
+        "STR_TO_DATE('0200PM', '%h%i%p'))"
+    )
+    sqlite_sql = transpile_to_sqlite(sql, source_dialect="mysql")
+    columns, rows = _execute_sqlite({}, {}, sqlite_sql or sql)
+
+    assert columns == [
+        "STR_TO_DATE('01/31/2024', '%m/%d/%Y')",
+        "FIND_IN_SET('b', 'a,b,c')",
+        "NUMBER_TO_STR(1234.5, 1)",
+        "TIMESTAMPDIFF('minute', STR_TO_TIME('0100PM', '%I%M%p'), STR_TO_TIME('0200PM', '%I%M%p'))",
+    ]
+    assert rows == [("2024-01-31", 2, "1,234.5", 60)]
+
+
+def test_mysql_simple_with_rollup_is_lowered_without_grouping_function():
+    sql = (
+        "SELECT category AS category_name, SUM(amount) AS total_amount "
+        "FROM sales GROUP BY category WITH ROLLUP"
+    )
+    sqlite_sql = transpile_to_sqlite(sql, source_dialect="mysql")
+
+    assert sqlite_sql is not None
+    assert "WITH ROLLUP" not in sqlite_sql.upper()
+    assert "UNION ALL" in sqlite_sql.upper()
+
+    run = generate_and_compare(
+        "sales(id INT PRIMARY KEY, category TEXT, amount INT);",
+        sql,
+        sql,
+        sql_dialect="mysql",
+    )
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+
+
+def test_mysql_rollup_grouping_function_is_lowered_per_grouping_branch():
+    sql = (
+        "SELECT CASE WHEN GROUPING(category) = 1 THEN 'TOTAL' ELSE category END AS category_name, "
+        "CASE WHEN GROUPING(channel) = 1 THEN 'ALL' ELSE channel END AS channel_name, "
+        "SUM(amount) AS total_amount FROM sales "
+        "GROUP BY category, channel WITH ROLLUP"
+    )
+    sqlite_sql = transpile_to_sqlite(sql, source_dialect="mysql")
+
+    assert sqlite_sql is not None
+    assert "GROUPING(" not in sqlite_sql.upper()
+    assert "UNION ALL" in sqlite_sql.upper()
+    run = generate_and_compare(
+        "sales(id INT PRIMARY KEY, category TEXT, channel TEXT, amount INT);",
+        sql,
+        sql,
+        sql_dialect="mysql",
+    )
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+
+
+def test_mysql_substring_index_is_available_in_sqlite_compatibility():
+    sql = (
+        "SELECT SUBSTRING_INDEX(path, '-', 1) AS first_part, "
+        "SUBSTRING_INDEX(path, '-', -1) AS last_part FROM paths"
+    )
+    run = generate_and_compare(
+        "paths(id INT PRIMARY KEY, path TEXT);",
+        sql,
+        sql,
+        sql_dialect="mysql",
+        max_rows_per_table=4,
+    )
+
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+
+
+def test_mysql_rollup_with_bounded_having_is_lowered_per_branch():
+    sql = (
+        "SELECT category, SUM(amount) AS total_amount FROM sales "
+        "GROUP BY category WITH ROLLUP "
+        "HAVING category IS NOT NULL OR category IS NULL"
+    )
+    sqlite_sql = transpile_to_sqlite(sql, source_dialect="mysql")
+
+    assert sqlite_sql is not None
+    assert "WITH ROLLUP" not in sqlite_sql.upper()
+    assert "UNION ALL" in sqlite_sql.upper()
+    run = generate_and_compare(
+        "sales(id INT PRIMARY KEY, category TEXT, amount INT);",
+        sql,
+        sql,
+        sql_dialect="mysql",
+    )
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
+
+
+def test_mysql_rollup_grouping_order_uses_private_sort_columns():
+    sql = (
+        "SELECT CASE WHEN GROUPING(category) = 1 THEN 'TOTAL' ELSE category END AS category_name, "
+        "CASE WHEN GROUPING(channel) = 1 THEN 'ALL' ELSE channel END AS channel_name, "
+        "SUM(amount) AS total_amount FROM sales "
+        "GROUP BY category, channel WITH ROLLUP "
+        "ORDER BY GROUPING(category), category, GROUPING(channel), channel"
+    )
+    sqlite_sql = transpile_to_sqlite(sql, source_dialect="mysql")
+
+    assert sqlite_sql is not None
+    assert "GROUPING(" not in sqlite_sql.upper()
+    assert "__PHASE1_GROUP_ORDER_" in sqlite_sql.upper()
+    run = generate_and_compare(
+        "sales(id INT PRIMARY KEY, category TEXT, channel TEXT, amount INT);",
+        sql,
+        sql,
+        sql_dialect="mysql",
+    )
+    assert run.executed is True, run.error
+    assert run.status == "SUPPORTED"
+    assert run.is_equivalent is True
+
+
+def test_mysql_compound_order_expression_is_wrapped_for_sqlite():
+    sql = (
+        "SELECT category AS category_name FROM sales "
+        "UNION ALL SELECT 'TOTAL' AS category_name FROM sales "
+        "ORDER BY CASE WHEN category_name = 'TOTAL' THEN 1 ELSE 0 END, category_name"
+    )
+    sqlite_sql = transpile_to_sqlite(sql, source_dialect="mysql")
+
+    assert sqlite_sql is not None
+    assert sqlite_sql.upper().startswith("SELECT * FROM (")
+    run = generate_and_compare(
+        "sales(id INT PRIMARY KEY, category TEXT);",
+        sql,
+        sql,
+        sql_dialect="mysql",
+    )
+    assert run.executed is True, run.error
+    assert run.is_equivalent is True
 
 
 def test_sql_server_recursive_cte_transpiles_with_recursive_and_without_option():
@@ -2957,6 +3128,129 @@ def test_student_native_sql_cannot_read_outside_fixture_before_session_creation(
     assert run.executed is False
     assert run.judge_status == "SECURITY_REJECTED"
     assert run.error_code == "NATIVE_SQL_UNSAFE_OBJECT"
+
+
+def test_trusted_postgres_namespace_is_rewritten_before_native_session(monkeypatch):
+    executed_sql: list[str] = []
+
+    def execute(sql):
+        executed_sql.append(sql)
+        return ["memid"], [(1,), (2,)]
+
+    _patch_native_session(monkeypatch, execute)
+
+    run = _generate_and_compare(
+        "members(memid INT);",
+        "SELECT memid FROM cd.members",
+        "SELECT memid FROM cd.members",
+        sql_dialect="postgres",
+        execution_backend="postgres",
+        native_executor_url="postgresql://judge:pw@db/parseval",
+    )
+
+    assert run.executed is True, run.error
+    assert run.judge_status == "CORRECT"
+    assert executed_sql
+    assert all("cd." not in sql.lower() for sql in executed_sql)
+    assert all("members" in sql.lower() for sql in executed_sql)
+
+
+def test_unknown_student_namespace_is_rejected_before_native_session(monkeypatch):
+    def fail_if_session_created(*_args, **_kwargs):
+        raise AssertionError("unknown namespaces must fail before provisioning")
+
+    monkeypatch.setattr(
+        "core.parseval_data_generator.native_query_session",
+        fail_if_session_created,
+    )
+
+    run = _generate_and_compare(
+        "members(memid INT);",
+        "SELECT memid FROM cd.members",
+        "SELECT memid FROM other.members",
+        sql_dialect="postgres",
+        execution_backend="postgres",
+        native_executor_url="postgresql://judge:pw@db/parseval",
+    )
+
+    assert run.executed is False
+    assert run.judge_status == "SECURITY_REJECTED"
+    assert run.error_code == "NATIVE_SQL_UNSAFE_OBJECT"
+
+
+def test_system_catalog_table_is_rejected_before_native_session(monkeypatch):
+    def fail_if_session_created(*_args, **_kwargs):
+        raise AssertionError("system catalog SQL must fail before provisioning")
+
+    monkeypatch.setattr(
+        "core.parseval_data_generator.native_query_session",
+        fail_if_session_created,
+    )
+
+    run = _generate_and_compare(
+        "members(memid INT);",
+        "SELECT memid FROM cd.members",
+        "SELECT memid FROM pg_catalog.members",
+        sql_dialect="postgres",
+        execution_backend="postgres",
+        native_executor_url="postgresql://judge:pw@db/parseval",
+    )
+
+    assert run.executed is False
+    assert run.judge_status == "SECURITY_REJECTED"
+    assert run.error_code == "NATIVE_SQL_UNSAFE_OBJECT"
+
+
+def test_pg_catalog_table_without_fixture_resolution_is_an_input_gap_before_session(
+    monkeypatch,
+):
+    def fail_if_session_created(*_args, **_kwargs):
+        raise AssertionError("unresolved system catalog SQL must not provision")
+
+    monkeypatch.setattr(
+        "core.parseval_data_generator.native_query_session",
+        fail_if_session_created,
+    )
+
+    run = _generate_and_compare(
+        "members(memid INT);",
+        "SELECT memid FROM cd.members",
+        "SELECT tablename FROM pg_catalog.pg_tables",
+        sql_dialect="postgres",
+        execution_backend="postgres",
+        native_executor_url="postgresql://judge:pw@db/parseval",
+    )
+
+    assert run.executed is False
+    assert run.judge_status == "SECURITY_REJECTED"
+    assert run.error_code == "NATIVE_SQL_UNSAFE_OBJECT"
+
+
+def test_trusted_namespace_mutation_replay_keeps_fixture_boundary(monkeypatch):
+    executed_sql: list[str] = []
+
+    def execute(sql):
+        executed_sql.append(sql)
+        if "<>" in sql:
+            return ["memid"], [(2,)]
+        return ["memid"], [(1,)]
+
+    _patch_native_session(monkeypatch, execute)
+
+    run = _generate_and_compare(
+        "members(memid INT);",
+        "SELECT memid FROM cd.members WHERE memid = 1",
+        "SELECT memid FROM cd.members WHERE memid <> 1",
+        sql_dialect="postgres",
+        execution_backend="postgres",
+        native_executor_url="postgresql://judge:pw@db/parseval",
+    )
+
+    assert run.executed is True, run.error
+    assert run.judge_status == "WRONG"
+    assert run.mutation_evidence["summary"]["executed"] > 0
+    assert executed_sql
+    assert all("cd." not in sql.lower() for sql in executed_sql)
 
 
 def test_native_mutation_cannot_read_outside_fixture():
@@ -6062,6 +6356,25 @@ def test_not_in_probe_preserves_match_and_injects_null():
     outer_ids = [row["id"] for row in run.test_database["student"]]
     assert None in inner_ids
     assert set(inner_ids) & set(outer_ids)
+
+
+def test_filtered_in_negation_witness_removes_probe_null_and_reaches_inner_filter():
+    run = generate_and_compare(
+        "student(id, name); takes(id, course_id, year);",
+        "SELECT name FROM student WHERE id IN "
+        "(SELECT id FROM takes WHERE year = 2020)",
+        "SELECT name FROM student WHERE id NOT IN "
+        "(SELECT id FROM takes WHERE year = 2020)",
+    )
+
+    assert run.status == "SUPPORTED"
+    assert run.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert run.is_equivalent is False
+    assert run.standard_rows != run.student_rows
+    # The ordinary filtered membership path needs a non-NULL row that reaches
+    # the subquery.  NULL-sensitive NOT IN/NOT EXISTS pairs use a separate
+    # obligation and retain their explicit NULL witness.
+    assert all(row["id"] is not None for row in run.test_database["takes"])
 
 
 @pytest.mark.parametrize(

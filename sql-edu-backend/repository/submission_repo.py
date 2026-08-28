@@ -19,6 +19,8 @@ class SubmissionRepository:
         submission = Submission(
             user_id=submission_data.user_id,
             question_id=submission_data.question_id,
+            attempt_id=submission_data.attempt_id,
+            request_fingerprint=submission_data.request_fingerprint,
             student_sql=submission_data.student_sql,
             ai_hint=submission_data.ai_hint,
             is_correct=submission_data.is_correct,
@@ -28,19 +30,59 @@ class SubmissionRepository:
         await self.session.flush()  # 刷新以获取 ID
         return submission
 
-    async def get_correct_count(self, user_id: int, question_id: int) -> int:
-        """统计该用户在该题目上已有的正确提交次数（用于判断是否首次正确、是否发经验）。"""
+    async def get_by_attempt_id(
+        self,
+        user_id: int,
+        question_id: int,
+        attempt_id: str,
+        *,
+        for_update: bool = False,
+    ) -> Submission | None:
+        """Resolve one idempotent check-sql attempt.
+
+        ``for_update`` is a current read on MySQL and is used after acquiring
+        the per-user lock so a waiter can observe the winner's committed
+        response despite an older REPEATABLE READ snapshot.
+        """
+
+        stmt = select(Submission).where(
+            Submission.user_id == user_id,
+            Submission.question_id == question_id,
+            Submission.attempt_id == attempt_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return await self.session.scalar(stmt)
+
+    async def get_correct_count(
+        self,
+        user_id: int,
+        question_id: int,
+        *,
+        for_update: bool = False,
+    ) -> int:
+        """统计该用户在该题目上已有的正确提交次数。"""
         stmt = (
             select(func.count(Submission.id))
             .where(Submission.user_id == user_id)
             .where(Submission.question_id == question_id)
             .where(Submission.is_correct == True)
         )
+        if for_update:
+            # A locking read is a current read under MySQL REPEATABLE READ.
+            # /ai/check-sql uses this after acquiring its per-user lock so a
+            # concurrent first-correct commit cannot remain hidden in the
+            # transaction's earlier idempotency-check snapshot.
+            stmt = stmt.with_for_update()
         count = await self.session.scalar(stmt)
         return count or 0
 
     async def get_failure_count(
-        self, user_id: int, question_id: int
+        self,
+        user_id: int,
+        question_id: int,
+        *,
+        for_update: bool = False,
     ) -> int:
         """统计该用户在该题目上的失败次数（is_correct=False 的记录数）。
 
@@ -54,6 +96,8 @@ class SubmissionRepository:
             .where(Submission.question_id == question_id)
             .where(Submission.is_correct == False)
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         count = await self.session.scalar(stmt)
         return count or 0
 

@@ -1,7 +1,10 @@
 from functools import lru_cache
 from typing import List, Literal
+from pydantic import Field
 from pydantic_settings import BaseSettings,SettingsConfigDict
 from datetime import timedelta
+
+from settings.ai_provider import load_cc_switch_provider
 
 class Settings(BaseSettings):
     """全局配置。
@@ -34,10 +37,29 @@ class Settings(BaseSettings):
     PARSEVAL_TSQL_URL: str = ""
     PARSEVAL_ORACLE_URL: str = ""
     # Runner 实际版本。题目声明 engine_version 时必须与对应值兼容。
-    PARSEVAL_MYSQL_VERSION: str = "8.4"
+    PARSEVAL_MYSQL_VERSION: str = "8.0.46"
     PARSEVAL_POSTGRES_VERSION: str = "16"
     PARSEVAL_TSQL_VERSION: str = "2022"
     PARSEVAL_ORACLE_VERSION: str = "23ai"
+    # Optional offline BKT artifact.  Empty keeps the conservative
+    # uncalibrated MVP parameters active.  The artifact loader verifies the
+    # source digest and rejects synthetic or malformed calibration results.
+    PHASE3_BKT_CALIBRATION_ARTIFACT: str = ""
+    PHASE3_BKT_CALIBRATION_SOURCE: str = ""
+    # Phase 1 jobs run in a killable child process in production.  The
+    # limits protect the API worker from a wedged parser/witness workload;
+    # tests may force the legacy thread adapter around a test double.
+    PARSEVAL_WORKER_MODE: Literal["process", "thread"] = "process"
+    # ``spawn`` avoids forking an already multi-threaded API process.  A
+    # deployment may opt into ``forkserver`` or ``fork`` only after auditing
+    # its runtime and native drivers.
+    PARSEVAL_WORKER_START_METHOD: Literal["spawn", "forkserver", "fork"] = "spawn"
+    PARSEVAL_WORKER_MAX_CONCURRENCY: int = Field(default=2, ge=1, le=64)
+    # Number of requests allowed to wait behind active workers. Requests
+    # beyond this bound fail closed instead of accumulating unbounded tasks.
+    PARSEVAL_WORKER_QUEUE_LIMIT: int = Field(default=8, ge=0, le=1024)
+    PARSEVAL_WORKER_MEMORY_MB: int = Field(default=2048, ge=128, le=8192)
+    PARSEVAL_WORKER_CPU_SECONDS: int = Field(default=50, ge=1, le=600)
 
     # --- 3. 安全与认证 (JWT) ---
     # 在终端运行 `openssl rand -hex 32` 可以生成一个安全的随机字符串，需在 .env 中设置
@@ -58,7 +80,29 @@ class Settings(BaseSettings):
     AI_BASE_URL: str = ""
     # 模型名称，统一用于判题提示、对话、题目生成等
     AI_MODEL_NAME: str = "gpt-3.5-turbo"
+    # OpenAI-compatible wire protocol.  Chat Completions remains the default;
+    # CC Switch Codex providers may explicitly use the Responses API.
+    AI_WIRE_API: Literal["chat_completions", "responses"] = "chat_completions"
     AI_TEMPERATURE: float = 0.7
+    # Optional, explicit CC Switch provider source for local development.  The
+    # selected provider is read-only loaded at startup; its secret is never
+    # written into this project or emitted in logs.
+    AI_CC_SWITCH_DB_PATH: str = ""
+    AI_CC_SWITCH_PROVIDER_ID: str = ""
+    AI_CC_SWITCH_APP_TYPE: str = "codex"
+    # Optional model alias override.  CC Switch's Codex profile may declare a
+    # default model while its successful request history uses another alias.
+    AI_CC_SWITCH_MODEL: str = ""
+    # Evidence-bounded teaching calls.  Keep the feature opt-in so a
+    # configured key never causes an unexpected paid request during tests or
+    # a deployment rollout.  Once enabled, Phase 2 and Phase 5 can still be
+    # disabled independently for staged rollout.
+    LLM_TEACHING_ENABLED: bool = False
+    LLM_PHASE2_ENABLED: bool = True
+    LLM_PHASE5_ENABLED: bool = True
+    LLM_TIMEOUT_SECONDS: float = Field(default=8.0, ge=1.0, le=60.0)
+    LLM_MAX_OUTPUT_TOKENS: int = Field(default=1200, ge=128, le=8192)
+    LLM_MAX_INPUT_BYTES: int = Field(default=48 * 1024, ge=4096, le=256 * 1024)
 
     # --- 6. 邮件服务器配置 (Outlook) ---
     MAIL_USERNAME: str
@@ -104,6 +148,68 @@ from sys import exit as _exit
 # 实例化对象并做关键配置校验
 settings = Settings()
 
+
+def _apply_cc_switch_ai_provider(current: Settings) -> None:
+    """Apply an explicitly selected CC Switch provider without copying secrets."""
+
+    database_path = str(current.AI_CC_SWITCH_DB_PATH or "").strip()
+    provider_id = str(current.AI_CC_SWITCH_PROVIDER_ID or "").strip()
+    if not database_path and not provider_id:
+        return
+    if not database_path or not provider_id:
+        raise RuntimeError(
+            "CC Switch AI 配置必须同时设置 AI_CC_SWITCH_DB_PATH 和 "
+            "AI_CC_SWITCH_PROVIDER_ID。"
+        )
+    try:
+        provider = load_cc_switch_provider(
+            database_path=database_path,
+            provider_id=provider_id,
+            app_type=current.AI_CC_SWITCH_APP_TYPE,
+        )
+    except ValueError as exc:
+        raise RuntimeError(f"CC Switch AI provider 配置无效：{exc}") from exc
+    current.AI_API_KEY = provider.api_key
+    current.AI_BASE_URL = provider.base_url
+    current.AI_MODEL_NAME = (
+        str(current.AI_CC_SWITCH_MODEL or "").strip() or provider.model
+    )
+    current.AI_WIRE_API = provider.wire_api
+
+
+_apply_cc_switch_ai_provider(settings)
+
+def validate_phase1_worker_config(
+    *,
+    mode: str,
+    debug: bool,
+    start_method: str,
+    max_concurrency: int,
+    queue_limit: int,
+    memory_mb: int,
+    cpu_seconds: int,
+) -> None:
+    """Reject unsafe worker configurations before the service starts."""
+    normalized_mode = str(mode).strip().lower()
+    if normalized_mode not in {"process", "thread"}:
+        raise RuntimeError("Phase 1 worker mode must be process or thread")
+    if normalized_mode == "thread" and not debug:
+        raise RuntimeError(
+            "生产/预发布禁止 PARSEVAL_WORKER_MODE=thread；"
+            "请使用可强制终止的 process worker。"
+        )
+    if str(start_method).strip().lower() not in {"spawn", "forkserver", "fork"}:
+        raise RuntimeError("Phase 1 worker start method is unsupported")
+    if max_concurrency < 1 or max_concurrency > 64:
+        raise RuntimeError("PARSEVAL_WORKER_MAX_CONCURRENCY must be between 1 and 64")
+    if queue_limit < 0 or queue_limit > 1024:
+        raise RuntimeError("PARSEVAL_WORKER_QUEUE_LIMIT must be between 0 and 1024")
+    if memory_mb < 128 or memory_mb > 8192:
+        raise RuntimeError("PARSEVAL_WORKER_MEMORY_MB must be between 128 and 8192")
+    if cpu_seconds < 1 or cpu_seconds > 600:
+        raise RuntimeError("PARSEVAL_WORKER_CPU_SECONDS must be between 1 and 600")
+
+
 def validate_business_db_url(db_url: str, *, debug: bool) -> None:
     """Enforce the single business-database contract.
 
@@ -120,6 +226,16 @@ def validate_business_db_url(db_url: str, *, debug: bool) -> None:
 
 
 validate_business_db_url(settings.DB_URL, debug=settings.DEBUG)
+validate_phase1_worker_config(
+    mode=settings.PARSEVAL_WORKER_MODE,
+    debug=settings.DEBUG,
+    start_method=settings.PARSEVAL_WORKER_START_METHOD,
+    max_concurrency=settings.PARSEVAL_WORKER_MAX_CONCURRENCY,
+    queue_limit=settings.PARSEVAL_WORKER_QUEUE_LIMIT,
+    memory_mb=settings.PARSEVAL_WORKER_MEMORY_MB,
+    cpu_seconds=settings.PARSEVAL_WORKER_CPU_SECONDS,
+)
+
 
 # 启动时强制校验安全关键配置，避免使用空密钥
 missing_secrets: list[str] = []
@@ -138,7 +254,7 @@ if missing_secrets:
 def get_settings() -> Settings:
     """获取单例 Settings 实例。"""
 
-    return Settings()
+    return settings
 
 
-__all__ = ["Settings", "get_settings", "validate_business_db_url"]
+__all__ = ["Settings", "get_settings", "validate_business_db_url", "validate_phase1_worker_config"]

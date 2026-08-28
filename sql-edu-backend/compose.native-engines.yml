@@ -4,7 +4,7 @@ name: sql-edu-native-engines
 # through PARSEVAL_*_URL and never receives access to the Docker socket.
 services:
   mysql:
-    image: mysql:8.4.6
+    image: mysql:8.0.46
     environment:
       MYSQL_ROOT_PASSWORD: parseval_dev_root
       MYSQL_DATABASE: parseval
