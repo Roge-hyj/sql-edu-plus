@@ -205,6 +205,7 @@ class _ScopeAccumulator:
     )
     explicitly_declared: bool = False
     correlated: bool = False
+    lateral: bool = False
     sides: set[str] = field(default_factory=set)
     conceptual_scope_ids: set[str] = field(default_factory=set)
     upstream_complete: bool = True
@@ -802,9 +803,8 @@ def _kind_from_edge(edge_type: str, endpoint: str) -> str | None:
             "CTE_FEEDS": "CTE",
             "DERIVED_FEEDS": "DERIVED",
             "SUBQUERY_OF": "SUBQUERY",
-            "CORRELATED_TO": "SUBQUERY",
             "SET_MEMBER_OF": "SET_BRANCH",
-            "LATERAL_TO": "SUBQUERY",
+            "LATERAL_TO": "DERIVED",
         }.get(edge_type)
     return None
 
@@ -967,6 +967,7 @@ def build_scoped_query_graph(
         *,
         declared: bool = False,
         correlated: bool = False,
+        lateral: bool = False,
         side: str = "",
         conceptual_scope_id: str = "",
         upstream_complete: bool = True,
@@ -978,6 +979,7 @@ def build_scoped_query_graph(
             accumulator.kinds.add(kind)
         accumulator.explicitly_declared |= declared
         accumulator.correlated |= correlated
+        accumulator.lateral |= lateral
         if side:
             accumulator.sides.add(side)
         if conceptual_scope_id:
@@ -1012,6 +1014,7 @@ def build_scoped_query_graph(
             _scope_kind(declaration, scope_id),
             declared=True,
             correlated=declaration.get("is_correlated") is True,
+            lateral=declaration.get("is_lateral") is True,
             side=declaration_side,
             conceptual_scope_id=declaration_conceptual_scope_id,
             upstream_complete=(
@@ -1282,7 +1285,7 @@ def build_scoped_query_graph(
         required_edges = {
             "CTE": {"CTE_FEEDS"},
             "DERIVED": {"DERIVED_FEEDS"},
-            "SUBQUERY": {"SUBQUERY_OF", "LATERAL_TO"},
+            "SUBQUERY": {"SUBQUERY_OF"},
             "SET_BRANCH": {"SET_MEMBER_OF"},
         }.get(kind, set())
         present = outgoing_types.get(scope_id, set())
@@ -1291,6 +1294,9 @@ def build_scoped_query_graph(
             scope_complete = False
         if accumulator.correlated and "CORRELATED_TO" not in present:
             limitations.add(f"explicit correlation target missing for scope {scope_id}")
+            scope_complete = False
+        if accumulator.lateral and "LATERAL_TO" not in present:
+            limitations.add(f"explicit lateral target missing for scope {scope_id}")
             scope_complete = False
         if kind != "ROOT" and not required_edges and scope_id not in referenced_edges:
             limitations.add(

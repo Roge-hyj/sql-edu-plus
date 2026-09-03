@@ -28460,6 +28460,7 @@ class _Phase1ScopeDescriptor:
     cte_recursive: bool = False
     derived_alias: str = ""
     is_set_container: bool = False
+    is_lateral: bool = False
     correlation_allowed: bool = False
     is_correlated: bool = False
 
@@ -28549,17 +28550,21 @@ def _scope_role(
         )
     if isinstance(wrapper, exp.Subquery) and wrapper.this is node:
         if _subquery_wrapper_is_derived(wrapper):
+            is_lateral = _subquery_wrapper_is_lateral(wrapper)
+            derived_alias = _scope_text(wrapper.alias)
+            if is_lateral and isinstance(wrapper.parent, exp.Lateral):
+                derived_alias = _scope_text(wrapper.parent.alias) or derived_alias
             return (
                 "DERIVED",
                 "",
                 None,
                 False,
-                _scope_text(wrapper.alias),
-                _subquery_wrapper_is_lateral(wrapper),
+                derived_alias,
+                is_lateral,
             )
-        return "SUBQUERY", "", None, False, "", True
+        return "SUBQUERY", "", None, False, "", False
     if isinstance(wrapper, exp.Exists) and wrapper.this is node:
-        return "SUBQUERY", "", None, False, "", True
+        return "SUBQUERY", "", None, False, "", False
     if isinstance(wrapper, exp.SetOperation):
         return "SET_BRANCH", "", None, False, "", False
     return "UNKNOWN", "", None, False, "", False
@@ -28647,6 +28652,7 @@ def _collect_phase1_scopes(
             cte_recursive=cte_recursive,
             derived_alias=derived_alias,
             is_set_container=isinstance(node, exp.SetOperation),
+            is_lateral=lateral,
             correlation_allowed=(kind == "SUBQUERY" or (kind == "DERIVED" and lateral)),
         )
         if kind == "SET_BRANCH" and parent is not None:
@@ -28747,6 +28753,20 @@ def _direct_scope_tables_and_qualifiers(
             continue
         consumer = _nearest_retained_scope(
             wrapper,
+            descriptors_by_node,
+            include_self=False,
+        )
+        if consumer is not None:
+            qualifiers[consumer.scope_id][alias] += 1
+    # SQLGlot stores the alias of ``LATERAL (SELECT ...) AS x`` on the
+    # Lateral wrapper rather than on the inner Subquery.  It is still a source
+    # qualifier owned by the consuming outer query block.
+    for lateral in (node for node in bounded_nodes if isinstance(node, exp.Lateral)):
+        alias = _norm_name(lateral.alias or "")
+        if not alias:
+            continue
+        consumer = _nearest_retained_scope(
+            lateral,
             descriptors_by_node,
             include_self=False,
         )
@@ -29154,6 +29174,20 @@ def _build_phase1_scope_metadata(
                     parent.scope_id,
                     "AST_FROM_SUBQUERY",
                 ))
+                if descriptor.is_lateral:
+                    composition_edges.append(_scope_edge(
+                        "LATERAL_TO",
+                        descriptor.scope_id,
+                        parent.scope_id,
+                        "AST_LATERAL_DERIVED_SOURCE",
+                    ))
+            if descriptor.scope_kind == "SUBQUERY":
+                composition_edges.append(_scope_edge(
+                    "SUBQUERY_OF",
+                    descriptor.scope_id,
+                    parent.scope_id,
+                    "AST_SUBQUERY_CONTEXT",
+                ))
             if descriptor.scope_kind == "SET_BRANCH" and isinstance(
                 parent.node,
                 exp.SetOperation,
@@ -29248,6 +29282,7 @@ def _build_phase1_scope_metadata(
             "lexical_depth": descriptor.lexical_depth,
             "metadata_complete": descriptor.metadata_complete,
             "is_set_container": descriptor.is_set_container,
+            "is_lateral": descriptor.is_lateral,
             "is_correlated": descriptor.is_correlated,
             "structural_path": [
                 {"node": item[0], "arg": item[1], "index": item[2]}

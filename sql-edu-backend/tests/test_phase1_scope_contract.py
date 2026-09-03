@@ -11,6 +11,7 @@ from core.parseval_data_generator import (
     extract_ast_diffs,
     generate_and_compare,
 )
+from core.scoped_query_graph import build_scoped_query_graph
 
 
 def _scope_metadata(standard_sql: str, student_sql: str | None = None) -> dict:
@@ -127,6 +128,7 @@ def test_ast_proves_derived_set_and_correlated_edges_without_cross_side_edges() 
         "CORRELATED_TO",
         "DERIVED_FEEDS",
         "SET_MEMBER_OF",
+        "SUBQUERY_OF",
     }
     assert {item["edge_type"] for item in metadata["parent_edges"]} == {"PARENT"}
 
@@ -141,6 +143,132 @@ def test_ast_proves_derived_set_and_correlated_edges_without_cross_side_edges() 
         source_side = scopes[edge["source_scope_id"]]["side"]
         target_side = scopes[edge["target_scope_id"]]["side"]
         assert source_side == target_side
+
+
+def test_ast_emits_explicit_subquery_of_edges_for_each_sql_side() -> None:
+    sql = """
+        SELECT o.id
+        FROM outer_t AS o
+        WHERE o.id IN (SELECT i.id FROM inner_t AS i)
+    """
+
+    metadata = _scope_metadata(sql)
+
+    assert metadata["status"] == "COMPLETE"
+    scopes = {item["scope_id"]: item for item in metadata["scopes"]}
+    for side in ("standard", "student"):
+        subquery = next(
+            item
+            for item in scopes.values()
+            if item["side"] == side and item["scope_kind"] == "SUBQUERY"
+        )
+        expected = (subquery["scope_id"], f"{side}:root")
+        subquery_edges = {
+            (item["source_scope_id"], item["target_scope_id"])
+            for item in metadata["composition_edges"]
+            if item["edge_type"] == "SUBQUERY_OF"
+        }
+        parent_edges = {
+            (item["source_scope_id"], item["target_scope_id"])
+            for item in metadata["parent_edges"]
+        }
+        assert expected in subquery_edges
+        assert expected in parent_edges
+
+
+def test_ast_emits_lateral_and_derived_edges_without_marking_plain_derived() -> None:
+    lateral_sql = """
+        SELECT o.id
+        FROM outer_t AS o
+        CROSS JOIN LATERAL (SELECT o.id AS id) AS x
+    """
+
+    metadata = _scope_metadata(lateral_sql)
+
+    assert metadata["status"] == "COMPLETE"
+    scopes = {item["scope_id"]: item for item in metadata["scopes"]}
+    for side in ("standard", "student"):
+        derived = next(
+            item
+            for item in scopes.values()
+            if item["side"] == side and item["scope_kind"] == "DERIVED"
+        )
+        assert derived["is_lateral"] is True
+        expected = (derived["scope_id"], f"{side}:root")
+        by_type = {
+            item["edge_type"]: (
+                item["source_scope_id"],
+                item["target_scope_id"],
+            )
+            for item in metadata["composition_edges"]
+            if item["source_scope_id"] == derived["scope_id"]
+        }
+        assert by_type["DERIVED_FEEDS"] == expected
+        assert by_type["LATERAL_TO"] == expected
+        assert by_type["CORRELATED_TO"] == expected
+
+    plain = _scope_metadata(
+        "SELECT d.id FROM (SELECT id FROM inner_t) AS d"
+    )
+    assert all(item["is_lateral"] is False for item in plain["scopes"])
+    assert not [
+        item
+        for item in plain["composition_edges"]
+        if item["edge_type"] == "LATERAL_TO"
+    ]
+
+
+def test_full_phase1_output_builds_complete_subquery_and_lateral_graphs() -> None:
+    cases = (
+        (
+            "outer_t(id INT); inner_t(id INT)",
+            """
+                SELECT o.id FROM outer_t AS o
+                WHERE o.id IN (
+                    SELECT i.id FROM inner_t AS i WHERE i.id > 1
+                )
+            """,
+            """
+                SELECT o.id FROM outer_t AS o
+                WHERE o.id IN (
+                    SELECT i.id FROM inner_t AS i WHERE i.id >= 1
+                )
+            """,
+            {"SUBQUERY_OF"},
+        ),
+        (
+            "outer_t(id INT)",
+            """
+                SELECT o.id, x.id
+                FROM outer_t AS o
+                CROSS JOIN LATERAL (SELECT o.id AS id) AS x
+            """,
+            """
+                SELECT o.id, x.id
+                FROM outer_t AS o
+                CROSS JOIN LATERAL (SELECT o.id AS id) AS x
+            """,
+            {"CORRELATED_TO", "DERIVED_FEEDS", "LATERAL_TO"},
+        ),
+    )
+
+    for schema, standard_sql, student_sql, expected_edges in cases:
+        run = generate_and_compare(
+            schema,
+            standard_sql,
+            student_sql,
+            max_rows_per_table=4,
+            sql_dialect="sqlite",
+        )
+        metadata = run.data_evidence["scope_metadata"]
+        graph = build_scoped_query_graph(run)
+
+        assert metadata["status"] == "COMPLETE"
+        assert {
+            item["edge_type"] for item in metadata["composition_edges"]
+        } >= expected_edges
+        assert graph.status == "COMPLETE"
+        assert graph.limitations == ()
 
 
 def test_unprovable_diff_scope_and_non_lateral_outer_reference_are_partial() -> None:
@@ -194,8 +322,10 @@ def test_scope_contract_emits_only_the_frozen_edge_allowlist() -> None:
         "PARENT",
         "CTE_FEEDS",
         "DERIVED_FEEDS",
+        "SUBQUERY_OF",
         "CORRELATED_TO",
         "SET_MEMBER_OF",
+        "LATERAL_TO",
     }
 
 

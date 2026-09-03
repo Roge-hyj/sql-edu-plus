@@ -111,6 +111,53 @@ def test_correlated_subquery_keeps_lexical_and_correlation_edges_separate():
     }
 
 
+def test_lateral_derived_scope_preserves_kind_and_requires_lateral_edge():
+    scope_metadata = {
+        "status": "COMPLETE",
+        "scopes": [
+            {"scope_id": "root", "scope_kind": "ROOT"},
+            {
+                "scope_id": "derived:lateral",
+                "scope_kind": "DERIVED",
+                "is_lateral": True,
+            },
+        ],
+        "composition_edges": [
+            {
+                "edge_type": "DERIVED_FEEDS",
+                "source_scope_id": "derived:lateral",
+                "target_scope_id": "root",
+            },
+            {
+                "edge_type": "LATERAL_TO",
+                "source_scope_id": "derived:lateral",
+                "target_scope_id": "root",
+            },
+        ],
+    }
+
+    complete = build_scoped_query_graph(scope_metadata=scope_metadata).to_dict()
+
+    assert complete["status"] == "COMPLETE"
+    assert _scope(complete, "derived:lateral")["scope_kind"] == "DERIVED"
+    assert [item["edge_type"] for item in complete["composition_edges"]] == [
+        "DERIVED_FEEDS",
+        "LATERAL_TO",
+    ]
+
+    missing_lateral = build_scoped_query_graph(
+        scope_metadata={
+            **scope_metadata,
+            "composition_edges": scope_metadata["composition_edges"][:1],
+        }
+    ).to_dict()
+    assert missing_lateral["status"] == "PARTIAL"
+    assert any(
+        "explicit lateral target missing" in item
+        for item in missing_lateral["limitations"]
+    )
+
+
 def test_set_branches_are_members_only_when_set_parent_is_explicit():
     public = build_scoped_query_graph(
         ast_diffs=[
@@ -724,6 +771,7 @@ def test_catalog_and_hard_limits_are_fixed_public_contracts():
         "SUBQUERY_OF",
         "CORRELATED_TO",
         "SET_MEMBER_OF",
+        "LATERAL_TO",
     }.issubset(COMPOSITION_EDGE_TYPES)
     assert MAX_DIFFS == 256
     assert MAX_SCOPES == 64

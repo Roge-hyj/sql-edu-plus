@@ -121,6 +121,7 @@ PYTHONPATH=. pytest -q tests/test_phase1_sql_cfg_coverage.py tests/test_phase1_d
 - `tests/test_phase1_sql_cfg_coverage.py`：CFG case 到 diff/obligation 的链路。
 - `tests/test_witness_generation_foundation.py`：结构 diff 到 obligation 的语义绑定。
 - Gold Oracle 审计工件记录 ASTDiff-obligation 绑定 `6,888/6,888`，但该比例只表示抽样审计中的绑定成功。
+- `tests/test_phase1_scope_contract.py` 还直接覆盖 `generate_and_compare → scope_metadata → ScopedQueryGraph`：普通子查询自动产生 `SUBQUERY_OF`；LATERAL 派生查询产生 `DERIVED_FEEDS + LATERAL_TO`，存在真实外层限定引用时再产生 `CORRELATED_TO`。两条链路均要求图状态为 `COMPLETE`。
 
 ### 4.3 当前限制
 
@@ -142,6 +143,8 @@ PYTHONPATH=. pytest -q tests/test_phase1_advanced_structure_ir.py tests/test_pha
 ```
 
 当前状态：`IMPLEMENTED`；公开结构回归已通过，但全量语义冻结：`UNDECIDED`，不能标记 `VERIFIED`。
+
+补充原生证据：上述普通子查询和 LATERAL 关系已在 Docker PostgreSQL 16 上真实执行，Phase1 `scope_metadata` 与下游 `ScopedQueryGraph` 均为 `COMPLETE`。这验证的是作用域关系生成和原生执行链路，不把有限查询形状扩大成任意嵌套 SQL 的完备作用域证明。
 
 ## 5. Schema
 
