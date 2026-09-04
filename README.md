@@ -19,7 +19,7 @@ SQLite execution → behavioral conflict → repair verification
 bounded Phase1 verdict → Phase2 evidence grading/ranking
                   │
                   ▼
-primary error → minimal witness → one progressive safe hint
+primary error → safe witness/result delta → one progressive safe hint
 ```
 
 Phase1 没有反例时只给出 `NO_COUNTEREXAMPLE_FOUND`，不声称证明了全局 SQL 等价。Phase2 只消费 Phase1 已验证的证据，不重新判定等价性。
@@ -57,7 +57,7 @@ result = run_pipeline(
     question="找出所有及格学生",
 )
 
-# level=1 定位，level=2 最小物证，level=3 反思问题；每次只返回一级。
+# level=1 定位，level=2 物证或结果差异，level=3 反思问题；每次只返回一级。
 learner_payload = result.learner_hint(level=1)
 ```
 
@@ -72,3 +72,14 @@ learner_payload = result.learner_hint(level=1)
 
 详细接口约束见 [`contracts/phase12-contract.md`](contracts/phase12-contract.md)。
 
+## 已验证的全链路数据
+
+`evaluation/` 保存 79 条重新筛选并去重的 SQLite Phase1+Phase2 回归数据、独立评测器和双次运行基线。数据覆盖 18 个当前完整支持的教学规则、19 个 Phase1 操作族、10 个等价家族、12 个公开参考查询变体和 4 个安全退化输入。
+
+```bash
+python evaluation/run_full_pipeline_eval.py \
+  --repeat 2 \
+  --output /tmp/sqlite_phase12_evaluation.json
+```
+
+当前基线为 79/79 条通过、75/75 个可执行案例独立 SQLite 重放一致、474/474 个分级提示载荷无泄漏。选择依据、公开数据来源属性和仍未纳入的能力边界见 [`evaluation/README.md`](evaluation/README.md)。

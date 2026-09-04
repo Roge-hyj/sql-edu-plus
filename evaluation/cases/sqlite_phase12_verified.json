@@ -1,0 +1,2531 @@
+{
+  "cases": [
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S1_CARTESIAN_PRODUCT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S1_CARTESIAN_PRODUCT",
+      "id": "teach_s1_cartesian_product_00",
+      "question": "列出教师及其院系楼宇",
+      "reference_sql": "SELECT i0.i_name, d0.building FROM instructor i0 JOIN department d0 ON i0.dept_name = d0.dept_name WHERE i0.salary > -10",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s1_cartesian_product_00"
+      },
+      "student_sql": "SELECT i0.i_name, d0.building FROM instructor i0, department d0 WHERE i0.salary > -10",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S1_CARTESIAN_PRODUCT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S1_CARTESIAN_PRODUCT",
+      "id": "teach_s1_cartesian_product_01",
+      "question": "列出教师及其院系楼宇",
+      "reference_sql": "SELECT i1.i_name, d1.building FROM instructor i1 JOIN department d1 ON i1.dept_name = d1.dept_name WHERE i1.salary > -1",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s1_cartesian_product_01"
+      },
+      "student_sql": "SELECT i1.i_name, d1.building FROM instructor i1, department d1 WHERE i1.salary > -1",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S1_OUTER_JOIN_MISUSE",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S1_OUTER_JOIN_MISUSE",
+      "id": "teach_s1_outer_join_misuse_00",
+      "question": "列出每位学生，包括未选课学生",
+      "reference_sql": "SELECT s0.s_name, COUNT(t0.course_id) FROM student s0 LEFT JOIN takes t0 ON s0.s_id = t0.s_id GROUP BY s0.s_id, s0.s_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s1_outer_join_misuse_00"
+      },
+      "student_sql": "SELECT s0.s_name, COUNT(t0.course_id) FROM student s0 JOIN takes t0 ON s0.s_id = t0.s_id GROUP BY s0.s_id, s0.s_name",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S1_OUTER_JOIN_MISUSE",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S1_OUTER_JOIN_MISUSE",
+      "id": "teach_s1_outer_join_misuse_01",
+      "question": "列出每位学生，包括未选课学生",
+      "reference_sql": "SELECT s1.s_name, COUNT(t1.course_id) FROM student s1 LEFT JOIN takes t1 ON s1.s_id = t1.s_id GROUP BY s1.s_id, s1.s_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s1_outer_join_misuse_01"
+      },
+      "student_sql": "SELECT s1.s_name, COUNT(t1.course_id) FROM student s1 JOIN takes t1 ON s1.s_id = t1.s_id GROUP BY s1.s_id, s1.s_name",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S1_SUBQUERY_CARDINALITY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S1_SUBQUERY_CARDINALITY",
+      "id": "teach_s1_subquery_cardinality_01",
+      "question": "匹配目标院系出现过的全部学分值",
+      "reference_sql": "SELECT title FROM course WHERE credits IN (SELECT credits FROM course WHERE dept_name = 'Math')",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s1_subquery_cardinality_01"
+      },
+      "student_sql": "SELECT title FROM course WHERE credits = (SELECT credits FROM course WHERE dept_name = 'Math')",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S1_SUBQUERY_CARDINALITY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S1_SUBQUERY_CARDINALITY",
+      "id": "teach_s1_subquery_cardinality_02",
+      "question": "匹配目标院系出现过的全部学分值",
+      "reference_sql": "SELECT title FROM course WHERE credits IN (SELECT credits FROM course WHERE dept_name = 'Physics')",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s1_subquery_cardinality_02"
+      },
+      "student_sql": "SELECT title FROM course WHERE credits = (SELECT credits FROM course WHERE dept_name = 'Physics')",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_AGGREGATE_IN_WHERE",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_AGGREGATE_IN_WHERE",
+      "id": "teach_s2_aggregate_in_where_00",
+      "question": "找出工资高于整体统计值的教师",
+      "reference_sql": "SELECT i_name FROM instructor WHERE salary > (SELECT AVG(salary) FROM instructor)",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s2_aggregate_in_where_00"
+      },
+      "student_sql": "SELECT i_name FROM instructor WHERE salary > AVG(salary)",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_AGGREGATE_IN_WHERE",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_AGGREGATE_IN_WHERE",
+      "id": "teach_s2_aggregate_in_where_01",
+      "question": "找出工资高于整体统计值的教师",
+      "reference_sql": "SELECT i_name FROM instructor WHERE salary > (SELECT MAX(salary) FROM instructor)",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s2_aggregate_in_where_01"
+      },
+      "student_sql": "SELECT i_name FROM instructor WHERE salary > MAX(salary)",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_BOOLEAN_LOGIC",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_BOOLEAN_LOGIC",
+      "id": "teach_s2_boolean_logic_00",
+      "question": "筛选两个院系中同时满足工资条件的教师",
+      "reference_sql": "SELECT i_name FROM instructor WHERE (dept_name = 'CS' OR dept_name = 'Math') AND salary > -10",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s2_boolean_logic_00"
+      },
+      "student_sql": "SELECT i_name FROM instructor WHERE dept_name = 'CS' OR dept_name = 'Math' AND salary > -10",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_BOOLEAN_LOGIC",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_BOOLEAN_LOGIC",
+      "id": "teach_s2_boolean_logic_01",
+      "question": "筛选两个院系中同时满足工资条件的教师",
+      "reference_sql": "SELECT i_name FROM instructor WHERE (dept_name = 'Math' OR dept_name = 'Physics') AND salary > -1",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s2_boolean_logic_01"
+      },
+      "student_sql": "SELECT i_name FROM instructor WHERE dept_name = 'Math' OR dept_name = 'Physics' AND salary > -1",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_BOUNDARY",
+      "id": "teach_s2_boundary_00",
+      "question": "按给定开闭边界筛选课程",
+      "reference_sql": "SELECT course_id FROM course WHERE credits > -10",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s2_boundary_00"
+      },
+      "student_sql": "SELECT course_id FROM course WHERE credits >= -10",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_BOUNDARY",
+      "id": "teach_s2_boundary_01",
+      "question": "按给定开闭边界筛选课程",
+      "reference_sql": "SELECT course_id FROM course WHERE credits >= -1",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s2_boundary_01"
+      },
+      "student_sql": "SELECT course_id FROM course WHERE credits > -1",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_NULL_LOGIC",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_NULL_LOGIC",
+      "id": "teach_s2_null_logic_00",
+      "question": "按题意保留相应的空值记录",
+      "reference_sql": "SELECT * FROM takes WHERE grade IS NULL",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s2_null_logic_00"
+      },
+      "student_sql": "SELECT * FROM takes WHERE grade IS NOT NULL",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S3_GRAIN_ENTITY_MISMATCH",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S3_GRAIN_ENTITY_MISMATCH",
+      "id": "teach_s3_grain_entity_mismatch_00",
+      "question": "按院系统计教师数",
+      "reference_sql": "SELECT d0.dept_name, COUNT(i0.i_id) FROM instructor i0 JOIN department d0 ON i0.dept_name = d0.dept_name GROUP BY d0.dept_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s3_grain_entity_mismatch_00"
+      },
+      "student_sql": "SELECT d0.dept_name, COUNT(i0.i_id) FROM instructor i0 JOIN department d0 ON i0.dept_name = d0.dept_name GROUP BY d0.building",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S3_GRAIN_ENTITY_MISMATCH",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S3_GRAIN_ENTITY_MISMATCH",
+      "id": "teach_s3_grain_entity_mismatch_01",
+      "question": "按院系统计教师数",
+      "reference_sql": "SELECT d1.dept_name, COUNT(i1.i_id) FROM instructor i1 JOIN department d1 ON i1.dept_name = d1.dept_name GROUP BY d1.dept_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s3_grain_entity_mismatch_01"
+      },
+      "student_sql": "SELECT d1.dept_name, COUNT(i1.i_id) FROM instructor i1 JOIN department d1 ON i1.dept_name = d1.dept_name GROUP BY d1.building",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S3_GROUP_KEY_MISSING",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S3_GROUP_KEY_MISSING",
+      "id": "teach_s3_group_key_missing_00",
+      "question": "按院系和学期统计选课数",
+      "reference_sql": "SELECT c0.dept_name, t0.semester, COUNT(t0.course_id) FROM takes t0 JOIN course c0 ON t0.course_id = c0.course_id GROUP BY c0.dept_name, t0.semester",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s3_group_key_missing_00"
+      },
+      "student_sql": "SELECT c0.dept_name, t0.semester, COUNT(t0.course_id) FROM takes t0 JOIN course c0 ON t0.course_id = c0.course_id GROUP BY c0.dept_name",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S3_GROUP_KEY_MISSING",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S3_GROUP_KEY_MISSING",
+      "id": "teach_s3_group_key_missing_01",
+      "question": "按院系和学期统计选课数",
+      "reference_sql": "SELECT c1.dept_name, t1.semester, COUNT(t1.course_id) FROM takes t1 JOIN course c1 ON t1.course_id = c1.course_id GROUP BY c1.dept_name, t1.semester",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s3_group_key_missing_01"
+      },
+      "student_sql": "SELECT c1.dept_name, t1.semester, COUNT(t1.course_id) FROM takes t1 JOIN course c1 ON t1.course_id = c1.course_id GROUP BY c1.dept_name",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S3_GROUP_KEY_REDUNDANT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S3_GROUP_KEY_REDUNDANT",
+      "id": "teach_s3_group_key_redundant_00",
+      "question": "每位学生输出一行选课统计",
+      "reference_sql": "SELECT s0.s_id, s0.s_name, COUNT(t0.course_id) FROM student s0 JOIN takes t0 ON s0.s_id = t0.s_id GROUP BY s0.s_id, s0.s_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s3_group_key_redundant_00"
+      },
+      "student_sql": "SELECT s0.s_id, s0.s_name, COUNT(t0.course_id) FROM student s0 JOIN takes t0 ON s0.s_id = t0.s_id GROUP BY s0.s_id, s0.s_name, t0.grade",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S3_GROUP_KEY_REDUNDANT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S3_GROUP_KEY_REDUNDANT",
+      "id": "teach_s3_group_key_redundant_01",
+      "question": "每位学生输出一行选课统计",
+      "reference_sql": "SELECT s1.s_id, s1.s_name, COUNT(t1.course_id) FROM student s1 JOIN takes t1 ON s1.s_id = t1.s_id GROUP BY s1.s_id, s1.s_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s3_group_key_redundant_01"
+      },
+      "student_sql": "SELECT s1.s_id, s1.s_name, COUNT(t1.course_id) FROM student s1 JOIN takes t1 ON s1.s_id = t1.s_id GROUP BY s1.s_id, s1.s_name, t1.grade",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S4_AGG_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S4_AGG_BOUNDARY",
+      "id": "teach_s4_agg_boundary_00",
+      "question": "按课程数的开闭边界筛选院系",
+      "reference_sql": "SELECT dept_name FROM course GROUP BY dept_name HAVING COUNT(course_id) >= 1",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s4_agg_boundary_00"
+      },
+      "student_sql": "SELECT dept_name FROM course GROUP BY dept_name HAVING COUNT(course_id) > 1",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S4_AGG_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S4_AGG_BOUNDARY",
+      "id": "teach_s4_agg_boundary_01",
+      "question": "按课程数的开闭边界筛选院系",
+      "reference_sql": "SELECT dept_name FROM course GROUP BY dept_name HAVING COUNT(course_id) > 2",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s4_agg_boundary_01"
+      },
+      "student_sql": "SELECT dept_name FROM course GROUP BY dept_name HAVING COUNT(course_id) >= 2",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S4_HAVING_MISSING",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S4_HAVING_MISSING",
+      "id": "teach_s4_having_missing_00",
+      "question": "只保留教师数超过阈值的院系",
+      "reference_sql": "SELECT dept_name FROM instructor GROUP BY dept_name HAVING COUNT(i_id) > 1",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s4_having_missing_00"
+      },
+      "student_sql": "SELECT dept_name FROM instructor GROUP BY dept_name",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S4_HAVING_MISSING",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S4_HAVING_MISSING",
+      "id": "teach_s4_having_missing_01",
+      "question": "只保留教师数超过阈值的院系",
+      "reference_sql": "SELECT dept_name FROM instructor GROUP BY dept_name HAVING COUNT(i_id) > 2",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s4_having_missing_01"
+      },
+      "student_sql": "SELECT dept_name FROM instructor GROUP BY dept_name",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S4_ROW_FILTER_IN_HAVING",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S4_ROW_FILTER_IN_HAVING",
+      "id": "teach_s4_row_filter_in_having_00",
+      "question": "先逐行筛选工资，再按院系统计",
+      "reference_sql": "SELECT dept_name, AVG(salary) FROM instructor WHERE salary > -10 GROUP BY dept_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s4_row_filter_in_having_00"
+      },
+      "student_sql": "SELECT dept_name, AVG(salary) FROM instructor GROUP BY dept_name HAVING salary > -10",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S4_ROW_FILTER_IN_HAVING",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S4_ROW_FILTER_IN_HAVING",
+      "id": "teach_s4_row_filter_in_having_01",
+      "question": "先逐行筛选工资，再按院系统计",
+      "reference_sql": "SELECT dept_name, AVG(salary) FROM instructor WHERE salary > -1 GROUP BY dept_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s4_row_filter_in_having_01"
+      },
+      "student_sql": "SELECT dept_name, AVG(salary) FROM instructor GROUP BY dept_name HAVING salary > -1",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_CASE_INCOMPLETE",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S5_CASE_INCOMPLETE",
+      "id": "teach_s5_case_incomplete_00",
+      "question": "为每名教师生成完整工资等级",
+      "reference_sql": "SELECT i_name, CASE WHEN salary > -10 THEN 'High0' ELSE 'Normal0' END AS salary_level FROM instructor",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s5_case_incomplete_00"
+      },
+      "student_sql": "SELECT i_name, CASE WHEN salary > -10 THEN 'High0' END AS salary_level FROM instructor",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_CASE_INCOMPLETE",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S5_CASE_INCOMPLETE",
+      "id": "teach_s5_case_incomplete_01",
+      "question": "为每名教师生成完整工资等级",
+      "reference_sql": "SELECT i_name, CASE WHEN salary > -1 THEN 'High1' ELSE 'Normal1' END AS salary_level FROM instructor",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s5_case_incomplete_01"
+      },
+      "student_sql": "SELECT i_name, CASE WHEN salary > -1 THEN 'High1' END AS salary_level FROM instructor",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_COUNT_NULL_SENSITIVITY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S5_COUNT_NULL_SENSITIVITY",
+      "id": "teach_s5_count_null_sensitivity_00",
+      "question": "统计每个院系具有非空奖金的教师数",
+      "reference_sql": "SELECT dept_name, COUNT(bonus) FROM instructor GROUP BY dept_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s5_count_null_sensitivity_00"
+      },
+      "student_sql": "SELECT dept_name, COUNT(*) FROM instructor GROUP BY dept_name",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_TOP_LEVEL_DEDUP",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S5_TOP_LEVEL_DEDUP",
+      "id": "teach_s5_top_level_dedup_00",
+      "question": "每个院系名称只输出一次",
+      "reference_sql": "SELECT DISTINCT dept_name FROM instructor WHERE salary > -10",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s5_top_level_dedup_00"
+      },
+      "student_sql": "SELECT dept_name FROM instructor WHERE salary > -10",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_TOP_LEVEL_DEDUP",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S5_TOP_LEVEL_DEDUP",
+      "id": "teach_s5_top_level_dedup_01",
+      "question": "每个院系名称只输出一次",
+      "reference_sql": "SELECT DISTINCT dept_name FROM instructor WHERE salary > -1",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s5_top_level_dedup_01"
+      },
+      "student_sql": "SELECT dept_name FROM instructor WHERE salary > -1",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S6_TOPN_WITHOUT_ORDER",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S6_TOPN_WITHOUT_ORDER",
+      "id": "teach_s6_topn_without_order_00",
+      "question": "按工资确定顺序后截取前若干名",
+      "reference_sql": "SELECT i_name, salary FROM instructor ORDER BY salary DESC, i_id ASC LIMIT 1",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s6_topn_without_order_00"
+      },
+      "student_sql": "SELECT i_name, salary FROM instructor LIMIT 1",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S6_TOPN_WITHOUT_ORDER",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S6_TOPN_WITHOUT_ORDER",
+      "id": "teach_s6_topn_without_order_01",
+      "question": "按工资确定顺序后截取前若干名",
+      "reference_sql": "SELECT i_name, salary FROM instructor ORDER BY salary DESC, i_id ASC LIMIT 2",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "strict_s6_topn_without_order_01"
+      },
+      "student_sql": "SELECT i_name, salary FROM instructor LIMIT 2",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S6_ORDER_OFFSET",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S6_ORDER_OFFSET",
+      "id": "teach_isolated_offset_00",
+      "question": "检查 OFFSET 是否选择了题目要求的结果位置",
+      "reference_sql": "SELECT i_name FROM instructor ORDER BY salary DESC, i_id ASC LIMIT 1 OFFSET 0",
+      "source": {
+        "generator": "sqlite_phase12_isolation_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "isolated_offset_00"
+      },
+      "student_sql": "SELECT i_name FROM instructor ORDER BY salary DESC, i_id ASC LIMIT 1 OFFSET 1",
+      "suite": "teaching_core"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S6_ORDER_OFFSET",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S6_ORDER_OFFSET",
+      "id": "teach_isolated_offset_01",
+      "question": "检查 OFFSET 是否选择了题目要求的结果位置",
+      "reference_sql": "SELECT i_name FROM instructor ORDER BY salary DESC, i_id ASC LIMIT 1 OFFSET 1",
+      "source": {
+        "generator": "sqlite_phase12_isolation_matrix",
+        "kind": "synthetic_targeted",
+        "original_case_id": "isolated_offset_01"
+      },
+      "student_sql": "SELECT i_name FROM instructor ORDER BY salary DESC, i_id ASC LIMIT 1 OFFSET 2",
+      "suite": "teaching_core"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "CORRELATED_SUBQUERY",
+      "id": "phase1_correlated_subquery_001",
+      "question": "相关列交叉与内层过滤边界",
+      "reference_sql": "SELECT name FROM student s WHERE EXISTS (SELECT 1 FROM takes t WHERE t.ID = s.ID AND t.year = 2021);",
+      "schema_text": "student(ID, name, dept_name); takes(ID, course_id, year)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 1,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT name FROM student s WHERE EXISTS (SELECT 1 FROM takes t WHERE t.ID = s.ID AND t.year = 2022);",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S1_OUTER_JOIN_MISUSE",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "LEFT_JOIN",
+      "id": "phase1_left_join_002",
+      "question": "无匹配右表行",
+      "reference_sql": "SELECT student.name, takes.course_id FROM student LEFT JOIN takes ON student.ID = takes.ID;",
+      "schema_text": "student(ID, name, dept_name); takes(ID, course_id)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 2,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT student.name, takes.course_id FROM student INNER JOIN takes ON student.ID = takes.ID;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "candidate_rule": "S6_RESULT_SHAPING_MISMATCH",
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "LIMIT_OFFSET",
+      "id": "phase1_limit_offset_003",
+      "question": "LIMIT/OFFSET 行数边界",
+      "reference_sql": "SELECT title FROM course ORDER BY credits DESC LIMIT 1 OFFSET 1;",
+      "schema_text": "course(course_id, title, dept_name, credits)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 3,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT title FROM course ORDER BY credits DESC LIMIT 3 OFFSET 1;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "HAVING_AGG",
+      "id": "phase1_having_agg_004",
+      "question": "MAX 聚合三态边界",
+      "reference_sql": "SELECT dept_name FROM instructor GROUP BY dept_name HAVING MAX(salary) > 90000;",
+      "schema_text": "instructor(ID, name, dept_name, salary)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 4,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT dept_name FROM instructor GROUP BY dept_name HAVING MAX(salary) < 90000;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_NULL_LOGIC",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "NULL",
+      "id": "phase1_null_006",
+      "question": "NULL 与非 NULL 数据",
+      "reference_sql": "SELECT name FROM student WHERE dept_name IS NULL;",
+      "schema_text": "student(ID, name, dept_name)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 6,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT name FROM student WHERE dept_name = NULL;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S4_AGG_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "HAVING_COUNT",
+      "id": "phase1_having_count_007",
+      "question": "COUNT 组大小边界",
+      "reference_sql": "SELECT dept_name FROM student GROUP BY dept_name HAVING COUNT(*) >= 4;",
+      "schema_text": "student(ID, name, dept_name, tot_cred)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 7,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT dept_name FROM student GROUP BY dept_name HAVING COUNT(*) > 4;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_TOP_LEVEL_DEDUP",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "SET_OPERATOR",
+      "id": "phase1_set_operator_009",
+      "question": "交集与并集差异",
+      "reference_sql": "SELECT title FROM course WHERE dept_name = 'Math' INTERSECT SELECT title FROM course WHERE credits > 1;",
+      "schema_text": "course(course_id, title, dept_name, credits)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 9,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT title FROM course WHERE dept_name = 'Math' UNION SELECT title FROM course WHERE credits > 1;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S6_ORDER_OFFSET",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "ORDER_BY",
+      "id": "phase1_order_by_015",
+      "question": "有序精确比较",
+      "reference_sql": "SELECT title, credits FROM course ORDER BY credits ASC;",
+      "schema_text": "course(course_id, title, dept_name, credits)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 15,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT title, credits FROM course ORDER BY credits DESC;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_TOP_LEVEL_DEDUP",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "DISTINCT",
+      "id": "phase1_distinct_016",
+      "question": "重复投影行",
+      "reference_sql": "SELECT DISTINCT course_id FROM takes;",
+      "schema_text": "takes(ID, course_id, sec_id, semester, year, grade)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 16,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT course_id FROM takes;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S3_GRAIN_ENTITY_MISMATCH",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "GROUP_BY",
+      "id": "phase1_group_by_018",
+      "question": "分组键替换",
+      "reference_sql": "SELECT dept_name, SUM(salary) FROM instructor GROUP BY dept_name;",
+      "schema_text": "instructor(ID, name, dept_name, salary, building)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 18,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT dept_name, SUM(salary) FROM instructor GROUP BY building;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "SELECT",
+      "id": "phase1_select_019",
+      "question": "投影列数、顺序或表达式不一致",
+      "reference_sql": "SELECT credits * 2 FROM course WHERE credits > 5;",
+      "schema_text": "course(course_id, title, dept_name, credits)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 19,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT credits FROM course WHERE credits > 5;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "SUBQUERY",
+      "id": "phase1_subquery_020",
+      "question": "父子表 ID 值域重合",
+      "reference_sql": "SELECT name FROM student WHERE ID IN (SELECT ID FROM takes WHERE year = 2021);",
+      "schema_text": "student(ID, name, dept_name); takes(ID, course_id, year)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 20,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT name FROM student WHERE ID NOT IN (SELECT ID FROM takes WHERE year = 2021);",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "WHERE",
+      "id": "phase1_where_021",
+      "question": "比较符边界 c-1/c/c+1",
+      "reference_sql": "SELECT title FROM course WHERE credits > 29;",
+      "schema_text": "course(course_id, title, dept_name, credits)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 21,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT title FROM course WHERE credits >= 29;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S1_CARTESIAN_PRODUCT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "JOIN_TOPOLOGY",
+      "id": "phase1_join_topology_024",
+      "question": "笛卡尔积与拓扑连接",
+      "reference_sql": "SELECT student.name, course.title FROM student JOIN takes ON student.ID = takes.ID JOIN course ON takes.course_id = course.course_id;",
+      "schema_text": "student(ID, name, dept_name); takes(ID, course_id); course(course_id, title, dept_name)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 24,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT student.name, course.title FROM student, takes, course;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "WINDOW",
+      "id": "phase1_window_044",
+      "question": "窗口分区遗漏",
+      "reference_sql": "SELECT name, ROW_NUMBER() OVER (PARTITION BY dept_name ORDER BY salary DESC) AS rn FROM instructor;",
+      "schema_text": "instructor(ID, name, dept_name, salary)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 44,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT name, ROW_NUMBER() OVER (ORDER BY salary DESC) AS rn FROM instructor;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "CASE_WHEN",
+      "id": "phase1_case_when_048",
+      "question": "CASE WHEN 分支边界",
+      "reference_sql": "SELECT category, SUM(CASE WHEN amount > 91 THEN amount ELSE 0 END) FROM sales GROUP BY category;",
+      "schema_text": "sales(sale_id, category, amount)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 48,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT category, SUM(CASE WHEN amount >= 91 THEN amount ELSE 0 END) FROM sales GROUP BY category;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "RECURSIVE_CTE",
+      "id": "phase1_recursive_cte_067",
+      "question": "递归终止边界",
+      "reference_sql": "WITH RECURSIVE nums AS (SELECT 1 AS n UNION ALL SELECT n + 1 AS n FROM nums WHERE n < 5) SELECT n FROM nums;",
+      "schema_text": "dummy(id)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 67,
+        "seed": 20260825
+      },
+      "student_sql": "WITH RECURSIVE nums AS (SELECT 1 AS n UNION ALL SELECT n + 1 AS n FROM nums WHERE n < 7) SELECT n FROM nums;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "CTE",
+      "id": "phase1_cte_068",
+      "question": "CTE 基表约束传递",
+      "reference_sql": "WITH co AS (SELECT company_name FROM company WHERE city = 'Shanghai') SELECT person_name FROM works JOIN co ON works.company_name = co.company_name WHERE salary > 9925;",
+      "schema_text": "works(company_name, person_name, salary); company(company_name, city)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 68,
+        "seed": 20260825
+      },
+      "student_sql": "WITH co AS (SELECT company_name FROM company WHERE city = 'Shanghai') SELECT person_name FROM works JOIN co ON works.company_name = co.company_name WHERE salary < 9925;",
+      "suite": "phase1_operator"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "UNCLASSIFIED_SUPPORTED_DIFF",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "JOIN_DRIFT",
+      "id": "phase1_join_drift_082",
+      "question": "s_ID/i_ID 同组键错位",
+      "reference_sql": "SELECT student.name FROM student JOIN advisor ON student.ID = advisor.s_ID;",
+      "schema_text": "student(ID, name, dept_name); advisor(s_ID, i_ID)",
+      "source": {
+        "dataset": "e2e_robustness_fuzzer",
+        "kind": "generated_regression",
+        "original_index": 82,
+        "seed": 20260825
+      },
+      "student_sql": "SELECT student.name FROM student JOIN advisor ON student.ID = advisor.i_ID;",
+      "suite": "phase1_operator"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "BETWEEN_EXPANSION",
+      "id": "equiv_between_expansion_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT course_id FROM course WHERE credits BETWEEN -10 AND 0",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_between_expansion_00"
+      },
+      "student_sql": "SELECT course_id FROM course WHERE credits >= -10 AND credits <= 0",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "EQUALITY_COMMUTATION",
+      "id": "equiv_equality_commutation_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT s.s_name FROM student s JOIN takes t ON s.s_id = t.s_id",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_equality_commutation_00"
+      },
+      "student_sql": "SELECT s.s_name FROM student s JOIN takes t ON t.s_id = s.s_id",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "AND_COMMUTATION",
+      "id": "equiv_and_commutation_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT i_id FROM instructor WHERE salary > -10 AND dept_name = 'CS'",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_and_commutation_00"
+      },
+      "student_sql": "SELECT i_id FROM instructor WHERE dept_name = 'CS' AND salary > -10",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "IN_TO_OR",
+      "id": "equiv_in_to_or_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT i_id FROM instructor WHERE dept_name IN ('CS', 'Math')",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_in_to_or_00"
+      },
+      "student_sql": "SELECT i_id FROM instructor WHERE dept_name = 'CS' OR dept_name = 'Math'",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "NOT_EQUAL",
+      "id": "equiv_not_equal_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT i_id FROM instructor WHERE NOT salary = -10",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_not_equal_00"
+      },
+      "student_sql": "SELECT i_id FROM instructor WHERE salary <> -10",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "COUNT_CONSTANT",
+      "id": "equiv_count_constant_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT dept_name, COUNT(*) FROM instructor GROUP BY dept_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_count_constant_00"
+      },
+      "student_sql": "SELECT dept_name, COUNT(1) FROM instructor GROUP BY dept_name",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "EXISTS_PROJECTION",
+      "id": "equiv_exists_projection_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT s_name FROM student s WHERE EXISTS (SELECT 1 FROM takes t WHERE t.s_id = s.s_id)",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_exists_projection_00"
+      },
+      "student_sql": "SELECT s_name FROM student s WHERE EXISTS (SELECT * FROM takes t WHERE t.s_id = s.s_id)",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "CTE_INLINE",
+      "id": "equiv_cte_inline_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "WITH picked AS (SELECT course_id FROM course WHERE credits > -10) SELECT course_id FROM picked",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_cte_inline_00"
+      },
+      "student_sql": "SELECT course_id FROM course WHERE credits > -10",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "DISTINCT_GROUP",
+      "id": "equiv_distinct_group_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT DISTINCT dept_name FROM instructor",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_distinct_group_00"
+      },
+      "student_sql": "SELECT dept_name FROM instructor GROUP BY dept_name",
+      "suite": "equivalent_control"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "allowed_conclusions": [
+          "NO_COUNTEREXAMPLE_FOUND",
+          "UNDECIDED"
+        ],
+        "allowed_phase1_statuses": [
+          "SUPPORTED",
+          "KNOWN_GAP"
+        ],
+        "allowed_phase2_verdicts": [
+          "CORRECT",
+          "UNDECIDED"
+        ],
+        "forbid_conclusion": "NOT_EQUIVALENT",
+        "kind": "equivalent_control",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "WHERE_GROUP_KEY_TO_HAVING",
+      "id": "equiv_where_group_key_to_having_00",
+      "question": "等价查询对照：不得产生错误反例",
+      "reference_sql": "SELECT dept_name, AVG(salary) FROM instructor WHERE dept_name = 'CS' GROUP BY dept_name",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_equivalence_control",
+        "original_case_id": "equiv_where_group_key_to_having_00"
+      },
+      "student_sql": "SELECT dept_name, AVG(salary) FROM instructor GROUP BY dept_name HAVING dept_name = 'CS'",
+      "suite": "equivalent_control"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_BOUNDARY",
+      "id": "public_01_34ae20d203797537ef5b",
+      "question": "",
+      "reference_sql": "SELECT First_Name, Last_Name FROM Employees WHERE Salary > ( SELECT Salary FROM Employees WHERE Employee_ID = 163 );",
+      "schema_text": "Employees(Employee_ID, First_Name, Last_Name, Salary)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "SQL-Exercises",
+        "online_labels": [
+          "SELECT",
+          "Subquery",
+          "WHERE"
+        ],
+        "original_id": "online_random250_34ae20d203797537ef5b",
+        "original_index": 10,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/amirai31/SQL-Exercises/blob/main/SQL_nested%20queries.sql"
+      },
+      "student_sql": "SELECT First_Name, Last_Name FROM Employees WHERE Salary >= ( SELECT Salary FROM Employees WHERE Employee_ID = 163 );",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S6_ORDER_OFFSET",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S6_ORDER_OFFSET",
+      "id": "public_02_d248ac3e3920a13db22d",
+      "question": "",
+      "reference_sql": "SELECT Author, COUNT(BookID) AS Total_Books FROM Books GROUP BY Author ORDER BY Total_Books DESC;",
+      "schema_text": "Books(BookID, Author, Total_Books)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "SQL-Exercises",
+        "online_labels": [
+          "Aggregate",
+          "GROUP BY",
+          "ORDER BY",
+          "SELECT"
+        ],
+        "original_id": "online_random250_d248ac3e3920a13db22d",
+        "original_index": 11,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/amirai31/SQL-Exercises/blob/main/SQL%20-%20Group%20BY%2C%20HAVING%2C%20ORDER%20BY.sql"
+      },
+      "student_sql": "SELECT Author, COUNT(BookID) AS Total_Books FROM Books GROUP BY Author ORDER BY Total_Books ASC;",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_TOP_LEVEL_DEDUP",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S5_TOP_LEVEL_DEDUP",
+      "id": "public_03_579951c0ebc4fe5accb0",
+      "question": "",
+      "reference_sql": "with recursive cte as ( select emp_id, emp_name, manager_id from employees where manager_id is null union all select e.emp_id, e.emp_name, e.manager_id from employees e join cte c on e.manager_id = c.emp_id ) select emp_id, emp_name, manager_id, case when emp_id in (select manager_id from cte ) then 'no' else 'yes' end as is_leaf_employee from cte;",
+      "schema_text": "employees(emp_id, manager_id, emp_name)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "Advanced SQL Practice MySQL",
+        "online_labels": [
+          "CASE",
+          "CTE",
+          "JOIN ON",
+          "Recursive CTE",
+          "SELECT",
+          "Set Operation",
+          "Subquery",
+          "WHERE"
+        ],
+        "original_id": "online_random250_579951c0ebc4fe5accb0",
+        "original_index": 22,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/santoshkhatri9860/advanced-sql-practice-mysql/blob/main/archive/00_original_everything.sql"
+      },
+      "student_sql": "with recursive cte as ( select emp_id, emp_name, manager_id from employees where manager_id is null UNION select e.emp_id, e.emp_name, e.manager_id from employees e join cte c on e.manager_id = c.emp_id ) select emp_id, emp_name, manager_id, case when emp_id in (select manager_id from cte ) then 'no' else 'yes' end as is_leaf_employee from cte;",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S4_AGG_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S4_AGG_BOUNDARY",
+      "id": "public_04_52244f0d8742a626f549",
+      "question": "",
+      "reference_sql": "SELECT class FROM courses GROUP BY class HAVING COUNT(DISTINCT student) >= 5;",
+      "schema_text": "courses(class, student)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "LeetCode SQL Summary",
+        "online_labels": [
+          "Aggregate",
+          "GROUP BY",
+          "HAVING",
+          "SELECT"
+        ],
+        "original_id": "online_random250_52244f0d8742a626f549",
+        "original_index": 36,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/siqichen-usc/LeetCode-SQL-Summary/blob/master/Basics/596_Classes_More_Than_5_Students.sql"
+      },
+      "student_sql": "SELECT class FROM courses GROUP BY class HAVING COUNT(DISTINCT student) > 5;",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S3_GRAIN_ENTITY_MISMATCH",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S3_GRAIN_ENTITY_MISMATCH",
+      "id": "public_05_35fcb00f070edf2dc5cb",
+      "question": "",
+      "reference_sql": "WITH CategoryTotalAmount AS ( SELECT category, SUM(amount) AS total_amount FROM expenses GROUP BY category ORDER BY total_amount DESC LIMIT 1 ) SELECT E.expense_id, E.category, E.amount FROM expenses E JOIN CategoryTotalAmount C ON E.category = C.category;",
+      "schema_text": "expenses(expense_id, amount, category, total_amount)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "SQL-Exercises",
+        "online_labels": [
+          "Aggregate",
+          "CTE",
+          "GROUP BY",
+          "JOIN ON",
+          "LIMIT / OFFSET",
+          "ORDER BY",
+          "SELECT",
+          "Subquery"
+        ],
+        "original_id": "online_random250_35fcb00f070edf2dc5cb",
+        "original_index": 37,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/amirai31/SQL-Exercises/blob/main/SQL_Window%20functions%20and%20CTEs.sql"
+      },
+      "student_sql": "WITH CategoryTotalAmount AS (SELECT category, SUM(amount) AS total_amount FROM expenses GROUP BY '__group_probe__' ORDER BY total_amount DESC LIMIT 1) SELECT E.expense_id, E.category, E.amount FROM expenses AS E JOIN CategoryTotalAmount AS C ON E.category = C.category",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S6_TOPN_WITHOUT_ORDER",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S6_TOPN_WITHOUT_ORDER",
+      "id": "public_06_966824015f9920e894d7",
+      "question": "",
+      "reference_sql": "SELECT a FROM b UNION SELECT x FROM y LIMIT 10;",
+      "schema_text": "b(a); y(x)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "PostgreSQL set-operation documentation",
+        "online_labels": [
+          "LIMIT / OFFSET",
+          "SELECT",
+          "Set Operation"
+        ],
+        "original_id": "online_random250_966824015f9920e894d7",
+        "original_index": 39,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://www.postgresql.org/docs/current/queries-union.html"
+      },
+      "student_sql": "SELECT a FROM b UNION SELECT x FROM y LIMIT 11;",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S5_TOP_LEVEL_DEDUP",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S5_TOP_LEVEL_DEDUP",
+      "id": "public_07_d536297b4249f3bdfe55",
+      "question": "",
+      "reference_sql": "SELECT product_id, product_name FROM Product WHERE product_id IN ( SELECT product_id FROM Sales WHERE sale_date BETWEEN '2019-01-01' AND '2019-03-31' EXCEPT SELECT product_id FROM Sales WHERE NOT sale_date BETWEEN '2019-01-01' AND '2019-03-31' );",
+      "schema_text": "Product(product_id, product_name); Sales(product_id, sale_date)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "LeetCode SQL Summary",
+        "online_labels": [
+          "SELECT",
+          "Set Operation",
+          "Subquery",
+          "WHERE"
+        ],
+        "original_id": "online_random250_d536297b4249f3bdfe55",
+        "original_index": 49,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/siqichen-usc/LeetCode-SQL-Summary/blob/master/Questions_by_ID/1084_Sales_Analysis_III.sql"
+      },
+      "student_sql": "SELECT product_id, product_name FROM Product WHERE product_id IN ( SELECT product_id FROM Sales WHERE sale_date BETWEEN '2019-01-01' AND '2019-03-31' UNION SELECT product_id FROM Sales WHERE NOT sale_date BETWEEN '2019-01-01' AND '2019-03-31' );",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "primary_rule": "S2_BOUNDARY",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S2_BOUNDARY",
+      "id": "public_08_102599d63f95838c7a80",
+      "question": "",
+      "reference_sql": "SELECT First_Name, Last_Name FROM Employees E1 WHERE salary > ( SELECT (SUM(salary)) * 0.5 FROM Employees E2 WHERE E1.Department_ID = E2.Department_ID );",
+      "schema_text": "Employees(Department_ID, First_Name, Last_Name, salary)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "SQL-Exercises",
+        "online_labels": [
+          "Aggregate",
+          "Correlated Subquery",
+          "SELECT",
+          "Subquery",
+          "WHERE"
+        ],
+        "original_id": "online_random250_102599d63f95838c7a80",
+        "original_index": 53,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/amirai31/SQL-Exercises/blob/main/SQL_nested%20queries.sql"
+      },
+      "student_sql": "SELECT First_Name, Last_Name FROM Employees E1 WHERE salary >= ( SELECT (SUM(salary)) * 0.5 FROM Employees E2 WHERE E1.Department_ID = E2.Department_ID );",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "S4_GROUP_FILTER_MISMATCH",
+      "id": "public_09_1e0a4ddb8e0aec06065a",
+      "question": "",
+      "reference_sql": "SELECT ord_date, SUM(purch_amt) FROM orders a GROUP BY ord_date HAVING SUM(purch_amt) > (SELECT MAX(purch_amt) + 1000 FROM orders b WHERE a.ord_date = b.ord_date);",
+      "schema_text": "orders(ord_date, purch_amt)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "w3resource SQL Exercises mirror",
+        "online_labels": [
+          "Aggregate",
+          "Correlated Subquery",
+          "GROUP BY",
+          "HAVING",
+          "SELECT",
+          "Subquery",
+          "WHERE"
+        ],
+        "original_id": "online_random250_1e0a4ddb8e0aec06065a",
+        "original_index": 1,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/tweichle/w3resource-SQL-Exercises/blob/master/SQL%20Exercises%20-%20SUBQUERIES%20on%20Sales%20Database.sql"
+      },
+      "student_sql": "SELECT ord_date, SUM(purch_amt) FROM orders a GROUP BY ord_date HAVING SUM(purch_amt) >= (SELECT MAX(purch_amt) + 1000 FROM orders b WHERE a.ord_date = b.ord_date);",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "UNCLASSIFIED_SUPPORTED_DIFF",
+      "id": "public_10_fb5d1a3bbd6ad10185e4",
+      "question": "",
+      "reference_sql": "With tb1 AS ( SELECT employee_id FROM Employees WHERE manager_id = 1 AND employee_id != manager_id ), tb2 AS ( SELECT employee_id FROM Employees WHERE manager_id IN (SELECT * FROM tb1) ), tb3 AS ( SELECT employee_id FROM Employees WHERE manager_id IN (SELECT * FROM tb2) ) SELECT * FROM tb1 UNION SELECT * FROM tb2 UNION SELECT * FROM tb3;",
+      "schema_text": "Employees(employee_id, manager_id)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "LeetCode SQL Summary",
+        "online_labels": [
+          "CTE",
+          "SELECT",
+          "Set Operation",
+          "Subquery",
+          "WHERE"
+        ],
+        "original_id": "online_random250_fb5d1a3bbd6ad10185e4",
+        "original_index": 2,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/siqichen-usc/LeetCode-SQL-Summary/blob/master/Questions_by_ID/1270_All_People_Report_to_the_Given_Manager.sql"
+      },
+      "student_sql": "With tb1 AS ( SELECT employee_id FROM Employees WHERE manager_id = 1 AND employee_id = manager_id ), tb2 AS ( SELECT employee_id FROM Employees WHERE manager_id IN (SELECT * FROM tb1) ), tb3 AS ( SELECT employee_id FROM Employees WHERE manager_id IN (SELECT * FROM tb2) ) SELECT * FROM tb1 UNION SELECT * FROM tb2 UNION SELECT * FROM tb3;",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "UNCLASSIFIED_SUPPORTED_DIFF",
+      "id": "public_11_41bdf22cc750f04e74f5",
+      "question": "",
+      "reference_sql": "WITH RankedSales AS ( SELECT region, order_date, revenue, ROW_NUMBER() OVER (PARTITION BY region ORDER BY revenue DESC) AS row_num FROM sales ) SELECT region, order_date, revenue FROM RankedSales WHERE row_num <= 3 ORDER BY region, row_num;",
+      "schema_text": "sales(order_date, region, revenue)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "SQL-Exercises",
+        "online_labels": [
+          "CTE",
+          "ORDER BY",
+          "SELECT",
+          "Subquery",
+          "WHERE",
+          "Window"
+        ],
+        "original_id": "online_random250_41bdf22cc750f04e74f5",
+        "original_index": 5,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/amirai31/SQL-Exercises/blob/main/SQL_Window%20functions%20and%20CTEs.sql"
+      },
+      "student_sql": "WITH RankedSales AS ( SELECT region, order_date, revenue, ROW_NUMBER() OVER ( ORDER BY revenue DESC) AS row_num FROM sales ) SELECT region, order_date, revenue FROM RankedSales WHERE row_num <= 3 ORDER BY region, row_num;",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "expectation": {
+        "conclusion": "NOT_EQUIVALENT",
+        "kind": "diagnostic",
+        "minimum_primary_grade": "REPAIR_VERIFIED",
+        "phase1_status": "SUPPORTED",
+        "phase2_verdict": "INCORRECT",
+        "require_phase1_witness": true,
+        "require_phase2_evidence": true,
+        "require_primary": true,
+        "require_repair": true,
+        "require_safe_hints": true
+      },
+      "family": "UNCLASSIFIED_SUPPORTED_DIFF",
+      "id": "public_12_dce98294767e12067dfc",
+      "question": "",
+      "reference_sql": "SELECT first_name, last_name, hire_date FROM employees WHERE department_id = (SELECT department_id FROM employees WHERE first_name = 'Clara') AND first_name != 'Clara';",
+      "schema_text": "employees(department_id, first_name, hire_date, last_name)",
+      "source": {
+        "dataset": "online_random250",
+        "kind": "public_reference_synthetic_mutation",
+        "name": "w3resource SQL Exercises mirror",
+        "online_labels": [
+          "SELECT",
+          "Subquery",
+          "WHERE"
+        ],
+        "original_id": "online_random250_dce98294767e12067dfc",
+        "original_index": 6,
+        "student_generation_method": "deterministic_mutation",
+        "url": "https://github.com/tweichle/w3resource-SQL-Exercises/blob/master/SQL%20Exercises%20-%20SUBQUERIES%20on%20HR%20Database.sql"
+      },
+      "student_sql": "SELECT first_name, last_name, hire_date FROM employees WHERE department_id = (SELECT department_id FROM employees WHERE first_name = 'Clara') AND first_name = 'Clara';",
+      "suite": "public_reference_mutation"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "UNDECIDED",
+        "kind": "fail_closed",
+        "phase1_status": "INPUT_GAP",
+        "phase2_verdict": "UNDECIDED",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "REFERENCE_MULTI",
+      "id": "safety_multi_statement",
+      "question": "",
+      "reference_sql": "SELECT course_id FROM course; SELECT title FROM course",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_safety",
+        "original_case_id": "safe_multi_statement"
+      },
+      "student_sql": "SELECT course_id FROM course WHERE credits > 3",
+      "suite": "fail_closed"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "UNDECIDED",
+        "kind": "fail_closed",
+        "phase1_status": "INPUT_GAP",
+        "phase2_verdict": "UNDECIDED",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "REFERENCE_DELETE",
+      "id": "safety_delete_reference",
+      "question": "",
+      "reference_sql": "DELETE FROM course",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_safety",
+        "original_case_id": "safe_delete_reference"
+      },
+      "student_sql": "SELECT course_id FROM course WHERE credits > 3",
+      "suite": "fail_closed"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "UNDECIDED",
+        "kind": "fail_closed",
+        "phase1_status": "INPUT_GAP",
+        "phase2_verdict": "UNDECIDED",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "REFERENCE_PRAGMA",
+      "id": "safety_pragma_reference",
+      "question": "",
+      "reference_sql": "PRAGMA table_info(course)",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_safety",
+        "original_case_id": "safe_pragma_reference"
+      },
+      "student_sql": "SELECT course_id FROM course WHERE credits > 3",
+      "suite": "fail_closed"
+    },
+    {
+      "context_id": "academic_sqlite",
+      "expectation": {
+        "conclusion": "UNDECIDED",
+        "kind": "fail_closed",
+        "phase1_status": "INPUT_GAP",
+        "phase2_verdict": "UNDECIDED",
+        "require_primary": false,
+        "require_safe_hints": true
+      },
+      "family": "REFERENCE_MALFORMED",
+      "id": "safety_malformed_reference",
+      "question": "",
+      "reference_sql": "SELECT FROM course WHERE",
+      "source": {
+        "generator": "sqlite_phase12_targeted_matrix",
+        "kind": "synthetic_safety",
+        "original_case_id": "safe_malformed_reference"
+      },
+      "student_sql": "SELECT course_id FROM course WHERE credits > 3",
+      "suite": "fail_closed"
+    }
+  ],
+  "contexts": {
+    "academic_sqlite": {
+      "schema_catalog": {
+        "db_id": "academic_sqlite",
+        "source": "targeted_matrix_declared_catalog",
+        "tables": [
+          {
+            "columns": [
+              {
+                "data_type": "INTEGER",
+                "name": "s_id",
+                "nullable": false,
+                "type": "INTEGER"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "s_name",
+                "nullable": false,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "dept_name",
+                "nullable": true,
+                "type": "TEXT"
+              }
+            ],
+            "name": "student",
+            "primary_key": [
+              "s_id"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "data_type": "INTEGER",
+                "name": "s_id",
+                "nullable": false,
+                "type": "INTEGER"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "course_id",
+                "nullable": false,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "semester",
+                "nullable": true,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "grade",
+                "nullable": true,
+                "type": "TEXT"
+              }
+            ],
+            "foreign_keys": [
+              {
+                "column": "s_id",
+                "columns": [
+                  "s_id"
+                ],
+                "references_column": "s_id",
+                "references_columns": [
+                  "s_id"
+                ],
+                "references_table": "student"
+              },
+              {
+                "column": "course_id",
+                "columns": [
+                  "course_id"
+                ],
+                "references_column": "course_id",
+                "references_columns": [
+                  "course_id"
+                ],
+                "references_table": "course"
+              }
+            ],
+            "name": "takes"
+          },
+          {
+            "columns": [
+              {
+                "data_type": "TEXT",
+                "name": "course_id",
+                "nullable": false,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "title",
+                "nullable": false,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "dept_name",
+                "nullable": true,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "INTEGER",
+                "name": "credits",
+                "nullable": true,
+                "type": "INTEGER"
+              }
+            ],
+            "name": "course",
+            "primary_key": [
+              "course_id"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "data_type": "INTEGER",
+                "name": "i_id",
+                "nullable": false,
+                "type": "INTEGER"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "i_name",
+                "nullable": false,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "dept_name",
+                "nullable": true,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "INTEGER",
+                "name": "salary",
+                "nullable": true,
+                "type": "INTEGER"
+              },
+              {
+                "data_type": "INTEGER",
+                "name": "bonus",
+                "nullable": true,
+                "type": "INTEGER"
+              }
+            ],
+            "name": "instructor",
+            "primary_key": [
+              "i_id"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "data_type": "TEXT",
+                "name": "dept_name",
+                "nullable": false,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "TEXT",
+                "name": "building",
+                "nullable": true,
+                "type": "TEXT"
+              },
+              {
+                "data_type": "INTEGER",
+                "name": "budget",
+                "nullable": true,
+                "type": "INTEGER"
+              }
+            ],
+            "name": "department",
+            "primary_key": [
+              "dept_name"
+            ]
+          }
+        ]
+      },
+      "schema_text": "student(s_id INTEGER PRIMARY KEY, s_name TEXT NOT NULL, dept_name TEXT);\ntakes(s_id INTEGER, course_id TEXT, semester TEXT, grade TEXT);\ncourse(course_id TEXT PRIMARY KEY, title TEXT, dept_name TEXT, credits INTEGER);\ninstructor(i_id INTEGER PRIMARY KEY, i_name TEXT, dept_name TEXT, salary INTEGER, bonus INTEGER);\ndepartment(dept_name TEXT PRIMARY KEY, building TEXT, budget INTEGER)"
+    }
+  },
+  "declared_counts": {
+    "equivalent_control": 10,
+    "fail_closed": 4,
+    "phase1_operator": 19,
+    "public_reference_mutation": 12,
+    "teaching_core": 34
+  },
+  "engine": "sqlite",
+  "format_version": 1,
+  "name": "sqlite_phase12_verified",
+  "provenance": {
+    "generated_source_sha256": "b477fa0f7c0fe0995e83416704fe936b37f9262d7def4d4758eff1a23daee1cf",
+    "public_source_sha256": "d08a98506f2a52b3b60eefd91bc75d320d01c348dcb54b188f1eb42f1b8d9f2b",
+    "selection_inputs_are_not_required_at_runtime": true
+  },
+  "purpose": "Curated regression data for the complete SQLite Phase1+Phase2 diagnostic pipeline; this is not an unbiased effectiveness benchmark.",
+  "selection_policy": {
+    "criteria": [
+      "deduplicate exact schema/reference/student triples",
+      "cover every Phase1 operator family represented by the generated source",
+      "cover one or two distinct exact-primary examples for each currently verified teaching rule",
+      "include ten operational-equivalence controls",
+      "include twelve native-SQLite public-reference cases with synthetic student mutations",
+      "include four fail-closed safety inputs",
+      "require prior witness, repair, and hint-safety verification for diagnostic cases"
+    ],
+    "known_rule_exclusions": {
+      "S1_MISSING_BRIDGE": "candidate detected but not reliably ranked as primary",
+      "S5_FANOUT_AGGREGATE": "no distinguishing witness in the targeted matrix"
+    }
+  }
+}
