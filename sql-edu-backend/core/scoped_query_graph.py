@@ -27,8 +27,8 @@ from typing import Any
 
 SCHEMA_VERSION = "phase2.scoped-query-graph.v1"
 
-# These are relational execution stages, not a claim that every SQL dialect is
-# reducible to one flat six-step query.  Every scope exposes all 14 slots so
+# These are relational execution stages, not a claim that every query is
+# reducible to one flat six-step pipeline. Every scope exposes every slot so
 # downstream serialization has a stable shape even when most slots are empty.
 LOGICAL_STAGE_ORDER: tuple[str, ...] = (
     "PRECHECK",
@@ -38,7 +38,6 @@ LOGICAL_STAGE_ORDER: tuple[str, ...] = (
     "GROUP_AGG",
     "GROUP_FILTER",
     "WINDOW",
-    "QUALIFY",
     "PROJECTION",
     "DISTINCT",
     "SET_OP",
@@ -58,7 +57,6 @@ COMPOSITION_EDGE_TYPES = frozenset(
         "SUBQUERY_OF",
         "CORRELATED_TO",
         "SET_MEMBER_OF",
-        "LATERAL_TO",
     }
 )
 
@@ -205,7 +203,6 @@ class _ScopeAccumulator:
     )
     explicitly_declared: bool = False
     correlated: bool = False
-    lateral: bool = False
     sides: set[str] = field(default_factory=set)
     conceptual_scope_ids: set[str] = field(default_factory=set)
     upstream_complete: bool = True
@@ -416,13 +413,13 @@ def _logical_stage(metadata: Mapping[str, Any]) -> str:
         metadata.get("clause") or metadata.get("clause_category")
     )
     diff_type = str(metadata.get("diff_type") or "").lower()
-    if clause in {"PRECHECK", "SYNTAX", "SECURITY", "DIALECT"}:
+    if clause in {"PRECHECK", "SYNTAX", "SECURITY", "UNSUPPORTED"}:
         return "PRECHECK"
     if clause.startswith("CTE") or "cte_" in diff_type:
         return "CTE_PRODUCER"
-    if clause in {"FROM", "JOIN", "JOIN_ON", "LATERAL"} or any(
+    if clause in {"FROM", "JOIN", "JOIN_ON"} or any(
         token in diff_type
-        for token in ("join_", "from_source", "lateral_", "correlated_")
+        for token in ("join_", "from_source", "correlated_")
     ):
         return "SOURCE_JOIN"
     if clause in {"WHERE", "PREDICATE", "IN", "CORRELATED_SUBQUERY"}:
@@ -433,16 +430,14 @@ def _logical_stage(metadata: Mapping[str, Any]) -> str:
         return "GROUP_FILTER"
     if clause == "WINDOW" or "window" in diff_type:
         return "WINDOW"
-    if clause == "QUALIFY" or "qualify" in diff_type:
-        return "QUALIFY"
     if clause == "DISTINCT" or diff_type == "distinct_changed":
         return "DISTINCT"
     if clause in {"UNION", "INTERSECT", "EXCEPT", "SET", "SET_OP"} or diff_type.startswith("set_"):
         return "SET_OP"
     if clause in {"ORDER", "ORDER_BY"} or diff_type.startswith("order_"):
         return "ROOT_ORDER"
-    if clause in {"LIMIT", "OFFSET", "FETCH", "TOP"} or any(
-        token in diff_type for token in ("limit_", "offset_", "fetch_", "top_")
+    if clause in {"LIMIT", "OFFSET"} or any(
+        token in diff_type for token in ("limit_", "offset_")
     ):
         return "PAGINATION"
     if clause in {"SELECT", "PROJECTION", "CASE"} or any(
@@ -593,7 +588,6 @@ def _edge_payloads(metadata: Mapping[str, Any], evidence_ref: str) -> list[dict[
         ("correlated_to_scope", "CORRELATED_TO"),
         ("set_parent_scope_id", "SET_MEMBER_OF"),
         ("set_parent_scope", "SET_MEMBER_OF"),
-        ("lateral_to_scope_id", "LATERAL_TO"),
     )
     for field_name, edge_type in relation_fields:
         target = _identifier(metadata.get(field_name))
@@ -804,7 +798,6 @@ def _kind_from_edge(edge_type: str, endpoint: str) -> str | None:
             "DERIVED_FEEDS": "DERIVED",
             "SUBQUERY_OF": "SUBQUERY",
             "SET_MEMBER_OF": "SET_BRANCH",
-            "LATERAL_TO": "DERIVED",
         }.get(edge_type)
     return None
 
@@ -967,7 +960,6 @@ def build_scoped_query_graph(
         *,
         declared: bool = False,
         correlated: bool = False,
-        lateral: bool = False,
         side: str = "",
         conceptual_scope_id: str = "",
         upstream_complete: bool = True,
@@ -979,7 +971,6 @@ def build_scoped_query_graph(
             accumulator.kinds.add(kind)
         accumulator.explicitly_declared |= declared
         accumulator.correlated |= correlated
-        accumulator.lateral |= lateral
         if side:
             accumulator.sides.add(side)
         if conceptual_scope_id:
@@ -1014,7 +1005,6 @@ def build_scoped_query_graph(
             _scope_kind(declaration, scope_id),
             declared=True,
             correlated=declaration.get("is_correlated") is True,
-            lateral=declaration.get("is_lateral") is True,
             side=declaration_side,
             conceptual_scope_id=declaration_conceptual_scope_id,
             upstream_complete=(
@@ -1294,9 +1284,6 @@ def build_scoped_query_graph(
             scope_complete = False
         if accumulator.correlated and "CORRELATED_TO" not in present:
             limitations.add(f"explicit correlation target missing for scope {scope_id}")
-            scope_complete = False
-        if accumulator.lateral and "LATERAL_TO" not in present:
-            limitations.add(f"explicit lateral target missing for scope {scope_id}")
             scope_complete = False
         if kind != "ROOT" and not required_edges and scope_id not in referenced_edges:
             limitations.add(

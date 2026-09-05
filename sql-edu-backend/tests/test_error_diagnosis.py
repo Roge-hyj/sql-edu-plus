@@ -585,7 +585,7 @@ def test_ordered_pipeline_is_stable_under_diff_input_permutation_and_keeps_scope
     assert one == two
     assert [item["diff_id"] for item in one] == ["cte_where", "sub_group", "root_order"]
     assert {item["scope_id"] for item in one} == {"cte:recent", "subquery:1", "root"}
-    assert len(LOGICAL_STAGE_ORDER) == 14
+    assert len(LOGICAL_STAGE_ORDER) == 13
 
 
 def test_missing_query_scope_remains_unscoped_with_explicit_limitation():

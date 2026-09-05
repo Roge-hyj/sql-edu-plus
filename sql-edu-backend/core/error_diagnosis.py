@@ -46,7 +46,6 @@ LOGICAL_STAGE_ORDER: tuple[str, ...] = (
     "GROUP_AGG",
     "GROUP_FILTER",
     "WINDOW",
-    "QUALIFY",
     "PROJECTION",
     "DISTINCT",
     "SET_OP",
@@ -364,7 +363,7 @@ def _normalize_scope(raw: Any) -> tuple[str, str, bool]:
         return text, "CTE", inferred
     if text.startswith(("set", "union", "intersect", "except", "branch")):
         return text, "SET_BRANCH", inferred
-    if text.startswith(("derived", "lateral")):
+    if text.startswith("derived"):
         return text, "DERIVED", inferred
     return text, "EXTENSION", inferred
 
@@ -376,7 +375,7 @@ def _logical_stage(clause: str, diff_type: str, mutation_clause: str = "") -> tu
         return "CTE_PRODUCER", "S1"
     if kind == "null_sensitive_antijoin_equivalence" and clause_key == "WHERE":
         return "ROW_FILTER", "S2"
-    if clause_key in {"FROM", "JOIN", "JOIN ON", "ON", "SUBQUERY", "LATERAL"} or any(
+    if clause_key in {"FROM", "JOIN", "JOIN ON", "ON", "SUBQUERY"} or any(
         token in kind for token in ("join_", "from_source", "subquery_", "correlated_")
     ):
         return "SOURCE_JOIN", "S1"
@@ -395,15 +394,13 @@ def _logical_stage(clause: str, diff_type: str, mutation_clause: str = "") -> tu
         return "GROUP_AGG", "S3"
     if clause_key == "WINDOW" or "window" in kind:
         return "WINDOW", "S5"
-    if clause_key == "QUALIFY" or "qualify" in kind:
-        return "QUALIFY", "S5"
     if clause_key == "DISTINCT" or kind == "distinct_changed":
         return "DISTINCT", "S5"
     if clause_key in {"UNION", "INTERSECT", "EXCEPT", "SET"} or kind.startswith("set_"):
         return "SET_OP", "EXTENSION"
     if clause_key in {"ORDER", "ORDER BY"} or kind.startswith("order_"):
         return "ROOT_ORDER", "S6"
-    if clause_key in {"LIMIT", "OFFSET", "FETCH", "TOP"} or kind in {"limit_changed", "offset_changed"}:
+    if clause_key in {"LIMIT", "OFFSET"} or kind in {"limit_changed", "offset_changed"}:
         return "PAGINATION", "S6"
     if clause_key in {"SELECT", "PROJECTION", "CASE", "AGGREGATION"} or any(
         token in kind for token in ("projection", "column_", "star_", "alias_", "case_", "aggregate_", "function_argument")
@@ -1220,7 +1217,7 @@ def _rule_for_diff(
 
     # Preserve supported advanced differences without pretending they belong
     # to one of the 20 MVP families.
-    if stage in {"SET_OP", "WINDOW", "QUALIFY", "CTE_PRODUCER"}:
+    if stage in {"SET_OP", "WINDOW", "CTE_PRODUCER"}:
         return "UNCLASSIFIED_SUPPORTED_DIFF"
     if (
         kind in {"where_changed", "predicate_missing", "predicate_added"}
@@ -1579,7 +1576,7 @@ def _detect_candidates(
             )
 
     student_sql = evidence.student_sql
-    has_limit = bool(re.search(r"\b(LIMIT|FETCH|TOP)\b", student_sql, flags=re.IGNORECASE))
+    has_limit = bool(re.search(r"\bLIMIT\b", student_sql, flags=re.IGNORECASE))
     has_order = bool(re.search(r"\bORDER\s+BY\b", student_sql, flags=re.IGNORECASE))
     shaping_diffs = [
         item for item in usable_diffs if item.logical_stage in {"ROOT_ORDER", "PAGINATION"}

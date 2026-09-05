@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections import Counter, defaultdict
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
-from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 import re
 import sqlite3
 from typing import Any
@@ -18,7 +17,6 @@ from .regex_support import (
     glob_matches,
     like_matches,
     regex_matches,
-    similar_to_matches,
 )
 
 
@@ -91,10 +89,8 @@ def _column_name(rows: list[dict[str, Any]], requested: str) -> str | None:
     if not rows:
         return None
     # Obligation metadata stores SQL fragments, so a simple column argument
-    # may retain its source-dialect quoting (``"amount"``, `` `amount` `` or
-    # ``[amount]``).  Resolve the physical witness column by its identifier
-    # rather than treating the quoted fragment as a literal name.  This keeps
-    # aggregate NULL-path validation faithful for quoted teaching schemas.
+    # may retain one of SQLite's accepted identifier quote forms. Resolve the
+    # physical witness column rather than treating that fragment as a name.
     requested = str(requested or "").strip()
     if len(requested) >= 2 and requested[0] == requested[-1] and requested[0] in {'"', "`", "["}:
         requested = requested[1:-1]
@@ -124,19 +120,6 @@ def _sql_extreme_order_key(value: Any) -> tuple[Any, ...]:
     if isinstance(value, (bytes, bytearray, memoryview)):
         return 2, bytes(value)
     return 3, type(value).__name__, repr(value)
-
-
-def _join_candidate_columns(left_rows: list[dict[str, Any]], right_rows: list[dict[str, Any]], preferred: str = "") -> list[tuple[str, str]]:
-    if not left_rows or not right_rows:
-        return []
-    left_names = {name.lower(): name for name in left_rows[0]}
-    right_names = {name.lower(): name for name in right_rows[0]}
-    common = set(left_names) & set(right_names)
-    ordered = []
-    if preferred.lower() in common:
-        ordered.append(preferred.lower())
-    ordered.extend(sorted(common - {item[0].lower() for item in ordered}))
-    return [(left_names[name], right_names[name]) for name in ordered]
 
 
 def _join_value_key(value: Any) -> tuple[str, Any] | None:
@@ -612,82 +595,11 @@ def _execute_sqlite_diagnostic(
     connection = sqlite3.connect(":memory:")
     progress_calls = 0
 
-    def _number_to_str(*values: Any) -> str | None:
-        """Cover SQLGlot's SQLite lowering of MySQL ``FORMAT``.
+    def sql_regexp(pattern: Any, value: Any) -> int | None:
+        matched = regex_matches(pattern, value)
+        return None if matched is None else int(matched)
 
-        Set-operator validators execute individual branches directly instead
-        of going through the main ParseVal adapter.  Register the same small
-        deterministic compatibility surface here so a branch containing
-        ``FORMAT`` is diagnosed semantically rather than rejected as an
-        unsupported SQLite function.
-        """
-        if len(values) < 2 or values[0] is None or values[1] is None:
-            return None
-        try:
-            places = int(values[1])
-            if places < 0:
-                return None
-            number = Decimal(str(values[0]))
-            if not number.is_finite():
-                return None
-            quantizer = Decimal(1).scaleb(-places)
-            with localcontext() as context:
-                context.rounding = ROUND_HALF_UP
-                rounded = number.quantize(quantizer)
-            return format(rounded, f",.{places}f")
-        except (InvalidOperation, TypeError, ValueError):
-            return None
-
-    def _coerce_date(value: Any) -> date | None:
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        text = str(value).strip()
-        for parser in (
-            lambda item: datetime.fromisoformat(item.replace("Z", "+00:00")).date(),
-            lambda item: datetime.strptime(item, "%d-%b-%y").date(),
-            lambda item: datetime.strptime(item, "%Y/%m/%d").date(),
-        ):
-            try:
-                return parser(text)
-            except (TypeError, ValueError):
-                continue
-        return None
-
-    def _date_diff(left: Any, right: Any) -> int | None:
-        start, end = _coerce_date(left), _coerce_date(right)
-        if start is None or end is None:
-            return None
-        return (start - end).days
-
-    # Keep this registry deliberately small and deterministic.  These are
-    # compatibility functions used by diagnostics, not a second SQL engine.
-    connection.create_function("NUMBER_TO_STR", -1, _number_to_str)
-    connection.create_function("FORMAT", -1, _number_to_str)
-    connection.create_function(
-        "CONCAT",
-        -1,
-        lambda *values: "".join("" if value is None else str(value) for value in values),
-    )
-    connection.create_function(
-        "LEFT",
-        2,
-        lambda value, size: str(value or "")[: max(0, int(size or 0))],
-    )
-    connection.create_function(
-        "RIGHT",
-        2,
-        lambda value, size: str(value or "")[-max(0, int(size or 0)) :],
-    )
-    connection.create_function("LEN", 1, lambda value: len(str(value or "")))
-    connection.create_function("STR_TO_DATE", 2, lambda value, _format: value)
-    connection.create_function("DATEDIFF", 2, _date_diff)
-    connection.create_function("YEAR", 1, lambda value: (_coerce_date(value) or date.min).year)
-    connection.create_function("MONTH", 1, lambda value: (_coerce_date(value) or date.min).month)
-    connection.create_function("DAY", 1, lambda value: (_coerce_date(value) or date.min).day)
+    connection.create_function("REGEXP", 2, sql_regexp)
 
     def _abort_large_diagnostic() -> int:
         nonlocal progress_calls
@@ -870,7 +782,7 @@ def _validate_scalar_subquery_boundary(
         exp.alias_(outer_projection, "__outer_boundary_value"),
         exp.alias_(boundary_projection, "__scalar_boundary_value"),
     ])
-    for key in ("order", "limit", "offset", "qualify", "distinct"):
+    for key in ("order", "limit", "offset", "distinct"):
         diagnostic.set(key, None)
     diagnostic.set(
         "limit",
@@ -935,7 +847,7 @@ def _filtered_aggregate_diagnostic_sql(sql: str) -> tuple[str, list[str]] | None
         [item.copy() for item in group.expressions]
         + [exp.alias_(aggregate.copy(), "__witness_count")],
     )
-    for key in ("order", "limit", "offset", "qualify", "distinct"):
+    for key in ("order", "limit", "offset", "distinct"):
         diagnostic.set(key, None)
     diagnostic.set(
         "limit",
@@ -1146,7 +1058,7 @@ def _validate_joined_aggregate_boundary(
         group_expressions
         + [exp.alias_(aggregate.copy(), "__witness_aggregate")],
     )
-    for key in ("having", "order", "limit", "offset", "qualify", "distinct"):
+    for key in ("having", "order", "limit", "offset", "distinct"):
         diagnostic.set(key, None)
     diagnostic.set(
         "limit",
@@ -1741,7 +1653,7 @@ def _validate_window_paths(world: Any, obligation: DistinguishingObligation) -> 
 
     standard_function = str(metadata.get("standard_window_function") or "").upper()
     student_function = str(metadata.get("student_window_function") or "").upper()
-    # The third serialized order-item flag includes the dialect's implicit
+    # The third serialized order-item flag includes SQLGlot's implicit SQLite
     # NULL placement.  ASC and DESC therefore commonly produce different
     # flags even when neither query contains an explicit ``NULLS`` clause.
     # Such a derived difference belongs to the direction witness, not to a
@@ -2363,12 +2275,12 @@ def _evaluate_predicate(node: exp.Expression, row: dict[str, Any]) -> Any:
         return None if None in candidates else False
     if isinstance(node, exp.Escape):
         inner = node.this
-        if isinstance(inner, (exp.Like, exp.ILike)):
+        if isinstance(inner, exp.Like):
             inner = inner.copy()
             inner.set("escape", node.expression)
             return _evaluate_predicate(inner, row)
         return _UNSUPPORTED_TRUTH_VALUE
-    if isinstance(node, (exp.Like, exp.ILike)):
+    if isinstance(node, exp.Like):
         value = _predicate_scalar_value(node.this, row)
         pattern = _literal_value(node.expression)
         if _UNSUPPORTED_TRUTH_VALUE in (value, pattern):
@@ -2383,7 +2295,7 @@ def _evaluate_predicate(node: exp.Expression, row: dict[str, Any]) -> Any:
                 pattern,
                 value,
                 escape=str(escape),
-                case_insensitive=isinstance(node, exp.ILike),
+                case_insensitive=False,
             )
         except RegexEvaluationError:
             return _UNSUPPORTED_TRUTH_VALUE
@@ -2394,11 +2306,10 @@ def _evaluate_predicate(node: exp.Expression, row: dict[str, Any]) -> Any:
             else _literal_value(node.this)
         )
         pattern = _literal_value(node.expression)
-        flag = _literal_value(node.args.get("flag"))
         if _UNSUPPORTED_TRUTH_VALUE in (value, pattern):
             return _UNSUPPORTED_TRUTH_VALUE
         try:
-            return regex_matches(pattern, value, flags=str(flag or ""))
+            return regex_matches(pattern, value)
         except RegexEvaluationError:
             return _UNSUPPORTED_TRUTH_VALUE
     return _UNSUPPORTED_TRUTH_VALUE
@@ -2467,8 +2378,8 @@ def _validate_boolean_truth_table(world: Any, obligation: DistinguishingObligati
     )
     execution_atomic_fallback = False
     if not satisfied and unsupported_rows:
-        # A dialect-owned predicate or quoted identifier can be opaque to the
-        # row-level evaluator even though the exact atomic replacement test
+        # A predicate outside the bounded row-level evaluator can still be
+        # covered when the exact atomic replacement test
         # executed successfully. Tie this fallback to the same diff and a
         # distinguished pair; a bare output difference is insufficient.
         attempt = _latest_execution_attempt(world)
@@ -2613,45 +2524,20 @@ def _validate_set_query_paths(
     student_sql = str(context.get("student_sql") or "")
     if not standard_sql or not student_sql:
         return None
-    parsed_pair: tuple[exp.Expression, exp.Expression, str] | None = None
-    candidates = [(standard_sql, student_sql, "sqlite", "executable_sql")]
-    source_standard = str(context.get("standard_source_sql") or "")
-    source_student = str(context.get("student_source_sql") or "")
-    if source_standard and source_student:
-        candidates.append((
-            source_standard,
-            source_student,
-            str(context.get("sql_dialect") or "sqlite"),
-            "source_sql",
-        ))
-    for candidate_standard, candidate_student, read_dialect, source in candidates:
-        try:
-            candidate_standard_ast = parse_one(
-                candidate_standard,
-                read=read_dialect,
-            )
-            candidate_student_ast = parse_one(
-                candidate_student,
-                read=read_dialect,
-            )
-        except Exception:
-            continue
-        if isinstance(
-            _set_operation_node(candidate_standard_ast),
-            (exp.Union, exp.Intersect, exp.Except),
-        ) and isinstance(
-            _set_operation_node(candidate_student_ast),
-            (exp.Union, exp.Intersect, exp.Except),
-        ):
-            parsed_pair = (
-                candidate_standard_ast,
-                candidate_student_ast,
-                source,
-            )
-            break
-    if parsed_pair is None:
+    try:
+        standard_ast = parse_one(standard_sql, read="sqlite")
+        student_ast = parse_one(student_sql, read="sqlite")
+    except Exception:
         return None
-    standard_ast, student_ast, validation_source = parsed_pair
+    if not isinstance(
+        _set_operation_node(standard_ast),
+        (exp.Union, exp.Intersect, exp.Except),
+    ) or not isinstance(
+        _set_operation_node(student_ast),
+        (exp.Union, exp.Intersect, exp.Except),
+    ):
+        return None
+    validation_source = "executable_sql"
     standard_node = _set_operation_node(standard_ast)
     student_node = _set_operation_node(student_ast)
     with_node = (
@@ -3534,77 +3420,6 @@ def _validate_glob_pattern_separation(
     }, [] if satisfied else ["glob_separating_value_missing"]
 
 
-def _validate_similar_pattern_separation(
-    world: Any,
-    obligation: DistinguishingObligation,
-) -> tuple[bool, dict[str, Any], list[str]]:
-    spec = next(
-        (
-            item
-            for item in obligation.hard_constraints
-            if item.kind == "similar_pattern_separation"
-        ),
-        None,
-    )
-    if spec is None or not spec.relation or not spec.column:
-        return False, {}, ["similar_pattern_constraint_missing"]
-    metadata = dict(spec.metadata)
-    standard_pattern = metadata.get("standard_pattern")
-    student_pattern = metadata.get("student_pattern")
-    if not isinstance(standard_pattern, str) or not isinstance(
-        student_pattern, str
-    ):
-        return False, {}, ["similar_pattern_metadata_missing"]
-    standard_escape = metadata.get("standard_escape")
-    student_escape = metadata.get("student_escape")
-    if not isinstance(standard_escape, str):
-        standard_escape = "\\"
-    if not isinstance(student_escape, str):
-        student_escape = "\\"
-    values = _values(world, spec.relation, spec.column)
-    evaluations: list[dict[str, Any]] = []
-    try:
-        for index, value in enumerate(values):
-            standard = similar_to_matches(
-                standard_pattern,
-                value,
-                escape=standard_escape,
-            )
-            student = similar_to_matches(
-                student_pattern,
-                value,
-                escape=student_escape,
-            )
-            evaluations.append({
-                "row_index": index,
-                "value": value,
-                "standard_matches": standard,
-                "student_matches": student,
-                "distinguishes": (
-                    standard is not None
-                    and student is not None
-                    and standard != student
-                ),
-            })
-    except RegexEvaluationError as exc:
-        return False, {
-            "relation": spec.relation,
-            "column": spec.column,
-            "standard_pattern": standard_pattern,
-            "student_pattern": student_pattern,
-        }, [f"similar_evaluation_failed:{exc}"]
-    satisfied = any(item["distinguishes"] for item in evaluations)
-    return satisfied, {
-        "relation": spec.relation,
-        "column": spec.column,
-        "standard_pattern": standard_pattern,
-        "student_pattern": student_pattern,
-        "standard_escape": standard_escape,
-        "student_escape": student_escape,
-        "evaluations": evaluations[:8],
-    }, [] if satisfied else ["similar_separating_value_missing"]
-
-
 def _validate_null_safe_comparison_paths(
     world: Any,
     obligation: DistinguishingObligation,
@@ -4048,44 +3863,6 @@ def _validate_duplicate(world: Any, obligation: DistinguishingObligation) -> tup
     }, [] if duplicates else ["duplicate_projection_not_materialized"]
 
 
-def _validate_distinct_on_competing_payload(
-    world: Any,
-    obligation: DistinguishingObligation,
-) -> tuple[bool, dict[str, Any], list[str]]:
-    spec = next(
-        (
-            item
-            for item in obligation.hard_constraints
-            if item.kind == "distinct_on_competing_payload"
-        ),
-        None,
-    )
-    if spec is None or not spec.relation or not spec.column:
-        return False, {}, ["distinct_on_constraint_missing_columns"]
-    rows = _table_rows(world, spec.relation)
-    key_columns = tuple(dict(spec.metadata).get("key_columns") or ())
-    if len(rows) < 2 or not key_columns:
-        return False, {}, ["distinct_on_key_or_rows_missing"]
-    payload = _column_name(rows, spec.column)
-    keys = [_column_name(rows, str(column)) for column in key_columns]
-    if payload is None or any(column is None for column in keys):
-        return False, {}, ["distinct_on_columns_not_materialized"]
-    groups: dict[tuple[Any, ...], set[Any]] = {}
-    for row in rows:
-        key = tuple(row.get(column) for column in keys if column is not None)
-        groups.setdefault(key, set()).add(row.get(payload))
-    competing = {
-        repr(key): sorted(values, key=str)[:8]
-        for key, values in groups.items()
-        if len(values) >= 2
-    }
-    return bool(competing), {
-        "key_columns": [str(column) for column in key_columns],
-        "payload_column": payload,
-        "competing_payloads": competing,
-    }, [] if competing else ["distinct_on_competing_payload_missing"]
-
-
 def _validate_projection_discriminator(world: Any, obligation: DistinguishingObligation) -> tuple[bool, dict[str, Any], list[str]]:
     spec = next(
         (item for item in obligation.hard_constraints if item.kind == "observable_projection_discriminator"),
@@ -4405,8 +4182,6 @@ def validate_obligation(
         validators.append(_validate_like_pattern_separation)
     if "glob_pattern_separation" in kinds:
         validators.append(_validate_glob_pattern_separation)
-    if "similar_pattern_separation" in kinds:
-        validators.append(_validate_similar_pattern_separation)
     if "boolean_truth_table" in kinds:
         validators.append(_validate_boolean_truth_table)
     if "set_left_right_overlap" in kinds:
@@ -4429,8 +4204,6 @@ def validate_obligation(
         validators.append(_validate_null_predicate_paths)
     if "duplicate_projected_tuple" in kinds:
         validators.append(_validate_duplicate)
-    if "distinct_on_competing_payload" in kinds:
-        validators.append(_validate_distinct_on_competing_payload)
     if "observable_projection_discriminator" in kinds:
         validators.append(_validate_projection_discriminator)
     if "projection_shape_paths" in kinds:

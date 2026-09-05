@@ -272,7 +272,7 @@ class SchemaCatalog:
         }
 
     def as_legacy_types(self) -> dict[str, dict[str, str]]:
-        """Render safe per-column hints for existing fixture backends.
+        """Render safe per-column hints for existing fixture generation.
 
         Composite constraints stay in ``TableSchema`` because representing a
         composite key as several column-level ``PRIMARY KEY`` declarations is
@@ -338,10 +338,9 @@ class SchemaQualification:
     catalog: SchemaCatalog | None = None
 
 
-def _parse_single_query(sql: str, dialect: str | None) -> tuple[exp.Expression | None, str | None]:
-    parse_dialect = None if not dialect or str(dialect).startswith("__") else dialect
+def _parse_single_query(sql: str) -> tuple[exp.Expression | None, str | None]:
     try:
-        statements = sqlglot.parse(sql, read=parse_dialect)
+        statements = sqlglot.parse(sql, read="sqlite")
     except Exception as exc:  # noqa: BLE001 - qualification reports parse boundaries.
         return None, f"sql_parse_failed: {exc}"
     statements = [
@@ -396,11 +395,6 @@ def _direct_subquery_aliases(select: exp.Select) -> set[str]:
             alias = _norm(subquery.alias_or_name)
             if alias:
                 aliases.add(alias)
-    for lateral in select.find_all(exp.Lateral):
-        if _nearest_select(lateral) is select:
-            alias = _norm(lateral.alias_or_name)
-            if alias:
-                aliases.add(alias)
     return aliases
 
 
@@ -419,52 +413,32 @@ def _schema_index(
 def _sqlite_double_quoted_literal_fallback(
     column: exp.Column,
     *,
-    dialect: str | None,
     candidates: list[str],
 ) -> bool:
-    """Recognize SQLite's legacy DQS fallback without weakening other dialects.
+    """Recognize SQLite's legacy double-quoted-string fallback.
 
     SQLite resolves ``"name"`` as an identifier when such a column is
     visible, but accepts it as a string literal when identifier resolution
     fails. Spider contains this historical SQLite spelling for values such as
     ``"Orange"``. Qualification must mirror that runtime rule; otherwise the
     safety pass invents a missing physical column before SQLite can execute
-    the query. PostgreSQL and other identifier-only dialects remain strict.
+    the query.
     """
 
-    normalized_dialect = str(dialect or "").strip().lower()
     identifier = column.this
     return bool(
-        normalized_dialect == "sqlite"
-        and not column.table
+        not column.table
         and not candidates
         and isinstance(identifier, exp.Identifier)
         and identifier.args.get("quoted")
     )
 
 
-def _dialect_pseudo_columns(dialect: str | None) -> set[str]:
-    """Return engine-generated names that are not physical schema columns.
-
-    Oracle's ``ROWNUM`` is evaluated by the engine for every row and therefore
-    must not be reported as a missing column during the pre-fixture safety
-    pass.  Keeping this list dialect-specific prevents the qualification layer
-    from weakening ordinary identifier checks in other engines.
-    """
-
-    normalized = str(dialect or "").strip().lower()
-    if normalized == "oracle":
-        return {"rownum"}
-    return set()
-
-
 def analyze_schema_qualification(
     sql: str,
     schema: dict[str, list[str]] | SchemaCatalog,
-    *,
-    dialect: str | None = None,
 ) -> SchemaQualification:
-    root, boundary = _parse_single_query(sql, dialect)
+    root, boundary = _parse_single_query(sql)
     if root is None:
         return SchemaQualification([], set(), set(), set(), False, boundary)
 
@@ -480,7 +454,6 @@ def analyze_schema_qualification(
     scope_ids = {id(select): f"scope_{index}" for index, select in enumerate(selects)}
     cte_names = _visible_cte_names(root)
     schema_names, schema_columns = _schema_index(catalog)
-    pseudo_columns = _dialect_pseudo_columns(dialect)
     scopes: list[QueryScope] = []
     all_physical: set[str] = set()
     missing_tables: set[str] = set()
@@ -496,7 +469,8 @@ def analyze_schema_qualification(
         )
         relation_aliases: dict[str, str] = {}
         # Names introduced by the projection are query-local symbols. They
-        # are valid in ORDER BY/HAVING/QUALIFY in several supported dialects
+        # are valid in SQLite ORDER BY/HAVING and must not be mistaken for
+        # physical columns during qualification.
         # and must not be mistaken for physical columns during qualification.
         projected_names = {
             _norm(expression.alias)
@@ -544,10 +518,6 @@ def analyze_schema_qualification(
                 continue
             qualifier = _norm(column.table)
             column_name = _norm(column.name)
-            if not qualifier and column_name in pseudo_columns:
-                # Engine-generated pseudo columns (currently Oracle ROWNUM)
-                # have no physical schema entry but are valid in native SQL.
-                continue
             relation = relation_aliases.get(qualifier, qualifier)
             candidates: list[str] = []
             if not qualifier:
@@ -568,7 +538,6 @@ def analyze_schema_qualification(
                     relation = _norm(candidates[0])
                 if _sqlite_double_quoted_literal_fallback(
                     column,
-                    dialect=dialect,
                     candidates=candidates,
                 ):
                     # This AST node is a value under SQLite's DQS fallback,
@@ -629,6 +598,6 @@ def _ancestors(node: exp.Expression) -> Iterable[exp.Expression]:
         parent = parent.parent
 
 
-def extract_physical_table_names(sql: str, *, dialect: str | None = None) -> set[str]:
-    qualification = analyze_schema_qualification(sql, {}, dialect=dialect)
+def extract_physical_table_names(sql: str) -> set[str]:
+    qualification = analyze_schema_qualification(sql, {})
     return qualification.physical_tables

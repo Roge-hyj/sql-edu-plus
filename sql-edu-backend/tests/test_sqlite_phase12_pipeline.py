@@ -66,6 +66,31 @@ def test_boundary_error_runs_phase1_then_phase2_with_repair_verified_evidence():
     assert result.phase2.witness["cases"]
 
 
+def test_cross_join_topology_repair_restores_the_missing_on_dependency():
+    result = run_pipeline(
+        schema_text=(
+            "instructor(id INTEGER, dept_name TEXT); "
+            "department(dept_name TEXT, building TEXT)"
+        ),
+        reference_sql=(
+            "SELECT i.id, d.building FROM instructor AS i "
+            "JOIN department AS d ON i.dept_name = d.dept_name"
+        ),
+        student_sql=(
+            "SELECT i.id, d.building FROM instructor AS i, department AS d"
+        ),
+    )
+
+    assert result.phase1.equivalence_conclusion == "NOT_EQUIVALENT"
+    assert result.phase1.mutation_evidence["summary"]["fixed_by_replacement"] >= 1
+    assert result.phase2.primary is not None
+    assert result.phase2.primary.rule_id == "S1_CARTESIAN_PRODUCT"
+    assert result.phase2.primary.evidence_grade in {
+        "REPAIR_VERIFIED",
+        "CAUSAL_VERIFIED",
+    }
+
+
 def test_progressive_hints_disclose_one_primary_slot_at_a_time_without_answer_sql():
     result = run_pipeline(
         schema_text=SCHEMA,

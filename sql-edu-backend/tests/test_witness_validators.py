@@ -5,7 +5,6 @@ import pytest
 from core.witness_generation.regex_support import (
     glob_matches,
     like_matches,
-    similar_to_matches,
 )
 from core.witness_generation.validators import validate_obligation
 from core.witness_generation.obligations import ConstraintSpec, DistinguishingObligation
@@ -1430,15 +1429,3 @@ def test_bounded_glob_matching_supports_wildcards_and_character_classes():
 def test_bounded_glob_matching_rejects_unbounded_input():
     with pytest.raises(ValueError, match="glob_pattern_too_long"):
         glob_matches("a" * 257, "a")
-
-
-def test_bounded_similar_to_matching_supports_sql_wildcards_and_regex_ops():
-    assert similar_to_matches("a%", "abc") is True
-    assert similar_to_matches("a|b", "a") is True
-    assert similar_to_matches("a|b", "ab") is False
-    assert similar_to_matches("[ab]%", "bar") is True
-
-
-def test_bounded_similar_to_matching_rejects_unbounded_input():
-    with pytest.raises(ValueError, match="similar_pattern_too_long"):
-        similar_to_matches("a" * 257, "a")

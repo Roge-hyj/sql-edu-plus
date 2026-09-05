@@ -26,12 +26,36 @@ Phase1 没有反例时只给出 `NO_COUNTEREXAMPLE_FOUND`，不声称证明了�
 
 ## 保留范围
 
-- Phase1：`ast_schema.py`、`parseval_data_generator.py`、`phase1_verdict.py` 与 `witness_generation/`。
+- Phase1：轻量 AST diff 契约、八层单向实现、bounded verdict 与 witness 子系统。
 - Phase2：`error_diagnosis.py`、`phase2_schema_catalog.py`、`scoped_query_graph.py`。
 - 最小编排入口：`pipeline.py`。
 - SQLite-only 回归、Phase2 规则、查询作用域、schema catalog、witness validator 测试。
 
 本仓库不包含原生 MySQL/PostgreSQL/T-SQL/Oracle 执行器、多方言路由、学生历史/BKT、Phase3–5、Web 前端、LLM 服务、实验大输出或数据库驱动。
+
+## Phase1 代码架构
+
+原 `parseval_data_generator.py` 已收敛为约 25 行的兼容 facade，公开 API 保持不变。实际实现按依赖方向拆成八层，每层只能引用其下方模块，单文件硬上限为 5,000 行：
+
+```text
+phase1_engine.py                    public orchestration / witness selection
+        ↓
+phase1_evidence.py                  SQLite execution / mutation evidence
+        ↓
+phase1_witness_materialization.py   final bounded witness stabilization
+        ↓
+phase1_witness_strategies.py        targeted witness strategies / scope evidence
+        ↓
+phase1_query_paths.py               relational reachability / query paths
+        ↓
+phase1_constraints.py               AST differences / SQLite boundary catalog
+        ↓
+phase1_sql_semantics.py             schema, values, narrow equivalence rules
+        ↓
+phase1_foundation.py                contracts, limits, SQLite parsing primitives
+```
+
+`witness_generation/` 提供 obligation、planner、schema qualification 和执行后 validator；`ast_schema.py` 只保留各层共享的 `ASTDiffNode` 数据契约。
 
 ## 安装与验证
 
@@ -68,6 +92,9 @@ learner_payload = result.learner_hint(level=1)
 - 最多 8 个 witness worlds、每个 world 最多 8 次尝试、每表最多 32 行。
 - SQLite VM 指令预算为 1,000,000，单次执行时间预算为 0.5 秒。
 - 只接受单条查询，执行数据库位于内存中；非 SQLite 后端调用会直接失败。
+- SQLGlot 的读取、规范化和输出均固定为 SQLite；不会尝试推断或转换其他方言。
+- TOP、QUALIFY、LATERAL、DISTINCT ON 等已知非 SQLite 语法在执行前返回有界 `KNOWN_GAP`。
+- SQLite 连接只注册一个带超时和长度上限的 `REGEXP` 回调，不伪造其他数据库函数。
 - learner payload 不包含参考 SQL、修复 SQL、完整 witness 数据库或次级候选链。
 
 详细接口约束见 [`contracts/phase12-contract.md`](contracts/phase12-contract.md)。

@@ -50,7 +50,7 @@ def _quoted_numeric_identifier_names(*values: Any) -> set[str]:
 
     The generic teaching corpus can spell a schema column such as ``2007``
     without identifier quotes.  The execution path repairs that spelling to
-    ``"2007"`` so every parser/backend sees the same column.  Stable evidence
+    ``"2007"`` so the SQLite parser and executor see the same column. Stable evidence
     IDs must treat that representation-only repair as the same source
     identity, while leaving unrelated double-quoted text untouched.
     """
@@ -207,64 +207,6 @@ def _inferred_target_column(diff: ASTDiffNode) -> str:
     return ""
 
 
-def _distinct_on_context(diff: ASTDiffNode) -> dict[str, Any]:
-    """Recover the physical key/payload pair behind a DISTINCT ON diff.
-
-    ``DISTINCT ON`` is represented by the modifier node itself, so the AST
-    diff has no ordinary target column.  The witness, however, needs two
-    rows with the same ON key and different selected payload.  Deriving that
-    pair here keeps the obligation, planner and validator on the same
-    evidence path instead of treating it as a generic projection change.
-    """
-    node = next(
-        (
-            item
-            for item in (diff.standard_node, diff.student_node)
-            if isinstance(item, exp.Distinct) and item.args.get("on") is not None
-            or isinstance(item, exp.Tuple)
-        ),
-        None,
-    )
-    if not isinstance(node, (exp.Distinct, exp.Tuple)):
-        return {}
-    on = node.args.get("on") if isinstance(node, exp.Distinct) else node
-    select = node.parent
-    while select is not None and not isinstance(select, exp.Select):
-        select = select.parent
-    if not isinstance(select, exp.Select):
-        return {}
-    key_nodes = on.expressions if isinstance(on, exp.Tuple) else (on,)
-    key_columns = [
-        str(item.name).lower()
-        for expression in key_nodes
-        for item in ([expression] if isinstance(expression, exp.Column) else expression.find_all(exp.Column))
-        if isinstance(item, exp.Column) and item.name
-    ]
-    if not key_columns:
-        return {}
-    payload_column = next(
-        (
-            str(column.name).lower()
-            for expression in select.expressions or ()
-            for column in (
-                [expression]
-                if isinstance(expression, exp.Column)
-                else expression.find_all(exp.Column)
-            )
-            if isinstance(column, exp.Column)
-            and column.name
-            and str(column.name).lower() not in key_columns
-        ),
-        "",
-    )
-    from_clause = select.args.get("from_") or select.args.get("from")
-    source = from_clause.this if isinstance(from_clause, exp.From) else None
-    relation = str(source.name).lower() if isinstance(source, exp.Table) else ""
-    return {
-        "source_table": relation,
-        "key_columns": tuple(key_columns),
-        "payload_column": payload_column,
-    }
 
 
 def _column_refs(
@@ -365,7 +307,7 @@ def _simple_in_exists_metadata(diff: ASTDiffNode) -> dict[str, str] | None:
             select.args.get(key) is not None
             for key in (
                 "joins", "group", "having", "order", "limit", "offset",
-                "qualify", "distinct", "with", "with_",
+                "distinct", "with", "with_",
             )
         ):
             return None
@@ -416,7 +358,7 @@ def _simple_in_exists_metadata(diff: ASTDiffNode) -> dict[str, str] | None:
             select.args.get(key) is not None
             for key in (
                 "where", "joins", "group", "having", "order", "limit", "offset",
-                "qualify", "distinct", "with", "with_",
+                "distinct", "with", "with_",
             )
         ):
             return None
@@ -667,24 +609,6 @@ def _constraint_templates(
                 for key in (
                     "standard_pattern",
                     "student_pattern",
-                    "standard_query_sql",
-                    "student_query_sql",
-                )
-                if diff.extra.get(key) is not None
-            ),
-        )], 3, 2
-    if diff_type == "similar_pattern_changed":
-        return [ConstraintSpec(
-            "similar_pattern_separation",
-            relation,
-            column,
-            metadata=tuple(
-                (key, diff.extra.get(key))
-                for key in (
-                    "standard_pattern",
-                    "student_pattern",
-                    "standard_escape",
-                    "student_escape",
                     "standard_query_sql",
                     "student_query_sql",
                 )
@@ -1146,20 +1070,6 @@ def _constraint_templates(
         # Keep the stricter two-path obligation for null equality/coercion, but
         # use a predicate-specific validator for the negation mutation.
         return [ConstraintSpec("null_predicate_paths", relation, column)], 1, 1
-    if diff_type == "distinct_on_changed":
-        context = _distinct_on_context(diff)
-        relation = str(context.get("source_table") or relation)
-        column = str(context.get("payload_column") or column)
-        return [ConstraintSpec(
-            "distinct_on_competing_payload",
-            relation,
-            column,
-            metadata=tuple(
-                (key, value)
-                for key, value in context.items()
-                if value not in (None, "", ())
-            ),
-        )], 2, 2
     if diff_type == "distinct_changed":
         return [ConstraintSpec(
             "duplicate_projected_tuple",
@@ -1913,8 +1823,8 @@ def _having_summary_is_covered(diff: ASTDiffNode, all_diffs: list[ASTDiffNode]) 
             if item.extra.get(key)
         )
     ]
-    # Some dialects render a grouped alias in HAVING (``high_score >= 90``)
-    # instead of repeating the aggregate expression.  In that form the
+    # A grouped alias can appear in HAVING (``high_score >= 90``) instead of
+    # repeating the aggregate expression. In that form the
     # concrete comparison is still the owner even though the aggregate-aware
     # metadata parser cannot recover ``MAX(score)`` from the fragment.
     alias_comparisons = [
@@ -2137,7 +2047,6 @@ def is_redundant_summary_diff(
                 "regex_pattern_changed",
                 "like_pattern_changed",
                 "glob_pattern_changed",
-                "similar_pattern_changed",
                 "in_predicate_negation_changed",
                 "in_list_member_removed",
                 "in_list_member_added",
@@ -2461,10 +2370,6 @@ def compile_obligations(
         diff_id = stable_diff_id(diff, index)
         target_column = _inferred_target_column(diff)
         table = _resolved_relation(diff, target_column, schema, qualification_list)
-        if diff.diff_type == "distinct_on_changed":
-            distinct_on = _distinct_on_context(diff)
-            target_column = target_column or str(distinct_on.get("payload_column") or "")
-            table = table or str(distinct_on.get("source_table") or "")
         if diff.diff_type == "distinct_changed" and not table:
             # Resolve the direct physical source of a nested/CTE DISTINCT
             # when the generic target-column resolver has no table.  A

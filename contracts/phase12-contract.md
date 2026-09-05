@@ -9,6 +9,8 @@
 
 任何参考 SQL、schema 或执行器故障都必须投影为 `UNDECIDED`，不得归咎于学生。
 
+输入边界使用 SQLite grammar 严格解析。已知非 SQLite 构造必须在 AST 差异提取和执行之前以 `KNOWN_GAP/UNSUPPORTED` 结束；系统不做方言猜测、方言路由或跨方言降级转换。
+
 ## Phase1 输出
 
 Phase1 保留完整的内部证据：AST 差异、obligation、bounded witness suite、原生 SQLite 执行结果、修复干预结果和作用域元数据。确定性的错误结论必须同时满足：
@@ -37,4 +39,14 @@ Phase2 不执行 SQL。它依据 Phase1 证据进行分级、候选归并、查�
 
 - 固定 `engine=sqlite`，不接受 dialect/backend/connection URL 参数。
 - 单查询、内存数据库、行数/world/尝试次数/VM 指令/时间均有硬上界。
+- 所有 SQLGlot `read`、`write` 和渲染 dialect 参数均固定为 `sqlite`。
+- 兼容公开名称 `transpile_to_sqlite` 只做 SQLite→SQLite 的确定性规范化，不接收源方言。
+- 执行连接仅注册有资源上界的 SQLite `REGEXP` 回调，不提供方言兼容 UDF。
 - 不加载本地模型，不启动数据库容器，不依赖外部网络。
+
+## 代码边界
+
+- `parseval_data_generator.py` 是小型兼容 facade，不承载实现逻辑。
+- Phase1 八层模块形成单向依赖图，任何一层不得反向导入上层，且单文件不得超过 5,000 行。
+- `ast_schema.py` 只定义共享 `ASTDiffNode`；Phase2 只消费 Phase1 的结构化证据。
+- QUALIFY、LATERAL 等非 SQLite 阶段或边类型不得进入 Phase2 scope graph。

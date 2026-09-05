@@ -344,7 +344,6 @@ _STRATEGY_BY_KIND = {
     "regex_pattern_separation": "regex_pattern_separation",
     "like_pattern_separation": "like_pattern_separation",
     "glob_pattern_separation": "glob_pattern_separation",
-    "similar_pattern_separation": "similar_pattern_separation",
     "boolean_truth_table": "logical_truth_table",
     "matched_and_dangling_join_rows": "join_dangling_rows",
     "standard_join_equal_student_join_unequal": "join_key_drift",
@@ -372,7 +371,6 @@ _STRATEGY_BY_KIND = {
     "null_and_non_null_rows": "null_tristate",
     "null_predicate_paths": "null_tristate",
     "duplicate_projected_tuple": "duplicate_projection",
-    "distinct_on_competing_payload": "distinct_on_competing_payload",
 }
 
 _FAMILY_BY_KIND = {
@@ -387,7 +385,6 @@ _FAMILY_BY_KIND = {
     "scalar_subquery_boundary_path": "subquery",
     "window_partitions_and_ties": "window",
     "duplicate_projected_tuple": "distinct",
-    "distinct_on_competing_payload": "distinct",
     "cte_base_recursive_orphan_paths": "recursive",
     "set_left_right_overlap": "set",
     "subquery_membership_paths": "subquery",
@@ -469,7 +466,7 @@ def _semantic_cell_constraints(obligation: DistinguishingObligation) -> list[Cel
             metadata = dict(spec.metadata)
             standard_items = tuple(metadata.get("standard_window_order_items") or ())
             student_items = tuple(metadata.get("student_window_order_items") or ())
-            # sqlglot serializes the dialect default NULL placement on every
+            # SQLGlot serializes SQLite's default NULL placement on every
             # ordered item.  That derived bit changes when ASC is replaced by
             # DESC (for example ``DESC`` -> ``ASC``), even though the source
             # query did not ask for a NULLS FIRST/LAST change.  Treating that
